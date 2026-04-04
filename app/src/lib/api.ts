@@ -1,7 +1,4 @@
-import {
-    getActiveServerConfig,
-    waitForActiveServerConfig
-} from "@/features/server/runtime";
+import { waitForServerConnection } from "@/features/server";
 
 type ApiPrimitive = string | number | boolean;
 type ApiQueryValue =
@@ -16,12 +13,15 @@ type ApiQuery = Record<string, ApiQueryValue>;
 type ApiParseAs = "json" | "text" | "blob" | "response";
 type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+const SERVER_BASE_URL = "http://127.0.0.1:4727";
+
 export interface ApiRequestOptions<TBody = unknown>
     extends Omit<RequestInit, "body" | "method"> {
     baseUrl?: string;
     body?: TBody;
     parseAs?: ApiParseAs;
     query?: ApiQuery;
+    waitForConnection?: boolean;
 }
 
 export class ApiError extends Error {
@@ -37,23 +37,17 @@ export class ApiError extends Error {
 }
 
 export function resolveBaseUrl(baseUrl?: string) {
-    const runtimeConfig = getActiveServerConfig();
-    const resolvedBaseUrl =
-        baseUrl ?? runtimeConfig?.url ?? import.meta.env.VITE_API_URL;
-
-    if (!resolvedBaseUrl) {
-        throw new Error("API server is not ready");
-    }
-
-    return resolvedBaseUrl.replace(/\/$/, "");
+    return (baseUrl ?? import.meta.env.VITE_API_URL ?? SERVER_BASE_URL).replace(
+        /\/$/,
+        ""
+    );
 }
 
 export function resolveAuthHeaders(): Record<string, string> {
     const headers: Record<string, string> = {};
-    const runtimeConfig = getActiveServerConfig();
 
-    if (runtimeConfig?.password) {
-        headers["Authorization"] = `Basic ${btoa(`app:${runtimeConfig.password}`)}`;
+    if (import.meta.env.VITE_API_PASSWORD) {
+        headers["Authorization"] = `Basic ${btoa(`app:${import.meta.env.VITE_API_PASSWORD}`)}`;
     } else if (
         import.meta.env.VITE_API_USERNAME &&
         import.meta.env.VITE_API_PASSWORD
@@ -93,7 +87,6 @@ function resolveUrl(path: string, query?: ApiQuery, baseUrl?: string) {
 
 function resolveHeaders(body: unknown, headers?: HeadersInit) {
     const resolvedHeaders = new Headers(headers);
-    const runtimeConfig = getActiveServerConfig();
 
     if (
         body != null &&
@@ -105,20 +98,12 @@ function resolveHeaders(body: unknown, headers?: HeadersInit) {
         resolvedHeaders.set("Content-Type", "application/json");
     }
 
-    if (runtimeConfig?.password && !resolvedHeaders.has("Authorization")) {
-        resolvedHeaders.set(
-            "Authorization",
-            `Basic ${btoa(`app:${runtimeConfig.password}`)}`
-        );
-    } else if (
-        import.meta.env.VITE_API_USERNAME &&
-        import.meta.env.VITE_API_PASSWORD &&
-        !resolvedHeaders.has("Authorization")
-    ) {
-        resolvedHeaders.set(
-            "Authorization",
-            `Basic ${btoa(`${import.meta.env.VITE_API_USERNAME}:${import.meta.env.VITE_API_PASSWORD}`)}`
-        );
+    if (!resolvedHeaders.has("Authorization")) {
+        const authHeaders = resolveAuthHeaders();
+
+        for (const [key, value] of Object.entries(authHeaders)) {
+            resolvedHeaders.set(key, value);
+        }
     }
 
     return resolvedHeaders;
@@ -155,11 +140,20 @@ async function request<TResponse = unknown, TBody = unknown>(
     path: string,
     options: ApiRequestOptions<TBody> = {}
 ) {
-    if (!options.baseUrl && !import.meta.env.VITE_API_URL) {
-        await waitForActiveServerConfig();
+    const {
+        baseUrl,
+        body,
+        headers,
+        parseAs = "json",
+        query,
+        waitForConnection = true,
+        ...init
+    } = options;
+
+    if (waitForConnection) {
+        await waitForServerConnection();
     }
 
-    const { baseUrl, body, headers, parseAs = "json", query, ...init } = options;
     const response = await fetch(resolveUrl(path, query, baseUrl), {
         ...init,
         method,
