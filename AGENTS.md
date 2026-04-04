@@ -45,6 +45,13 @@ graph LR
 
 ---
 
+## Package manager and CLI policy
+- Use `bun`/`bun run` for dependency management and scripts.
+- Use `bunx` for one-off CLIs.
+- Do not use `npm`, `npx`, `yarn`, or `pnpm` commands in this repo unless a future change explicitly documents an exception here.
+
+---
+
 ## Run and build commands
 
 ### Frontend + Tauri
@@ -138,7 +145,12 @@ If nothing in this doc changed, state that explicitly in your summary.
 ---
 
 ## Maintenance Log
-- 2026-04-04: Initial AGENTS.md created from repository inspection (app + server + tauri + sidecar workflow). 
+Keep this section compact to avoid context bloat:
+- One line per entry.
+- Keep only the latest 10 entries; collapse older history into a single summary line when needed.
+
+- 2026-04-04: Initial AGENTS.md created from repository inspection (app + server + tauri + sidecar workflow).
+- 2026-04-04: Added explicit package-manager policy: use `bun`/`bunx`; do not use `npm`/`npx` by default.
 
 ---
 
