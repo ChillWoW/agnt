@@ -1,9 +1,16 @@
-import { type ReactNode, useMemo, useState } from "react";
-import { CopyIcon, GearSixIcon, MinusIcon, SquareIcon, XIcon } from "@phosphor-icons/react";
+import { type ReactNode, useEffect, useState } from "react";
+import {
+    CopyIcon,
+    GearSixIcon,
+    MinusIcon,
+    SquareIcon,
+    XIcon
+} from "@phosphor-icons/react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/cn";
-import { SettingsPanel } from "./SettingsPanel";
+import { SettingsPanel } from "@/components/settings";
+import { useOS } from "@/lib/useOS";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -12,45 +19,44 @@ interface AppLayoutProps {
 const desktop = isTauri();
 
 export function AppLayout({ children }: AppLayoutProps) {
+    const os = useOS();
+
     const [isMaximized, setIsMaximized] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const appWindow = useMemo(() => (desktop ? getCurrentWindow() : null), []);
+    const appWindow = getCurrentWindow();
 
-    const startDragging = async () => {
-        if (!appWindow) {
-            return;
-        }
+    useEffect(() => {
+        const checkMaximized = async () => {
+            const maximized = await appWindow.isMaximized();
+            setIsMaximized(maximized);
+        };
 
-        await appWindow.startDragging();
-    };
+        checkMaximized();
 
-    const toggleMaximize = async () => {
-        if (!appWindow) {
-            return;
-        }
+        const unlisten = appWindow.onResized(async () => {
+            const maximized = await appWindow.isMaximized();
+            setIsMaximized(maximized);
+        });
 
-        await appWindow.toggleMaximize();
-        setIsMaximized(await appWindow.isMaximized());
-    };
+        return () => {
+            unlisten.then((fn) => fn());
+        };
+    }, [appWindow]);
 
-    const minimize = async () => {
-        if (!appWindow) {
-            return;
-        }
-
+    const handleMinimize = async () => {
         await appWindow.minimize();
     };
 
-    const close = async () => {
-        if (!appWindow) {
-            return;
-        }
+    const handleMaximize = async () => {
+        await appWindow.toggleMaximize();
+    };
 
+    const handleClose = async () => {
         await appWindow.close();
     };
 
     return (
-        <div className="flex min-h-screen flex-col bg-dark-950 text-primary-100">
+        <div className="flex min-h-screen flex-col bg-dark-950 text-dark-50">
             <header
                 data-tauri-drag-region
                 className="flex h-9 shrink-0 items-center justify-between border-b border-dark-700 pl-4"
@@ -63,10 +69,10 @@ export function AppLayout({ children }: AppLayoutProps) {
                         return;
                     }
 
-                    void startDragging();
+                    void appWindow.startDragging();
                 }}
                 onDoubleClick={() => {
-                    void toggleMaximize();
+                    void handleMaximize();
                 }}
             >
                 <div className="flex-1"></div>
@@ -80,34 +86,47 @@ export function AppLayout({ children }: AppLayoutProps) {
                             settingsOpen && "bg-dark-900 text-dark-50"
                         )}
                     >
-                        <GearSixIcon size={15} weight={settingsOpen ? "fill" : "bold"} />
+                        <GearSixIcon
+                            className="size-3.5"
+                            weight={settingsOpen ? "fill" : "bold"}
+                        />
                     </button>
-                    <WindowControlButton
-                        onClick={() => {
-                            void minimize();
-                        }}
-                    >
-                        <MinusIcon size={14} weight="bold" />
-                    </WindowControlButton>
-                    <WindowControlButton
-                        onClick={() => {
-                            void toggleMaximize();
-                        }}
-                    >
-                        {isMaximized ? (
-                            <CopyIcon size={13} weight="bold" />
-                        ) : (
-                            <SquareIcon size={13} weight="bold" />
-                        )}
-                    </WindowControlButton>
-                    <WindowControlButton
-                        danger
-                        onClick={() => {
-                            void close();
-                        }}
-                    >
-                        <XIcon size={14} weight="bold" />
-                    </WindowControlButton>
+                    {(os === "windows" || os === "linux") && (
+                        <div className="flex items-center">
+                            <WindowControlButton
+                                onClick={() => {
+                                    void handleMinimize();
+                                }}
+                            >
+                                <MinusIcon className="size-3.5" weight="bold" />
+                            </WindowControlButton>
+                            <WindowControlButton
+                                onClick={() => {
+                                    void handleMaximize();
+                                }}
+                            >
+                                {isMaximized ? (
+                                    <CopyIcon
+                                        className="size-3.5"
+                                        weight="bold"
+                                    />
+                                ) : (
+                                    <SquareIcon
+                                        className="size-3.5"
+                                        weight="bold"
+                                    />
+                                )}
+                            </WindowControlButton>
+                            <WindowControlButton
+                                danger
+                                onClick={() => {
+                                    void handleClose();
+                                }}
+                            >
+                                <XIcon className="size-3.5" weight="bold" />
+                            </WindowControlButton>
+                        </div>
+                    )}
                 </div>
             </header>
 
@@ -137,7 +156,7 @@ function WindowControlButton({
         <button
             type="button"
             className={cn(
-                "flex w-10 items-center justify-center border-l border-dark-700 text-dark-100 transition-colors duration-150 hover:bg-dark-900 hover:text-dark-50",
+                "flex w-10 items-center justify-center text-dark-100 transition-colors duration-150 hover:bg-dark-900 hover:text-dark-50",
                 danger &&
                     "hover:border-red-500/30 hover:bg-red-600 hover:text-white"
             )}
