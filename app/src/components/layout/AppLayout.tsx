@@ -1,8 +1,9 @@
 import { type ReactNode, useMemo, useState } from "react";
-import { CopyIcon, MinusIcon, SquareIcon, XIcon } from "@phosphor-icons/react";
+import { CopyIcon, GearSixIcon, MinusIcon, SquareIcon, XIcon } from "@phosphor-icons/react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/cn";
+import { SettingsPanel } from "./SettingsPanel";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -12,6 +13,7 @@ const desktop = isTauri();
 
 export function AppLayout({ children }: AppLayoutProps) {
     const [isMaximized, setIsMaximized] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const appWindow = useMemo(() => (desktop ? getCurrentWindow() : null), []);
 
     const startDragging = async () => {
@@ -69,6 +71,17 @@ export function AppLayout({ children }: AppLayoutProps) {
             >
                 <div className="flex-1"></div>
                 <div className="flex items-stretch self-stretch">
+                    <button
+                        type="button"
+                        onClick={() => setSettingsOpen((prev) => !prev)}
+                        className={cn(
+                            "flex w-10 items-center justify-center text-dark-200 transition-colors duration-150",
+                            "hover:bg-dark-900 hover:text-dark-50",
+                            settingsOpen && "bg-dark-900 text-dark-50"
+                        )}
+                    >
+                        <GearSixIcon size={15} weight={settingsOpen ? "fill" : "bold"} />
+                    </button>
                     <WindowControlButton
                         onClick={() => {
                             void minimize();
@@ -98,8 +111,12 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
             </header>
 
-            <main className="min-h-0 min-w-0 flex-1 overflow-auto">
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">
                 {children}
+                <SettingsPanel
+                    open={settingsOpen}
+                    onClose={() => setSettingsOpen(false)}
+                />
             </main>
         </div>
     );

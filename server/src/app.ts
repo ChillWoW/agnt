@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import healthRoutes from "./modules/health/health.routes";
+import settingsRoutes from "./modules/settings/settings.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -15,6 +16,7 @@ const app = new Elysia()
             error: "Server is still starting"
         };
     })
-    .use(healthRoutes);
+    .use(healthRoutes)
+    .use(settingsRoutes);
 
 export default app;
