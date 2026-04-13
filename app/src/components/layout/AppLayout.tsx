@@ -11,6 +11,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/cn";
 import { SettingsPanel } from "@/components/settings";
 import { useOS } from "@/lib/useOS";
+import { useHotkey, useResolvedHotkeyCombo } from "@/features/hotkeys";
+import { KeybindTooltip } from "../ui";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -55,6 +57,13 @@ export function AppLayout({ children }: AppLayoutProps) {
         await appWindow.close();
     };
 
+    useHotkey({
+        id: "layout.settings",
+        label: "Open Settings",
+        defaultCombo: "Ctrl+,",
+        handler: () => setSettingsOpen(!settingsOpen)
+    });
+
     return (
         <div className="flex min-h-screen flex-col bg-dark-950 text-dark-50">
             <header
@@ -77,22 +86,27 @@ export function AppLayout({ children }: AppLayoutProps) {
             >
                 <div className="flex-1"></div>
                 <div className="flex items-stretch self-stretch">
-                    <button
-                        type="button"
-                        onClick={() => setSettingsOpen((prev) => !prev)}
-                        className={cn(
-                            "flex w-10 items-center justify-center text-dark-200 transition-colors duration-150",
-                            "hover:bg-dark-900 hover:text-dark-50",
-                            settingsOpen && "bg-dark-900 text-dark-50"
-                        )}
+                    <KeybindTooltip
+                        keybind={useResolvedHotkeyCombo("layout.settings")}
+                        content="Open Settings"
                     >
-                        <GearSixIcon
-                            className="size-3.5"
-                            weight={settingsOpen ? "fill" : "bold"}
-                        />
-                    </button>
+                        <button
+                            type="button"
+                            onClick={() => setSettingsOpen((prev) => !prev)}
+                            className={cn(
+                                "flex w-10 items-center justify-center text-dark-200 transition-colors duration-150",
+                                "hover:bg-dark-900 hover:text-dark-50",
+                                settingsOpen && "bg-dark-900 text-dark-50"
+                            )}
+                        >
+                            <GearSixIcon
+                                className="size-3.5"
+                                weight={settingsOpen ? "fill" : "bold"}
+                            />
+                        </button>
+                    </KeybindTooltip>
                     {(os === "windows" || os === "linux") && (
-                        <div className="flex items-center">
+                        <div className="flex items-stretch self-stretch">
                             <WindowControlButton
                                 onClick={() => {
                                     void handleMinimize();
@@ -156,7 +170,7 @@ function WindowControlButton({
         <button
             type="button"
             className={cn(
-                "flex w-10 items-center justify-center text-dark-100 transition-colors duration-150 hover:bg-dark-900 hover:text-dark-50",
+                "flex h-full w-10 items-center justify-center self-stretch text-dark-100 transition-colors duration-150 hover:bg-dark-900 hover:text-dark-50",
                 danger &&
                     "hover:border-red-500/30 hover:bg-red-600 hover:text-white"
             )}

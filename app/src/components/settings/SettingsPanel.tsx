@@ -1,7 +1,8 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { ArrowLeftIcon, GearIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, GearIcon, KeyboardIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { GeneralSettings } from "./GeneralSettings";
+import { HotkeySettings } from "./HotkeySettings";
 
 interface SettingsPanelProps {
     open: boolean;
@@ -30,6 +31,12 @@ const categories: CategoryMeta[] = [
         key: "general",
         label: "General",
         icon: <GearIcon size={16} weight="duotone" />,
+        group: "Desktop"
+    },
+    {
+        key: "hotkeys",
+        label: "Hotkeys",
+        icon: <KeyboardIcon size={16} weight="duotone" />,
         group: "Desktop"
     }
 ];
@@ -112,6 +119,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
             <div className="flex-1 overflow-y-auto">
                 {activeCategory === "general" && <GeneralSettings />}
+                {activeCategory === "hotkeys" && <HotkeySettings />}
             </div>
         </div>
     );

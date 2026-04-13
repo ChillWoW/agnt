@@ -121,6 +121,8 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `server/src/app.ts` — Elysia app and readiness guard
 - `server/src/modules/health/*` — health/readiness endpoints
 - `server/build.ts` — sidecar compile script + `.env` define injection
+- `app/src/features/hotkeys/` — hotkey system (store, provider, useHotkey hook, combo utils, shortcut display)
+- `app/src/components/ui/Tooltip.tsx` — base Tooltip + KeybindTooltip components
 
 ---
 
@@ -151,6 +153,7 @@ Keep this section compact to avoid context bloat:
 
 - 2026-04-04: Initial AGENTS.md created from repository inspection (app + server + tauri + sidecar workflow).
 - 2026-04-04: Added explicit package-manager policy: use `bun`/`bunx`; do not use `npm`/`npx` by default.
+- 2026-04-13: Added `app/src/features/hotkeys/` module (Zustand store, provider, useHotkey hook, combo utils, HotkeyShortcut). Added `Tooltip` and `KeybindTooltip` to `app/src/components/ui/`. Added `HotkeySettings` to settings types/store.
 
 ---
 
