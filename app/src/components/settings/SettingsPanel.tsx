@@ -1,13 +1,13 @@
-import { useEffect, type ReactNode } from "react";
+import { type ElementType, useEffect } from "react";
 import { GearIcon, KeyboardIcon } from "@phosphor-icons/react";
-import { cn } from "@/lib/cn";
 import { GeneralSettings } from "./GeneralSettings";
 import { HotkeySettings } from "./HotkeySettings";
+import { useSettingsStore } from "./settings-store";
 
 export type SettingsCategory = {
     key: string;
     label: string;
-    icon: ReactNode;
+    icon: ElementType;
     group: string;
 };
 
@@ -15,42 +15,33 @@ export const settingsCategories: SettingsCategory[] = [
     {
         key: "general",
         label: "General",
-        icon: <GearIcon size={16} weight="duotone" />,
+        icon: GearIcon,
         group: "Desktop"
     },
     {
         key: "hotkeys",
         label: "Hotkeys",
-        icon: <KeyboardIcon size={16} weight="duotone" />,
+        icon: KeyboardIcon,
         group: "Desktop"
     }
 ];
 
-interface SettingsPanelProps {
-    open: boolean;
-    onClose: () => void;
-    activeCategory: string;
-}
+export function SettingsPanel() {
+    const { isOpen, activeCategory, close } = useSettingsStore();
 
-export function SettingsPanel({ open, onClose, activeCategory }: SettingsPanelProps) {
     useEffect(() => {
-        if (!open) return;
+        if (!isOpen) return;
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") close();
         };
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, [open, onClose]);
+    }, [isOpen, close]);
 
-    if (!open) return null;
+    if (!isOpen) return null;
 
     return (
-        <div
-            className={cn(
-                "absolute inset-0 z-30 bg-dark-950",
-                "animate-in fade-in-0 duration-150 ease-out"
-            )}
-        >
+        <div className="absolute inset-0 z-30 bg-dark-950">
             <div className="h-full overflow-y-auto">
                 {activeCategory === "general" && <GeneralSettings />}
                 {activeCategory === "hotkeys" && <HotkeySettings />}
