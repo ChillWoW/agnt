@@ -3,6 +3,7 @@ import {
     CopyIcon,
     GearSixIcon,
     MinusIcon,
+    SidebarIcon,
     SquareIcon,
     XIcon
 } from "@phosphor-icons/react";
@@ -13,6 +14,8 @@ import { SettingsPanel } from "@/components/settings";
 import { useOS } from "@/lib/useOS";
 import { useHotkey, useResolvedHotkeyCombo } from "@/features/hotkeys";
 import { KeybindTooltip } from "../ui";
+import { LeftSidebar } from "@/features/left-sidebar";
+import { useLeftSidebarStore } from "@/features/left-sidebar/left-sidebar-store";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -22,6 +25,7 @@ const desktop = isTauri();
 
 export function AppLayout({ children }: AppLayoutProps) {
     const os = useOS();
+    const { isCollapsed } = useLeftSidebarStore();
 
     const [isMaximized, setIsMaximized] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -84,6 +88,16 @@ export function AppLayout({ children }: AppLayoutProps) {
                     void handleMaximize();
                 }}
             >
+                <div className="flex items-center gap-2">
+                    <button
+                        className={cn(
+                            "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
+                            !isCollapsed && "bg-dark-800 text-dark-50"
+                        )}
+                    >
+                        <SidebarIcon className="size-4" />
+                    </button>
+                </div>
                 <div className="flex-1"></div>
                 <div className="flex items-stretch self-stretch">
                     <KeybindTooltip
@@ -144,13 +158,16 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
             </header>
 
-            <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">
-                {children}
-                <SettingsPanel
-                    open={settingsOpen}
-                    onClose={() => setSettingsOpen(false)}
-                />
-            </main>
+            <div className="flex flex-1">
+                <LeftSidebar />
+                <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">
+                    {children}
+                    <SettingsPanel
+                        open={settingsOpen}
+                        onClose={() => setSettingsOpen(false)}
+                    />
+                </main>
+            </div>
         </div>
     );
 }
