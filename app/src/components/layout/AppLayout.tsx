@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import {
+    ArrowLeftIcon,
     CopyIcon,
     GearSixIcon,
     MinusIcon,
@@ -25,10 +26,11 @@ const desktop = isTauri();
 
 export function AppLayout({ children }: AppLayoutProps) {
     const os = useOS();
-    const { isCollapsed } = useLeftSidebarStore();
+    const { isCollapsed, toggleSidebar, setCollapsed } = useLeftSidebarStore();
 
     const [isMaximized, setIsMaximized] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [activeSettingsCategory, setActiveSettingsCategory] = useState("general");
     const appWindow = getCurrentWindow();
 
     useEffect(() => {
@@ -61,11 +63,20 @@ export function AppLayout({ children }: AppLayoutProps) {
         await appWindow.close();
     };
 
+    const openSettings = () => {
+        setSettingsOpen(true);
+        setCollapsed(false);
+    };
+
+    const closeSettings = () => {
+        setSettingsOpen(false);
+    };
+
     useHotkey({
         id: "layout.settings",
         label: "Open Settings",
         defaultCombo: "Ctrl+,",
-        handler: () => setSettingsOpen(!settingsOpen)
+        handler: () => (settingsOpen ? closeSettings() : openSettings())
     });
 
     return (
@@ -89,14 +100,26 @@ export function AppLayout({ children }: AppLayoutProps) {
                 }}
             >
                 <div className="flex items-center gap-2">
-                    <button
-                        className={cn(
-                            "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
-                            !isCollapsed && "bg-dark-800 text-dark-50"
-                        )}
-                    >
-                        <SidebarIcon className="size-4" />
-                    </button>
+                    {settingsOpen ? (
+                        <button
+                            type="button"
+                            onClick={closeSettings}
+                            className="flex items-center gap-1.5 text-xs font-medium text-dark-400 hover:text-dark-100 transition-colors duration-150 px-1 py-0.5 rounded"
+                        >
+                            <ArrowLeftIcon className="size-3.5" weight="bold" />
+                            Back
+                        </button>
+                    ) : (
+                        <button
+                            onClick={toggleSidebar}
+                            className={cn(
+                                "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
+                                !isCollapsed && "bg-dark-800 text-dark-50"
+                            )}
+                        >
+                            <SidebarIcon className="size-4" />
+                        </button>
+                    )}
                 </div>
                 <div className="flex-1"></div>
                 <div className="flex items-stretch self-stretch">
@@ -106,7 +129,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     >
                         <button
                             type="button"
-                            onClick={() => setSettingsOpen((prev) => !prev)}
+                            onClick={() => settingsOpen ? closeSettings() : openSettings()}
                             className={cn(
                                 "flex w-10 items-center justify-center text-dark-200 transition-colors duration-150",
                                 "hover:bg-dark-900 hover:text-dark-50",
@@ -158,13 +181,18 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </div>
             </header>
 
-            <div className="flex flex-1">
-                <LeftSidebar />
+            <div className="flex flex-1 overflow-hidden">
+                <LeftSidebar
+                    settingsOpen={settingsOpen}
+                    activeSettingsCategory={activeSettingsCategory}
+                    onSettingsCategoryChange={setActiveSettingsCategory}
+                />
                 <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">
                     {children}
                     <SettingsPanel
                         open={settingsOpen}
-                        onClose={() => setSettingsOpen(false)}
+                        onClose={closeSettings}
+                        activeCategory={activeSettingsCategory}
                     />
                 </main>
             </div>
