@@ -6,6 +6,7 @@ import {
 import { Switch } from "@/components/ui";
 import { useSettings } from "@/features/settings";
 import { SettingGroup } from "./SettingGroup";
+import { SettingHeader } from "./SettingHeader";
 import { SettingRow } from "./SettingRow";
 
 export function GeneralSettings() {
@@ -14,12 +15,10 @@ export function GeneralSettings() {
 
     return (
         <div className="mx-auto w-full max-w-xl p-8">
-            <div className="mb-6">
-                <h2 className="text-base font-semibold text-dark-50">General</h2>
-                <p className="mt-1 text-[13px] text-dark-300">
-                    Core application behavior and preferences.
-                </p>
-            </div>
+            <SettingHeader
+                title="General"
+                description="Core application behavior and preferences."
+            />
 
             <SettingGroup>
                 <SettingRow
