@@ -4,6 +4,7 @@ import {
     GearSixIcon,
     MinusIcon,
     SidebarIcon,
+    SidebarSimpleIcon,
     SquareIcon,
     XIcon
 } from "@phosphor-icons/react";
@@ -13,8 +14,8 @@ import { SettingsPanel, useSettingsStore } from "@/components/settings";
 import { useOS } from "@/lib/useOS";
 import { useHotkey, useResolvedHotkeyCombo } from "@/features/hotkeys";
 import { KeybindTooltip } from "../ui";
-import { LeftSidebar } from "@/features/left-sidebar";
-import { useLeftSidebarStore } from "@/features/left-sidebar/left-sidebar-store";
+import { LeftSidebar, useLeftSidebarStore } from "@/features/left-sidebar";
+import { RightSidebar, useRightSidebarStore } from "@/features/right-sidebar";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -23,6 +24,8 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
     const os = useOS();
     const { isCollapsed, toggleSidebar, setCollapsed } = useLeftSidebarStore();
+    const { isCollapsed: rightCollapsed, toggleSidebar: toggleRightSidebar } =
+        useRightSidebarStore();
     const {
         isOpen: settingsOpen,
         open: openSettings,
@@ -84,18 +87,44 @@ export function AppLayout({ children }: AppLayoutProps) {
                 }}
             >
                 <div className="flex items-center gap-2">
-                    <button
-                        onClick={toggleSidebar}
-                        className={cn(
-                            "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
-                            !isCollapsed && "bg-dark-800 text-dark-50"
+                    <KeybindTooltip
+                        keybind={useResolvedHotkeyCombo(
+                            "layout.sidebar.toggle"
                         )}
+                        content="Toggle Sidebar"
                     >
-                        <SidebarIcon className="size-4" />
-                    </button>
+                        <button
+                            onClick={toggleSidebar}
+                            className={cn(
+                                "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
+                                !isCollapsed && "bg-dark-800 text-dark-50"
+                            )}
+                        >
+                            <SidebarIcon className="size-4" />
+                        </button>
+                    </KeybindTooltip>
                 </div>
                 <div className="flex-1"></div>
                 <div className="flex items-center gap-2">
+                    <KeybindTooltip
+                        keybind={useResolvedHotkeyCombo(
+                            "layout.right-sidebar.toggle"
+                        )}
+                        content="Toggle Right Sidebar"
+                    >
+                        <button
+                            onClick={toggleRightSidebar}
+                            className={cn(
+                                "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
+                                !rightCollapsed && "bg-dark-800 text-dark-50"
+                            )}
+                        >
+                            <SidebarSimpleIcon
+                                className="size-4"
+                                style={{ transform: "scaleX(-1)" }}
+                            />
+                        </button>
+                    </KeybindTooltip>
                     <KeybindTooltip
                         keybind={useResolvedHotkeyCombo("layout.settings")}
                         content="Open Settings"
@@ -106,15 +135,11 @@ export function AppLayout({ children }: AppLayoutProps) {
                                 settingsOpen ? closeSettings() : openSettings()
                             }
                             className={cn(
-                                "flex size-6 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md items-center justify-center text-dark-200 transition-colors duration-150",
-                                "hover:bg-dark-800 hover:text-dark-50",
-                                settingsOpen && "bg-dark-900 text-dark-50"
+                                "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
+                                settingsOpen && "bg-dark-800 text-dark-50"
                             )}
                         >
-                            <GearSixIcon
-                                className="size-3.5"
-                                weight={settingsOpen ? "fill" : "bold"}
-                            />
+                            <GearSixIcon className="size-3.5" weight="bold" />
                         </button>
                     </KeybindTooltip>
                 </div>
@@ -164,6 +189,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                     {children}
                     <SettingsPanel />
                 </main>
+                <RightSidebar />
             </div>
         </div>
     );

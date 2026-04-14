@@ -3,6 +3,7 @@ export * from "./Checkbox";
 export * from "./Input";
 export * from "./Menu";
 export * from "./Modal";
+export * from "./Popover";
 export * from "./Radio";
 export * from "./Select";
 export * from "./Switch";
