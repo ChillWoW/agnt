@@ -16,6 +16,7 @@ import { useHotkey, useResolvedHotkeyCombo } from "@/features/hotkeys";
 import { KeybindTooltip } from "../ui";
 import { LeftSidebar, useLeftSidebarStore } from "@/features/left-sidebar";
 import { RightSidebar, useRightSidebarStore } from "@/features/right-sidebar";
+import { useWorkspaceStore } from "@/features/workspaces";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -31,6 +32,12 @@ export function AppLayout({ children }: AppLayoutProps) {
         open: openSettings,
         close: closeSettings
     } = useSettingsStore();
+
+    const loadWorkspaces = useWorkspaceStore((s) => s.load);
+
+    useEffect(() => {
+        void loadWorkspaces();
+    }, [loadWorkspaces]);
 
     const [isMaximized, setIsMaximized] = useState(false);
     const appWindow = getCurrentWindow();

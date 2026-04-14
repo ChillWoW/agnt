@@ -18,7 +18,7 @@ export function LeftSidebarButton({
     return (
         <button
             className={cn(
-                "group shrink-0 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors",
+                "group w-full shrink-0 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors",
                 isActive
                     ? "bg-dark-800 text-dark-50"
                     : "hover:bg-dark-700 text-dark-100 hover:text-dark-50"
