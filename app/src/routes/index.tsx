@@ -1,31 +1,67 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useServerConnection } from "@/features/server";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { useConversationStore } from "@/features/conversations";
+import { useWorkspaceStore } from "@/features/workspaces";
 
 export const Route = createFileRoute("/")({
-    component: RouteComponent
+    component: HomeRoute
 });
 
-function RouteComponent() {
-    const connection = useServerConnection();
+function HomeRoute() {
+    const navigate = useNavigate();
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const workspaces = useWorkspaceStore((s) => s.workspaces);
+    const createConversation = useConversationStore((s) => s.createConversation);
+
+    const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
+
+    useEffect(() => {
+        useConversationStore.getState().clearActiveConversation();
+    }, []);
+
+    const handleSend = async (message: string) => {
+        if (!activeWorkspaceId) return;
+
+        const conversation = await createConversation(activeWorkspaceId, message);
+        void navigate({
+            to: "/conversations/$conversationId",
+            params: { conversationId: conversation.id }
+        });
+    };
 
     return (
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-3 p-6 text-primary-100">
-            <h1 className="text-xl font-semibold">Server Status</h1>
-            <div className="rounded-md border border-dark-700 bg-dark-900 px-4 py-3">
-                <p className="text-sm text-primary-400">Connection</p>
-                <p className="text-base font-medium">{connection.status}</p>
-            </div>
-            {connection.errorMessage ? (
-                <div className="rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-                    {connection.errorMessage}
+        <div className="flex h-full flex-col">
+            <div className="flex flex-1 flex-col items-center justify-center px-4">
+                <div className="flex flex-col items-center gap-3 text-center">
+                    <h1 className="text-2xl font-semibold text-dark-50">
+                        {activeWorkspace
+                            ? `What can I help you with?`
+                            : "Open a workspace to get started"}
+                    </h1>
+                    {activeWorkspace && (
+                        <p className="text-sm text-dark-300">
+                            Working in{" "}
+                            <span className="text-dark-200 font-medium">
+                                {activeWorkspace.name}
+                            </span>
+                        </p>
+                    )}
                 </div>
-            ) : null}
-            <p className="text-xs text-primary-500">
-                Last OK:{" "}
-                {connection.lastOkAt
-                    ? new Date(connection.lastOkAt).toLocaleTimeString()
-                    : "-"}
-            </p>
+            </div>
+
+            <div className="shrink-0">
+                <div className="mx-auto max-w-2xl px-4 py-4">
+                    <ChatInput
+                        onSend={(msg) => void handleSend(msg)}
+                        placeholder={
+                            activeWorkspaceId
+                                ? "Ask anything... (/ for commands)"
+                                : "Open a workspace first..."
+                        }
+                    />
+                </div>
+            </div>
         </div>
     );
 }

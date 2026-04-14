@@ -42,6 +42,7 @@ graph LR
 - Elysia framework
 - Commander CLI
 - Zod in deps
+- `bun:sqlite` for per-workspace conversation storage
 
 ---
 
@@ -85,6 +86,12 @@ From `server/`:
 - `app/src/features/server/*` polls `http://127.0.0.1:4727/health` every 3s.
 - `waitForServerConnection()` is a global gate used by `app/src/lib/api.ts` before HTTP requests.
 
+### Conversation storage (SQLite)
+- Each workspace has a SQLite database at `~/.agnt/workspaces/<workspaceId>/conversations.db`.
+- Tables: `conversations` (id, title, created_at, updated_at) and `messages` (id, conversation_id, role, content, created_at).
+- `server/src/lib/db.ts` manages per-workspace DB instances with caching and auto-migration.
+- Conversations are created lazily on first user message.
+
 ### Tauri sidecar lifecycle
 - Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
 - On window close, sidecar child process is killed.
@@ -120,8 +127,11 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `server/src/index.ts` — CLI server entry, CORS/auth wrapping, Bun serve
 - `server/src/app.ts` — Elysia app and readiness guard
 - `server/src/modules/health/*` — health/readiness endpoints
+- `server/src/modules/conversations/*` — conversation CRUD (SQLite-backed, per-workspace)
+- `server/src/lib/db.ts` — per-workspace SQLite DB helper (open/cache/migrate)
 - `server/build.ts` — sidecar compile script + `.env` define injection
 - `app/src/features/hotkeys/` — hotkey system (store, provider, useHotkey hook, combo utils, shortcut display)
+- `app/src/features/conversations/` — conversation store, API client, types (Zustand)
 - `app/src/components/ui/Tooltip.tsx` — base Tooltip + KeybindTooltip components
 
 ---
@@ -154,6 +164,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-04: Initial AGENTS.md created from repository inspection (app + server + tauri + sidecar workflow).
 - 2026-04-04: Added explicit package-manager policy: use `bun`/`bunx`; do not use `npm`/`npx` by default.
 - 2026-04-13: Added `app/src/features/hotkeys/` module (Zustand store, provider, useHotkey hook, combo utils, HotkeyShortcut). Added `Tooltip` and `KeybindTooltip` to `app/src/components/ui/`. Added `HotkeySettings` to settings types/store.
+- 2026-04-14: Added workspace conversations feature. Server: `server/src/lib/db.ts` (per-workspace SQLite via `bun:sqlite`), `server/src/modules/conversations/` (types, service, routes). Frontend: `app/src/features/conversations/` (store, api, types), `/conversations/$conversationId` route, grouped sidebar with expandable workspace conversations, New Agent button wired to Ctrl+N.
 
 ---
 
