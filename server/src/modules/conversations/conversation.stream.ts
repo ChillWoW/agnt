@@ -13,6 +13,31 @@ type ModelMessage =
     | { role: "user"; content: string }
     | { role: "assistant"; content: string };
 
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
+}
+
+function finalizeAbortedAssistantMessage(
+    db: ReturnType<typeof getWorkspaceDb>,
+    assistantMsgId: string,
+    conversationId: string,
+    partialContent: string
+) {
+    if (partialContent.length > 0) {
+        db.query("UPDATE messages SET content = ? WHERE id = ?").run(
+            partialContent,
+            assistantMsgId
+        );
+        db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
+            new Date().toISOString(),
+            conversationId
+        );
+        return;
+    }
+
+    db.query("DELETE FROM messages WHERE id = ?").run(assistantMsgId);
+}
+
 function buildModelMessages(messages: Message[]): ModelMessage[] {
     const result: ModelMessage[] = [];
 
@@ -31,7 +56,8 @@ function buildModelMessages(messages: Message[]): ModelMessage[] {
  */
 export async function streamReplyToLastMessage(
     workspaceId: string,
-    conversationId: string
+    conversationId: string,
+    abortSignal?: AbortSignal
 ): Promise<Response> {
     logger.log("[stream] streamReplyToLastMessage start", {
         workspaceId,
@@ -96,11 +122,19 @@ export async function streamReplyToLastMessage(
             const result = streamText({
                 model: codex.responses(DEFAULT_MODEL),
                 messages: modelMessages,
+                abortSignal,
                 providerOptions: {
                     openai: {
                         instructions: SYSTEM_INSTRUCTIONS,
                         store: false
                     }
+                },
+                onAbort: () => {
+                    logger.log("[stream] Reply generation aborted", {
+                        workspaceId,
+                        conversationId,
+                        assistantMsgId
+                    });
                 }
             });
 
@@ -110,6 +144,21 @@ export async function streamReplyToLastMessage(
                     controller.enqueue(
                         sseEvent("delta", { content: part.text })
                     );
+                } else if (part.type === "abort") {
+                    finalizeAbortedAssistantMessage(
+                        db,
+                        assistantMsgId,
+                        conversationId,
+                        fullText
+                    );
+                    controller.enqueue(
+                        sseEvent("abort", {
+                            reason: part.reason ?? "aborted",
+                            content: fullText,
+                            assistantMessageId: assistantMsgId
+                        })
+                    );
+                    return;
                 }
             }
 
@@ -135,6 +184,21 @@ export async function streamReplyToLastMessage(
                 })
             );
         } catch (error) {
+            if (abortSignal?.aborted || isAbortError(error)) {
+                logger.log("[stream] Reply stream cancelled", {
+                    workspaceId,
+                    conversationId,
+                    assistantMsgId
+                });
+                finalizeAbortedAssistantMessage(
+                    db,
+                    assistantMsgId,
+                    conversationId,
+                    fullText
+                );
+                return;
+            }
+
             const message =
                 error instanceof Error ? error.message : "Stream failed";
 
@@ -149,7 +213,8 @@ export async function streamReplyToLastMessage(
 export async function streamConversationReply(
     workspaceId: string,
     conversationId: string,
-    userContent: string
+    userContent: string,
+    abortSignal?: AbortSignal
 ): Promise<Response> {
     logger.log("[stream] streamConversationReply start", {
         workspaceId,
@@ -249,11 +314,19 @@ export async function streamConversationReply(
             const result = streamText({
                 model: codex.responses(DEFAULT_MODEL),
                 messages: modelMessages,
+                abortSignal,
                 providerOptions: {
                     openai: {
                         instructions: SYSTEM_INSTRUCTIONS,
                         store: false
                     }
+                },
+                onAbort: () => {
+                    logger.log("[stream] Conversation generation aborted", {
+                        workspaceId,
+                        conversationId,
+                        assistantMsgId
+                    });
                 }
             });
 
@@ -263,6 +336,21 @@ export async function streamConversationReply(
                     controller.enqueue(
                         sseEvent("delta", { content: part.text })
                     );
+                } else if (part.type === "abort") {
+                    finalizeAbortedAssistantMessage(
+                        db,
+                        assistantMsgId,
+                        conversationId,
+                        fullText
+                    );
+                    controller.enqueue(
+                        sseEvent("abort", {
+                            reason: part.reason ?? "aborted",
+                            content: fullText,
+                            assistantMessageId: assistantMsgId
+                        })
+                    );
+                    return;
                 }
             }
 
@@ -288,6 +376,21 @@ export async function streamConversationReply(
                 })
             );
         } catch (error) {
+            if (abortSignal?.aborted || isAbortError(error)) {
+                logger.log("[stream] Conversation stream cancelled", {
+                    workspaceId,
+                    conversationId,
+                    assistantMsgId
+                });
+                finalizeAbortedAssistantMessage(
+                    db,
+                    assistantMsgId,
+                    conversationId,
+                    fullText
+                );
+                return;
+            }
+
             const message =
                 error instanceof Error ? error.message : "Stream failed";
 

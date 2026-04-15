@@ -95,7 +95,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
-    .post("/:id/conversations/:conversationId/stream", async ({ params, body, set }) => {
+    .post("/:id/conversations/:conversationId/stream", async ({ params, body, request, set }) => {
         try {
             const { content } = body as { content: string };
 
@@ -104,7 +104,12 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                 return { error: "Missing or invalid 'content' field" };
             }
 
-            return streamConversationReply(params.id, params.conversationId, content);
+            return streamConversationReply(
+                params.id,
+                params.conversationId,
+                content,
+                request.signal
+            );
         } catch (error) {
             set.status =
                 error instanceof Error && error.message.includes("not found") ? 404 : 500;
@@ -116,9 +121,13 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
-    .post("/:id/conversations/:conversationId/reply", async ({ params, set }) => {
+    .post("/:id/conversations/:conversationId/reply", async ({ params, request, set }) => {
         try {
-            return streamReplyToLastMessage(params.id, params.conversationId);
+            return streamReplyToLastMessage(
+                params.id,
+                params.conversationId,
+                request.signal
+            );
         } catch (error) {
             set.status =
                 error instanceof Error && error.message.includes("not found") ? 404 : 500;

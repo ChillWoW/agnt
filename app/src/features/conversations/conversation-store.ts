@@ -8,6 +8,8 @@ interface ConversationStoreState {
     isLoadingList: boolean;
     isLoadingConversation: boolean;
     isStreaming: boolean;
+    streamAbortController: AbortController | null;
+    stopGeneration: () => void;
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -19,6 +21,24 @@ interface ConversationStoreState {
 }
 
 type SseEventPayload = Record<string, unknown>;
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
+}
+
+function finalizeStreamingMessages(messages: Message[]): Message[] {
+    return messages.flatMap((message) => {
+        if (!message.isStreaming) {
+            return [message];
+        }
+
+        if (message.role === "assistant" && message.content.length === 0) {
+            return [];
+        }
+
+        return [{ ...message, isStreaming: false }];
+    });
+}
 
 async function consumeSseStream(
     response: Response,
@@ -140,6 +160,37 @@ async function runStream(
                 break;
             }
 
+            case "abort": {
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+
+                    const lastStreamingAssistantIndex = [...prev.messages]
+                        .map((message, index) => ({ message, index }))
+                        .reverse()
+                        .find(({ message }) => message.role === "assistant" && message.isStreaming)
+                        ?.index;
+
+                    if (lastStreamingAssistantIndex == null) {
+                        return prev;
+                    }
+
+                    const messages = prev.messages.flatMap((message, index) => {
+                        if (index !== lastStreamingAssistantIndex) {
+                            return [message];
+                        }
+
+                        if (message.content.length === 0) {
+                            return [];
+                        }
+
+                        return [{ ...message, isStreaming: false }];
+                    });
+
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
             case "error": {
                 // Remove any streaming placeholder on error
                 updateFn((prev) => {
@@ -161,6 +212,12 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     isLoadingList: false,
     isLoadingConversation: false,
     isStreaming: false,
+    streamAbortController: null,
+
+    stopGeneration: () => {
+        get().streamAbortController?.abort();
+        set({ streamAbortController: null });
+    },
 
     loadConversations: async (workspaceId: string) => {
         const hadCached = workspaceId in get().conversationsByWorkspace;
@@ -206,7 +263,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     },
 
     sendMessage: async (workspaceId: string, conversationId: string, content: string) => {
-        set({ isStreaming: true });
+        const streamAbortController = new AbortController();
+        set({ isStreaming: true, streamAbortController });
 
         const updateActive = (
             updater: (prev: ConversationWithMessages) => ConversationWithMessages
@@ -218,19 +276,26 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         };
 
         try {
-            const response = await conversationApi.streamMessage(workspaceId, conversationId, content);
+            const response = await conversationApi.streamMessage(
+                workspaceId,
+                conversationId,
+                content,
+                streamAbortController.signal
+            );
             await runStream(response, conversationId, updateActive);
+        } catch (error) {
+            if (!isAbortError(error) && !streamAbortController.signal.aborted) {
+                throw error;
+            }
         } finally {
-            set({ isStreaming: false });
+            set({ isStreaming: false, streamAbortController: null });
             // Ensure no lingering streaming flags
             set((state) => {
                 if (!state.activeConversation) return {};
                 return {
                     activeConversation: {
                         ...state.activeConversation,
-                        messages: state.activeConversation.messages.map((m) =>
-                            m.isStreaming ? { ...m, isStreaming: false } : m
-                        )
+                        messages: finalizeStreamingMessages(state.activeConversation.messages)
                     }
                 };
             });
@@ -238,7 +303,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     },
 
     replyToConversation: async (workspaceId: string, conversationId: string) => {
-        set({ isStreaming: true });
+        const streamAbortController = new AbortController();
+        set({ isStreaming: true, streamAbortController });
 
         const updateActive = (
             updater: (prev: ConversationWithMessages) => ConversationWithMessages
@@ -250,18 +316,24 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         };
 
         try {
-            const response = await conversationApi.replyToConversation(workspaceId, conversationId);
+            const response = await conversationApi.replyToConversation(
+                workspaceId,
+                conversationId,
+                streamAbortController.signal
+            );
             await runStream(response, conversationId, updateActive);
+        } catch (error) {
+            if (!isAbortError(error) && !streamAbortController.signal.aborted) {
+                throw error;
+            }
         } finally {
-            set({ isStreaming: false });
+            set({ isStreaming: false, streamAbortController: null });
             set((state) => {
                 if (!state.activeConversation) return {};
                 return {
                     activeConversation: {
                         ...state.activeConversation,
-                        messages: state.activeConversation.messages.map((m) =>
-                            m.isStreaming ? { ...m, isStreaming: false } : m
-                        )
+                        messages: finalizeStreamingMessages(state.activeConversation.messages)
                     }
                 };
             });

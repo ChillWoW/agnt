@@ -33,21 +33,23 @@ export function addMessage(
 export function streamMessage(
     workspaceId: string,
     conversationId: string,
-    content: string
+    content: string,
+    signal?: AbortSignal
 ): Promise<Response> {
     return api.post<Response>(
         `/workspaces/${workspaceId}/conversations/${conversationId}/stream`,
-        { body: { content }, parseAs: "response" }
+        { body: { content }, parseAs: "response", signal }
     );
 }
 
 export function replyToConversation(
     workspaceId: string,
-    conversationId: string
+    conversationId: string,
+    signal?: AbortSignal
 ): Promise<Response> {
     return api.post<Response>(
         `/workspaces/${workspaceId}/conversations/${conversationId}/reply`,
-        { parseAs: "response" }
+        { parseAs: "response", signal }
     );
 }
 

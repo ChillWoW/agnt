@@ -28,7 +28,8 @@ function ConversationRoute() {
         isStreaming,
         loadConversation,
         sendMessage,
-        replyToConversation
+        replyToConversation,
+        stopGeneration
     } = useConversationStore();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const hasTriggeredReply = useRef(false);
@@ -132,6 +133,7 @@ function ConversationRoute() {
                 <div className="mx-auto max-w-2xl px-4 py-3">
                     <ChatInput
                         onSend={handleSend}
+                        onStop={stopGeneration}
                         isStreaming={isStreaming}
                         placeholder={isStreaming ? "Waiting for response..." : "Send a message..."}
                     />
