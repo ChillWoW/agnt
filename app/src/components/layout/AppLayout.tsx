@@ -85,7 +85,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     });
 
     return (
-        <div className="flex min-h-screen flex-col bg-dark-950 text-dark-50">
+        <div className="flex h-screen flex-col overflow-hidden bg-dark-950 text-dark-50">
             <header
                 data-tauri-drag-region
                 className="flex h-9 shrink-0 items-center justify-between border-b border-dark-700 pl-4"
