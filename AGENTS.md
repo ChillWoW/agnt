@@ -88,10 +88,12 @@ From `server/`:
 
 ### Conversation storage (SQLite)
 - Each workspace has a SQLite database at `~/.agnt/workspaces/<workspaceId>/conversations.db`.
-- Tables: `conversations` (id, title, created_at, updated_at) and `messages` (id, conversation_id, role, content, created_at).
+- Tables: `conversations` (id, title, created_at, updated_at), `messages` (id, conversation_id, role, content, created_at), `state_entries` (latest workspace/conversation key-value state), and `history_entries` (append-only workspace/conversation state history).
 - `server/src/lib/db.ts` manages per-workspace DB instances with caching and auto-migration.
 - Conversations are created lazily on first user message.
 - Active conversation streams can be cancelled from the frontend stop button; the frontend aborts the HTTP request, the server forwards `request.signal` into AI SDK `streamText`, and partial assistant text is persisted while empty aborted placeholders are removed.
+- Workspace-level and conversation-level metadata/history are exposed under `/workspaces/:id/state|history` and `/workspaces/:id/conversations/:conversationId/state|history`, with `state/effective` providing workspace defaults merged with conversation overrides.
+- Conversation streaming resolves the active model from effective state keys (`activeModel` first, then `model`) before falling back to the built-in default model.
 
 ### Tauri sidecar lifecycle
 - Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
@@ -129,6 +131,7 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `server/src/app.ts` — Elysia app and readiness guard
 - `server/src/modules/health/*` — health/readiness endpoints
 - `server/src/modules/conversations/*` — conversation CRUD (SQLite-backed, per-workspace)
+- `server/src/modules/history/*` — workspace/conversation metadata state snapshots + append-only history
 - `server/src/lib/db.ts` — per-workspace SQLite DB helper (open/cache/migrate)
 - `server/build.ts` — sidecar compile script + `.env` define injection
 - `app/src/features/hotkeys/` — hotkey system (store, provider, useHotkey hook, combo utils, shortcut display)
@@ -168,6 +171,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-14: Added workspace conversations feature. Server: `server/src/lib/db.ts` (per-workspace SQLite via `bun:sqlite`), `server/src/modules/conversations/` (types, service, routes). Frontend: `app/src/features/conversations/` (store, api, types), `/conversations/$conversationId` route, grouped sidebar with expandable workspace conversations, New Agent button wired to Ctrl+N.
 - 2026-04-14: Added Codex OAuth + SSE streaming. Server: `server/src/lib/agnt-home.ts`, `server/src/modules/auth/` (PKCE OAuth, token storage at `~/.agnt/auth.json`, `/auth` routes), `server/src/modules/conversations/codex-client.ts` + `conversation.sse.ts` + `conversation.stream.ts` (AI SDK streamText via `chatgpt.com/backend-api/codex`), added `/stream` and `/reply` endpoints. Frontend: `app/src/features/auth/` (Zustand store, bootstrap, API client), `CodexSettings` in settings panel, SSE stream consumer in conversation store. Server deps added: `ai`, `@ai-sdk/openai`.
 - 2026-04-15: Wired conversation stop-generation end-to-end. Frontend `ChatInput` stop action now aborts the in-flight stream request via Zustand; server conversation streaming now forwards `request.signal` into AI SDK `streamText` and persists partial aborted assistant output.
+- 2026-04-15: Added per-workspace and per-conversation state/history persistence. Server stores latest key-value snapshots plus append-only history in SQLite, exposes `/workspaces/:id/state|history` + conversation equivalents, and conversation streaming now resolves saved `activeModel`/`model` from effective state; frontend now has typed history API helpers in `app/src/features/history/`.
 
 ---
 

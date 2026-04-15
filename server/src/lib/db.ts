@@ -21,7 +21,29 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS state_entries (
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('workspace', 'conversation')),
+    scope_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope_type, scope_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS history_entries (
+    id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL CHECK(scope_type IN ('workspace', 'conversation')),
+    scope_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    source TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_state_entries_scope ON state_entries(scope_type, scope_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_entries_scope ON history_entries(scope_type, scope_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_entries_scope_key ON history_entries(scope_type, scope_id, key, created_at DESC);
 `;
 
 function ensureDir(dir: string): void {

@@ -4,6 +4,7 @@ import settingsRoutes from "./modules/settings/settings.routes";
 import workspacesRoutes from "./modules/workspaces/workspaces.routes";
 import conversationsRoutes from "./modules/conversations/conversations.routes";
 import authRoutes from "./modules/auth/auth.routes";
+import historyRoutes from "./modules/history/history.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -22,6 +23,7 @@ const app = new Elysia()
     .use(healthRoutes)
     .use(settingsRoutes)
     .use(workspacesRoutes)
+    .use(historyRoutes)
     .use(conversationsRoutes)
     .use(authRoutes);
 

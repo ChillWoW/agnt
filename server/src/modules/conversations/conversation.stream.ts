@@ -3,6 +3,7 @@ import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { createCodexClient } from "./codex-client";
 import { buildStreamResponse, sseEvent } from "./conversation.sse";
+import { getEffectiveConversationState } from "../history/history.service";
 import type { Message } from "./conversations.types";
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
@@ -50,6 +51,23 @@ function buildModelMessages(messages: Message[]): ModelMessage[] {
     return result;
 }
 
+function resolveConversationModel(workspaceId: string, conversationId: string): string {
+    const state = getEffectiveConversationState(workspaceId, conversationId).merged;
+    const configuredModel =
+        typeof state.activeModel === "string"
+            ? state.activeModel
+            : typeof state.model === "string"
+              ? state.model
+              : null;
+
+    if (!configuredModel) {
+        return DEFAULT_MODEL;
+    }
+
+    const trimmed = configuredModel.trim();
+    return trimmed.length > 0 ? trimmed : DEFAULT_MODEL;
+}
+
 /**
  * Generate a reply to the existing conversation without adding a new user message.
  * Used after conversation creation where the first user message is already persisted.
@@ -84,6 +102,7 @@ export async function streamReplyToLastMessage(
     logger.log("[stream] Loaded", history.length, "messages for context");
 
     const modelMessages = buildModelMessages(history);
+    const modelName = resolveConversationModel(workspaceId, conversationId);
 
     const assistantMsgId = crypto.randomUUID();
     const assistantCreatedAt = new Date().toISOString();
@@ -114,13 +133,13 @@ export async function streamReplyToLastMessage(
 
             logger.log(
                 "[stream] Starting streamText with model:",
-                DEFAULT_MODEL,
+                modelName,
                 "messages:",
                 modelMessages.length
             );
 
             const result = streamText({
-                model: codex.responses(DEFAULT_MODEL),
+                model: codex.responses(modelName),
                 messages: modelMessages,
                 abortSignal,
                 providerOptions: {
@@ -269,6 +288,7 @@ export async function streamConversationReply(
             created_at: now
         }
     ]);
+    const modelName = resolveConversationModel(workspaceId, conversationId);
 
     const assistantMsgId = crypto.randomUUID();
     const assistantCreatedAt = new Date().toISOString();
@@ -306,13 +326,13 @@ export async function streamConversationReply(
 
             logger.log(
                 "[stream] Starting streamText with model:",
-                DEFAULT_MODEL,
+                modelName,
                 "messages:",
                 modelMessages.length
             );
 
             const result = streamText({
-                model: codex.responses(DEFAULT_MODEL),
+                model: codex.responses(modelName),
                 messages: modelMessages,
                 abortSignal,
                 providerOptions: {
