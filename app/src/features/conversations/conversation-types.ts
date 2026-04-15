@@ -6,6 +6,7 @@ export interface Message {
     role: MessageRole;
     content: string;
     created_at: string;
+    isStreaming?: boolean;
 }
 
 export interface Conversation {

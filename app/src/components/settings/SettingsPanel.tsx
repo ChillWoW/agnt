@@ -1,7 +1,8 @@
 import { type ElementType, useEffect } from "react";
-import { GearIcon, KeyboardIcon } from "@phosphor-icons/react";
+import { GearIcon, KeyboardIcon, RobotIcon } from "@phosphor-icons/react";
 import { GeneralSettings } from "./GeneralSettings";
 import { HotkeySettings } from "./HotkeySettings";
+import { CodexSettings } from "./CodexSettings";
 import { useSettingsStore } from "./settings-store";
 
 export type SettingsCategory = {
@@ -23,6 +24,12 @@ export const settingsCategories: SettingsCategory[] = [
         label: "Hotkeys",
         icon: KeyboardIcon,
         group: "Desktop"
+    },
+    {
+        key: "codex",
+        label: "Codex",
+        icon: RobotIcon,
+        group: "AI"
     }
 ];
 
@@ -45,6 +52,7 @@ export function SettingsPanel() {
             <div className="h-full overflow-y-auto">
                 {activeCategory === "general" && <GeneralSettings />}
                 {activeCategory === "hotkeys" && <HotkeySettings />}
+                {activeCategory === "codex" && <CodexSettings />}
             </div>
         </div>
     );

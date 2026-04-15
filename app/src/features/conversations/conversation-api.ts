@@ -30,6 +30,27 @@ export function addMessage(
     );
 }
 
+export function streamMessage(
+    workspaceId: string,
+    conversationId: string,
+    content: string
+): Promise<Response> {
+    return api.post<Response>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/stream`,
+        { body: { content }, parseAs: "response" }
+    );
+}
+
+export function replyToConversation(
+    workspaceId: string,
+    conversationId: string
+): Promise<Response> {
+    return api.post<Response>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/reply`,
+        { parseAs: "response" }
+    );
+}
+
 export function deleteConversation(workspaceId: string, conversationId: string) {
     return api.delete<{ success: boolean }>(
         `/workspaces/${workspaceId}/conversations/${conversationId}`

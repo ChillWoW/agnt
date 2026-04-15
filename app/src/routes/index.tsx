@@ -12,7 +12,9 @@ function HomeRoute() {
     const navigate = useNavigate();
     const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
     const workspaces = useWorkspaceStore((s) => s.workspaces);
-    const createConversation = useConversationStore((s) => s.createConversation);
+    const createConversation = useConversationStore(
+        (s) => s.createConversation
+    );
 
     const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
@@ -23,7 +25,10 @@ function HomeRoute() {
     const handleSend = async (message: string) => {
         if (!activeWorkspaceId) return;
 
-        const conversation = await createConversation(activeWorkspaceId, message);
+        const conversation = await createConversation(
+            activeWorkspaceId,
+            message
+        );
         void navigate({
             to: "/conversations/$conversationId",
             params: { conversationId: conversation.id }
@@ -56,7 +61,7 @@ function HomeRoute() {
                         onSend={(msg) => void handleSend(msg)}
                         placeholder={
                             activeWorkspaceId
-                                ? "Ask anything... (/ for commands)"
+                                ? "Ask anything..."
                                 : "Open a workspace first..."
                         }
                     />

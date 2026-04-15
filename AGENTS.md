@@ -165,6 +165,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-04: Added explicit package-manager policy: use `bun`/`bunx`; do not use `npm`/`npx` by default.
 - 2026-04-13: Added `app/src/features/hotkeys/` module (Zustand store, provider, useHotkey hook, combo utils, HotkeyShortcut). Added `Tooltip` and `KeybindTooltip` to `app/src/components/ui/`. Added `HotkeySettings` to settings types/store.
 - 2026-04-14: Added workspace conversations feature. Server: `server/src/lib/db.ts` (per-workspace SQLite via `bun:sqlite`), `server/src/modules/conversations/` (types, service, routes). Frontend: `app/src/features/conversations/` (store, api, types), `/conversations/$conversationId` route, grouped sidebar with expandable workspace conversations, New Agent button wired to Ctrl+N.
+- 2026-04-14: Added Codex OAuth + SSE streaming. Server: `server/src/lib/agnt-home.ts`, `server/src/modules/auth/` (PKCE OAuth, token storage at `~/.agnt/auth.json`, `/auth` routes), `server/src/modules/conversations/codex-client.ts` + `conversation.sse.ts` + `conversation.stream.ts` (AI SDK streamText via `chatgpt.com/backend-api/codex`), added `/stream` and `/reply` endpoints. Frontend: `app/src/features/auth/` (Zustand store, bootstrap, API client), `CodexSettings` in settings panel, SSE stream consumer in conversation store. Server deps added: `ai`, `@ai-sdk/openai`.
 
 ---
 

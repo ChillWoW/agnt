@@ -14,7 +14,7 @@ export function ChatInput({
     onSend,
     onStop,
     isStreaming,
-    placeholder = "Ask anything... (/ for commands)"
+    placeholder = "Ask anything..."
 }: ChatInputProps) {
     const [value, setValue] = useState("");
 

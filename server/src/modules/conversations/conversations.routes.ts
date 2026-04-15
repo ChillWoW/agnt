@@ -7,6 +7,7 @@ import {
     deleteConversation,
     updateConversation
 } from "./conversations.service";
+import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
 import type { MessageRole } from "./conversations.types";
 
 const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
@@ -91,6 +92,41 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to update conversation"
+            };
+        }
+    })
+    .post("/:id/conversations/:conversationId/stream", async ({ params, body, set }) => {
+        try {
+            const { content } = body as { content: string };
+
+            if (!content || typeof content !== "string") {
+                set.status = 400;
+                return { error: "Missing or invalid 'content' field" };
+            }
+
+            return streamConversationReply(params.id, params.conversationId, content);
+        } catch (error) {
+            set.status =
+                error instanceof Error && error.message.includes("not found") ? 404 : 500;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to stream conversation reply"
+            };
+        }
+    })
+    .post("/:id/conversations/:conversationId/reply", async ({ params, set }) => {
+        try {
+            return streamReplyToLastMessage(params.id, params.conversationId);
+        } catch (error) {
+            set.status =
+                error instanceof Error && error.message.includes("not found") ? 404 : 500;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to stream reply"
             };
         }
     });

@@ -3,6 +3,7 @@ import healthRoutes from "./modules/health/health.routes";
 import settingsRoutes from "./modules/settings/settings.routes";
 import workspacesRoutes from "./modules/workspaces/workspaces.routes";
 import conversationsRoutes from "./modules/conversations/conversations.routes";
+import authRoutes from "./modules/auth/auth.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -21,6 +22,7 @@ const app = new Elysia()
     .use(healthRoutes)
     .use(settingsRoutes)
     .use(workspacesRoutes)
-    .use(conversationsRoutes);
+    .use(conversationsRoutes)
+    .use(authRoutes);
 
 export default app;
