@@ -12,6 +12,11 @@ import {
     PopoverTrigger,
     Button
 } from "@/components/ui";
+import {
+    HotkeyShortcut,
+    useHotkey,
+    useResolvedHotkeyCombo
+} from "@/features/hotkeys";
 import { cn } from "@/lib/cn";
 import { useModelSelection } from "@/features/models";
 import type { ReasoningEffort, ModelSpeed } from "@/features/models";
@@ -53,6 +58,7 @@ export function ModelSelector({
         selection,
         selectedModel,
         selectedReasoningEfforts,
+        cycleReasoningEffort,
         selectModel,
         selectSpeed,
         selectReasoningEffort
@@ -66,6 +72,18 @@ export function ModelSelector({
 
     const speedOptions: ModelSpeed[] = ["standard", "fast"];
     const supportsFastMode = selectedModel?.supportsFastMode ?? false;
+    const reasoningCycleHotkey = useResolvedHotkeyCombo(
+        "models.reasoning.cycle"
+    );
+
+    useHotkey({
+        id: "models.reasoning.cycle",
+        label: "Cycle reasoning",
+        description: "Cycle through reasoning levels for the selected model",
+        defaultCombo: "Ctrl+E",
+        enabled: selectedReasoningEfforts.length > 1,
+        handler: cycleReasoningEffort
+    });
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -81,12 +99,15 @@ export function ModelSelector({
                             (isLoading ? "Loading models" : "Select model")}
                         {selectedModel && (
                             <span className="text-dark-300">
-                                {supportsFastMode && selection.speed === "fast" && (
-                                    <> · Fast</>
-                                )}
-                                {selectedReasoningEfforts.length > 0 && currentEffort && (
-                                    <> · {formatEffortLabel(currentEffort)}</>
-                                )}
+                                {supportsFastMode &&
+                                    selection.speed === "fast" && <> · Fast</>}
+                                {selectedReasoningEfforts.length > 0 &&
+                                    currentEffort && (
+                                        <>
+                                            {" "}
+                                            · {formatEffortLabel(currentEffort)}
+                                        </>
+                                    )}
                             </span>
                         )}
                     </span>
@@ -104,9 +125,13 @@ export function ModelSelector({
                     {supportsFastMode && (
                         <Popover open={speedOpen} onOpenChange={setSpeedOpen}>
                             <PopoverTrigger className="flex w-full items-center justify-between rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-dark-800">
-                                <span className="text-xs text-dark-100">Speed</span>
+                                <span className="text-xs text-dark-100">
+                                    Speed
+                                </span>
                                 <div className="flex items-center gap-1 text-xs text-dark-300">
-                                    <span>{formatSpeedLabel(selection.speed)}</span>
+                                    <span>
+                                        {formatSpeedLabel(selection.speed)}
+                                    </span>
                                     <CaretRightIcon className="size-3 shrink-0" />
                                 </div>
                             </PopoverTrigger>
@@ -118,7 +143,8 @@ export function ModelSelector({
                             >
                                 <div className="space-y-0.5">
                                     {speedOptions.map((speed) => {
-                                        const isActive = selection.speed === speed;
+                                        const isActive =
+                                            selection.speed === speed;
                                         return (
                                             <button
                                                 key={speed}
@@ -133,7 +159,9 @@ export function ModelSelector({
                                                         : "text-dark-200 hover:bg-dark-800 hover:text-dark-50"
                                                 )}
                                             >
-                                                <span>{formatSpeedLabel(speed)}</span>
+                                                <span>
+                                                    {formatSpeedLabel(speed)}
+                                                </span>
                                                 {isActive && (
                                                     <CheckIcon
                                                         className="size-3 shrink-0 text-dark-100"
@@ -171,6 +199,15 @@ export function ModelSelector({
                             className="w-32 p-1"
                         >
                             <div className="space-y-0.5">
+                                <div className="mb-1 flex items-center justify-between px-2.5 py-1">
+                                    <span className="text-xs text-dark-200">
+                                        Reasoning
+                                    </span>
+                                    <HotkeyShortcut
+                                        combo={reasoningCycleHotkey}
+                                    />
+                                </div>
+
                                 {selectedReasoningEfforts.map((effort) => {
                                     const isActive = currentEffort === effort;
                                     return (
