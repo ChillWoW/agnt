@@ -192,6 +192,30 @@ async function runStreamTextIntoController({
                 continue;
             }
 
+            if (part.type === "reasoning-start") {
+                controller.enqueue(
+                    sseEvent("reasoning-start", { messageId: assistantMsgId })
+                );
+                continue;
+            }
+
+            if (part.type === "reasoning-delta") {
+                controller.enqueue(
+                    sseEvent("reasoning-delta", {
+                        messageId: assistantMsgId,
+                        text: part.text
+                    })
+                );
+                continue;
+            }
+
+            if (part.type === "reasoning-end") {
+                controller.enqueue(
+                    sseEvent("reasoning-end", { messageId: assistantMsgId })
+                );
+                continue;
+            }
+
             if (part.type === "tool-call") {
                 const invocationId = crypto.randomUUID();
                 const createdAt = new Date().toISOString();

@@ -152,6 +152,45 @@ async function runStream(
                 break;
             }
 
+            case "reasoning-start": {
+                const messageId = data.messageId as string;
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+                    const messages = prev.messages.map((m) =>
+                        m.id === messageId ? { ...m, isReasoning: true } : m
+                    );
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
+            case "reasoning-delta": {
+                const messageId = data.messageId as string;
+                const text = data.text as string;
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+                    const messages = prev.messages.map((m) =>
+                        m.id === messageId
+                            ? { ...m, reasoning: (m.reasoning ?? "") + text }
+                            : m
+                    );
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
+            case "reasoning-end": {
+                const messageId = data.messageId as string;
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+                    const messages = prev.messages.map((m) =>
+                        m.id === messageId ? { ...m, isReasoning: false } : m
+                    );
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
             case "tool-call": {
                 const invocation: ToolInvocation = {
                     id: data.id as string,

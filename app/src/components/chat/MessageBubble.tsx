@@ -2,6 +2,7 @@ import { cn } from "@/lib/cn";
 import type { Message } from "@/features/conversations/conversation-types";
 import { StreamingDots } from "./StreamingDots";
 import { ToolCallCard } from "./ToolCallCard";
+import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 
 interface MessageBubbleProps {
@@ -14,7 +15,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     const toolInvocations = message.tool_invocations ?? [];
     const hasToolCalls = toolInvocations.length > 0;
     const showStreamingDots =
-        message.isStreaming && !hasContent && !hasToolCalls;
+        message.isStreaming && !hasContent && !hasToolCalls && !message.isReasoning && !message.reasoning;
 
     return (
         <div
@@ -31,6 +32,13 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         : "w-full text-dark-50"
                 )}
             >
+                {(message.reasoning || message.isReasoning) && (
+                    <ThinkingBlock
+                        reasoning={message.reasoning}
+                        isReasoning={message.isReasoning}
+                    />
+                )}
+
                 {hasToolCalls && (
                     <div className="mb-1">
                         {toolInvocations.map((invocation) => (

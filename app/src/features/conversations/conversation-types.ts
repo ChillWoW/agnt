@@ -21,6 +21,8 @@ export interface Message {
     created_at: string;
     isStreaming?: boolean;
     tool_invocations?: ToolInvocation[];
+    reasoning?: string;
+    isReasoning?: boolean;
 }
 
 export interface Conversation {
