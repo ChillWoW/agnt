@@ -3,8 +3,43 @@ import type {
     Conversation,
     ConversationWithMessages,
     Message,
-    MessageRole
+    MessageRole,
+    ToolInvocation,
+    ToolInvocationStatus
 } from "./conversations.types";
+
+interface ToolInvocationRow {
+    id: string;
+    message_id: string;
+    tool_name: string;
+    input_json: string;
+    output_json: string | null;
+    error: string | null;
+    status: ToolInvocationStatus;
+    created_at: string;
+}
+
+function parseJsonOrNull(value: string | null): unknown {
+    if (value === null) return null;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+}
+
+function toolInvocationFromRow(row: ToolInvocationRow): ToolInvocation {
+    return {
+        id: row.id,
+        message_id: row.message_id,
+        tool_name: row.tool_name,
+        input: parseJsonOrNull(row.input_json),
+        output: parseJsonOrNull(row.output_json),
+        error: row.error,
+        status: row.status,
+        created_at: row.created_at
+    };
+}
 
 export function listConversations(workspaceId: string): Conversation[] {
     const db = getWorkspaceDb(workspaceId);
@@ -28,7 +63,33 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         .query("SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
         .all(conversationId) as Message[];
 
-    return { ...conversation, messages };
+    if (messages.length === 0) {
+        return { ...conversation, messages };
+    }
+
+    const messageIds = messages.map((m) => m.id);
+    const placeholders = messageIds.map(() => "?").join(",");
+    const invocationRows = db
+        .query(
+            `SELECT id, message_id, tool_name, input_json, output_json, error, status, created_at FROM tool_invocations WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+        )
+        .all(...messageIds) as ToolInvocationRow[];
+
+    const invocationsByMessage = new Map<string, ToolInvocation[]>();
+    for (const row of invocationRows) {
+        const list = invocationsByMessage.get(row.message_id) ?? [];
+        list.push(toolInvocationFromRow(row));
+        invocationsByMessage.set(row.message_id, list);
+    }
+
+    const messagesWithTools: Message[] = messages.map((m) => {
+        const tools = invocationsByMessage.get(m.id);
+        return tools && tools.length > 0
+            ? { ...m, tool_invocations: tools }
+            : m;
+    });
+
+    return { ...conversation, messages: messagesWithTools };
 }
 
 export function createConversation(workspaceId: string, firstMessage: string): ConversationWithMessages {

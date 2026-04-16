@@ -88,13 +88,21 @@ From `server/`:
 
 ### Conversation storage (SQLite)
 - Each workspace has a SQLite database at `~/.agnt/workspaces/<workspaceId>/conversations.db`.
-- Tables: `conversations` (id, title, created_at, updated_at), `messages` (id, conversation_id, role, content, created_at), `state_entries` (latest workspace/conversation key-value state), and `history_entries` (append-only workspace/conversation state history).
+- Tables: `conversations` (id, title, created_at, updated_at), `messages` (id, conversation_id, role, content, created_at), `state_entries` (latest workspace/conversation key-value state), `history_entries` (append-only workspace/conversation state history), and `tool_invocations` (id, message_id, tool_name, input_json, output_json, error, status, created_at) linked to assistant messages with cascade delete.
 - `server/src/lib/db.ts` manages per-workspace DB instances with caching and auto-migration.
 - Conversations are created lazily on first user message.
 - Active conversation streams can be cancelled from the frontend stop button; the frontend aborts the HTTP request, the server forwards `request.signal` into AI SDK `streamText`, and partial assistant text is persisted while empty aborted placeholders are removed.
 - Workspace-level and conversation-level metadata/history are exposed under `/workspaces/:id/state|history` and `/workspaces/:id/conversations/:conversationId/state|history`, with `state/effective` providing workspace defaults merged with conversation overrides.
 - `GET /models` returns the frontend model catalog used by the chat input selector.
 - Conversation streaming resolves model settings from effective state keys: `activeModel`/`model`, `reasoningEffort`/`effort`, and `fastMode`; fast mode maps to OpenAI priority processing when the selected model supports it.
+
+### Agent tools
+- The assistant can call tools defined in `server/src/modules/conversations/tools/`. Registry: `server/src/modules/conversations/tools/index.ts` exports `AGNT_TOOLS`.
+- `streamText` in `conversation.stream.ts` passes `AGNT_TOOLS` and `stopWhen: stepCountIs(5)`, allowing the model to call tools and then continue generating.
+- Tool invocations are persisted in `tool_invocations`: a row is inserted on `tool-call` (status `pending`) and updated on `tool-result` (`success`) / `tool-error` (`error`). Pending rows are marked `error` when the stream aborts or errors.
+- SSE protocol adds `tool-call` and `tool-result` events. Each carries `messageId` so the frontend attaches them to the right assistant message. `Message.tool_invocations` is now part of the conversation fetch payload.
+- Current tool set: `read_file(path, maxBytes?)` — reads a utf-8 file by absolute path, rejects binary (NUL-byte scan), default 256KB cap, hard cap 1MB. Located at `server/src/modules/conversations/tools/read-file.ts`.
+- Frontend renders tool calls as `ToolCallCard` (`app/src/components/chat/ToolCallCard.tsx`) inside the assistant bubble: collapsed summary (tool name + input preview + status), expandable to show full input/output JSON.
 
 ### Tauri sidecar lifecycle
 - Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
@@ -132,6 +140,7 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `server/src/app.ts` — Elysia app and readiness guard
 - `server/src/modules/health/*` — health/readiness endpoints
 - `server/src/modules/conversations/*` — conversation CRUD (SQLite-backed, per-workspace)
+- `server/src/modules/conversations/tools/*` — agent tool definitions + registry; `conversation.stream.ts` wires them into `streamText`
 - `server/src/modules/history/*` — workspace/conversation metadata state snapshots + append-only history
 - `server/src/modules/models/*` — model catalog served to the frontend selector
 - `server/src/lib/db.ts` — per-workspace SQLite DB helper (open/cache/migrate)
@@ -176,6 +185,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-15: Wired conversation stop-generation end-to-end. Frontend `ChatInput` stop action now aborts the in-flight stream request via Zustand; server conversation streaming now forwards `request.signal` into AI SDK `streamText` and persists partial aborted assistant output.
 - 2026-04-15: Added per-workspace and per-conversation state/history persistence. Server stores latest key-value snapshots plus append-only history in SQLite, exposes `/workspaces/:id/state|history` + conversation equivalents, and conversation streaming now resolves saved `activeModel`/`model` from effective state; frontend now has typed history API helpers in `app/src/features/history/`.
 - 2026-04-15: Added model catalog + chat input model selector. Server exposes `/models` and now applies effective `activeModel`/`reasoningEffort`/`fastMode` state to Codex requests (priority processing for fast mode); frontend adds `app/src/features/models/` and a chat toolbar popover for model, reasoning, speed, and hover pricing details.
+- 2026-04-16: Added agent tool framework and first tool `read_file`. Server: `server/src/modules/conversations/tools/` with `read-file.ts` + registry, `conversation.stream.ts` passes tools + `stopWhen: stepCountIs(5)`, new `tool_invocations` SQLite table, new SSE events `tool-call`/`tool-result` carrying `messageId`, `getConversation` loads invocations into `Message.tool_invocations`. Frontend: extended `Message` type, store handles tool SSE events, new `ToolCallCard` component rendered inside `MessageBubble`.
 
 ---
 

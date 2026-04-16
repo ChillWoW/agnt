@@ -1,6 +1,7 @@
 import { cn } from "@/lib/cn";
 import type { Message } from "@/features/conversations/conversation-types";
 import { StreamingDots } from "./StreamingDots";
+import { ToolCallCard } from "./ToolCallCard";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 
 interface MessageBubbleProps {
@@ -10,6 +11,10 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
     const isUser = message.role === "user";
     const hasContent = message.content.trim().length > 0;
+    const toolInvocations = message.tool_invocations ?? [];
+    const hasToolCalls = toolInvocations.length > 0;
+    const showStreamingDots =
+        message.isStreaming && !hasContent && !hasToolCalls;
 
     return (
         <div
@@ -26,9 +31,20 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         : "w-full text-dark-50"
                 )}
             >
-                {message.isStreaming && message.content === "" ? (
+                {hasToolCalls && (
+                    <div className="mb-1">
+                        {toolInvocations.map((invocation) => (
+                            <ToolCallCard
+                                key={invocation.id}
+                                invocation={invocation}
+                            />
+                        ))}
+                    </div>
+                )}
+
+                {showStreamingDots ? (
                     <StreamingDots />
-                ) : (
+                ) : hasContent ? (
                     <div
                         className={cn(
                             isUser &&
@@ -36,11 +52,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         )}
                     >
                         <MarkdownRenderer
-                            content={hasContent ? message.content : " "}
+                            content={message.content}
                             isStreaming={message.isStreaming}
                         />
                     </div>
-                )}
+                ) : null}
             </div>
         </div>
     );

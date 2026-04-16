@@ -1,5 +1,18 @@
 export type MessageRole = "user" | "assistant" | "system";
 
+export type ToolInvocationStatus = "pending" | "success" | "error";
+
+export interface ToolInvocation {
+    id: string;
+    message_id: string;
+    tool_name: string;
+    input: unknown;
+    output: unknown;
+    error: string | null;
+    status: ToolInvocationStatus;
+    created_at: string;
+}
+
 export interface Message {
     id: string;
     conversation_id: string;
@@ -7,6 +20,7 @@ export interface Message {
     content: string;
     created_at: string;
     isStreaming?: boolean;
+    tool_invocations?: ToolInvocation[];
 }
 
 export interface Conversation {

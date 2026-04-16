@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import type { Conversation, ConversationWithMessages, Message } from "./conversation-types";
+import type {
+    Conversation,
+    ConversationWithMessages,
+    Message,
+    ToolInvocation,
+    ToolInvocationStatus
+} from "./conversation-types";
 import * as conversationApi from "./conversation-api";
 
 interface ConversationStoreState {
@@ -140,6 +146,71 @@ async function runStream(
                             return { ...m, content: m.content + delta };
                         }
                         return m;
+                    });
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
+            case "tool-call": {
+                const invocation: ToolInvocation = {
+                    id: data.id as string,
+                    message_id: data.messageId as string,
+                    tool_name: data.toolName as string,
+                    input: data.input,
+                    output: null,
+                    error: null,
+                    status: (data.status as ToolInvocationStatus) ?? "pending",
+                    created_at:
+                        (data.createdAt as string) ??
+                        new Date().toISOString()
+                };
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+                    const messages = prev.messages.map((m) => {
+                        if (m.id !== invocation.message_id) return m;
+                        const existing = m.tool_invocations ?? [];
+                        return {
+                            ...m,
+                            tool_invocations: [...existing, invocation]
+                        };
+                    });
+                    return { ...prev, messages };
+                });
+                break;
+            }
+
+            case "tool-result": {
+                const messageId = data.messageId as string;
+                const toolName = data.toolName as string;
+                const output = data.output;
+                const error = (data.error as string | null) ?? null;
+                const status =
+                    (data.status as ToolInvocationStatus) ??
+                    (error ? "error" : "success");
+                updateFn((prev) => {
+                    if (prev.id !== conversationId) return prev;
+                    const messages = prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.tool_invocations ?? [];
+                        let applied = false;
+                        const tool_invocations = existing.map((inv) => {
+                            if (
+                                applied ||
+                                inv.status !== "pending" ||
+                                inv.tool_name !== toolName
+                            ) {
+                                return inv;
+                            }
+                            applied = true;
+                            return {
+                                ...inv,
+                                status,
+                                output,
+                                error
+                            };
+                        });
+                        return { ...m, tool_invocations };
                     });
                     return { ...prev, messages };
                 });

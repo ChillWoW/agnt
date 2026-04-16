@@ -40,10 +40,22 @@ CREATE TABLE IF NOT EXISTS history_entries (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tool_invocations (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    output_json TEXT,
+    error TEXT,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'success', 'error')),
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_state_entries_scope ON state_entries(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope ON history_entries(scope_type, scope_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope_key ON history_entries(scope_type, scope_id, key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_invocations_message ON tool_invocations(message_id, created_at);
 `;
 
 function ensureDir(dir: string): void {
