@@ -18,6 +18,9 @@ function HomeRoute() {
     const createConversation = useConversationStore(
         (s) => s.createConversation
     );
+    const replyToConversation = useConversationStore(
+        (s) => s.replyToConversation
+    );
 
     const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
 
@@ -32,10 +35,13 @@ function HomeRoute() {
             activeWorkspaceId,
             message
         );
+
         void navigate({
             to: "/conversations/$conversationId",
             params: { conversationId: conversation.id }
         });
+
+        void replyToConversation(activeWorkspaceId, conversation.id);
     };
 
     const setActive = useWorkspaceStore((s) => s.setActive);

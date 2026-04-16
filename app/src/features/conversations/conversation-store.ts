@@ -263,6 +263,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     },
 
     sendMessage: async (workspaceId: string, conversationId: string, content: string) => {
+        if (get().isStreaming) {
+            return;
+        }
+
         const streamAbortController = new AbortController();
         set({ isStreaming: true, streamAbortController });
 
@@ -303,6 +307,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     },
 
     replyToConversation: async (workspaceId: string, conversationId: string) => {
+        if (get().isStreaming) {
+            return;
+        }
+
         const streamAbortController = new AbortController();
         set({ isStreaming: true, streamAbortController });
 

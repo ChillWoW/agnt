@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
 import { useConversationStore } from "@/features/conversations";
@@ -18,39 +18,14 @@ function ConversationRoute() {
         isStreaming,
         loadConversation,
         sendMessage,
-        replyToConversation,
         stopGeneration
     } = useConversationStore();
-    const hasTriggeredReply = useRef(false);
 
     useEffect(() => {
         if (activeWorkspaceId) {
-            hasTriggeredReply.current = false;
             void loadConversation(activeWorkspaceId, conversationId);
         }
     }, [activeWorkspaceId, conversationId, loadConversation]);
-
-    useEffect(() => {
-        if (!activeConversation || !activeWorkspaceId) return;
-        if (activeConversation.id !== conversationId) return;
-        if (isStreaming || hasTriggeredReply.current) return;
-
-        const messages = activeConversation.messages.filter(
-            (m) => m.role === "user" || m.role === "assistant"
-        );
-        const lastMessage = messages[messages.length - 1];
-
-        if (lastMessage?.role === "user") {
-            hasTriggeredReply.current = true;
-            void replyToConversation(activeWorkspaceId, conversationId);
-        }
-    }, [
-        activeConversation,
-        activeWorkspaceId,
-        conversationId,
-        isStreaming,
-        replyToConversation
-    ]);
 
     const handleSend = (content: string) => {
         if (!activeWorkspaceId || !activeConversation) return;

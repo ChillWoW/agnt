@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import "./index.css";
+import "katex/dist/katex.min.css";
 
 const hashHistory = createHashHistory();
 const router = createRouter({ routeTree, history: hashHistory });
