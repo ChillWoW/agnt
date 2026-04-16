@@ -73,12 +73,22 @@ export function ModelSelector({
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 max-w-[13rem] gap-2 hover:bg-dark-800 text-dark-200"
+                    className="h-7 max-w-[18rem] gap-2 hover:bg-dark-800 text-dark-200"
                 >
                     <OpenAiLogoIcon className="size-3.5 shrink-0" />
                     <span className="truncate">
                         {selectedModel?.displayName ??
                             (isLoading ? "Loading models" : "Select model")}
+                        {selectedModel && (
+                            <span className="text-dark-300">
+                                {supportsFastMode && selection.speed === "fast" && (
+                                    <> · Fast</>
+                                )}
+                                {selectedReasoningEfforts.length > 0 && currentEffort && (
+                                    <> · {formatEffortLabel(currentEffort)}</>
+                                )}
+                            </span>
+                        )}
                     </span>
                     <CaretUpDownIcon className="size-3.5 shrink-0 text-dark-300" />
                 </Button>

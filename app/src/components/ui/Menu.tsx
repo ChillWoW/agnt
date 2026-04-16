@@ -6,8 +6,8 @@ import { cn } from "@/lib/cn";
 // ─── Shared classes ───────────────────────────────────────────────────────────
 
 const popupClasses = cn(
-    "z-50 min-w-[10rem] rounded-lg border border-dark-600",
-    "bg-dark-800 p-1 shadow-lg shadow-black/40",
+    "z-50 min-w-[10rem] rounded-md border border-dark-600",
+    "bg-dark-850 p-1 shadow-sm",
     "outline-none",
     "origin-[var(--transform-origin)]",
     "animate-in fade-in-0 zoom-in-95 duration-150 ease-out",
@@ -15,9 +15,9 @@ const popupClasses = cn(
 );
 
 const itemClasses = cn(
-    "group flex w-full cursor-default select-none items-center gap-2 cursor-pointer",
-    "rounded-md px-2.5 py-1.5",
-    "text-[13px] text-dark-100 outline-none",
+    "group flex w-full select-none items-center gap-2 cursor-pointer",
+    "rounded-sm px-2.5 py-1",
+    "text-[11px] text-dark-100 outline-none",
     "transition-colors duration-75",
     "data-[highlighted]:bg-dark-700 data-[highlighted]:text-dark-50",
     "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40"
@@ -157,7 +157,7 @@ function MenuItem({
             {...props}
         >
             {icon && (
-                <span className="shrink-0 text-dark-300 group-data-[highlighted]:text-current">
+                <span className="shrink-0 text-dark-200 group-data-[highlighted]:text-current">
                     {icon}
                 </span>
             )}

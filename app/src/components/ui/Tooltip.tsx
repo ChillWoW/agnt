@@ -50,7 +50,7 @@ export function Tooltip({
                     >
                         <Base.Popup
                             className={cn(
-                                "rounded-md border border-dark-600 bg-dark-850 px-2 py-1 text-xs text-dark-50 shadow-sm",
+                                "rounded-md border border-dark-600 bg-dark-850 px-2.5 py-1 text-xs text-dark-50 shadow-sm",
                                 "animate-in fade-in-0 zoom-in-95 duration-150",
                                 "data-[ending-style]:animate-out data-[ending-style]:fade-out-0 data-[ending-style]:zoom-out-95",
                                 className

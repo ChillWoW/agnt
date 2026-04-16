@@ -7,9 +7,13 @@ import {
     NavigationArrowIcon,
     FolderOpenIcon,
     CaretRightIcon,
-    ChatCircleIcon,
-    TrashIcon
+    TrashIcon,
+    PlusIcon,
+    DotsThreeIcon,
+    XIcon,
+    MinusIcon
 } from "@phosphor-icons/react";
+import { Menu, Tooltip } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LeftSidebarButton } from "./left-sidebar-button";
 import { settingsCategories } from "@/components/settings/SettingsPanel";
@@ -29,26 +33,21 @@ function groupCategories<T extends { group: string }>(cats: T[]) {
     return map;
 }
 
-const EMPTY_CONVERSATIONS: import("@/features/conversations").Conversation[] = [];
+const EMPTY_CONVERSATIONS: import("@/features/conversations").Conversation[] =
+    [];
 
 function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const navigate = useNavigate();
     const conversations = useConversationStore(
         (s) => s.conversationsByWorkspace[workspaceId] ?? EMPTY_CONVERSATIONS
     );
-    const activeConversationId = useConversationStore((s) => s.activeConversation?.id ?? null);
+    const activeConversationId = useConversationStore(
+        (s) => s.activeConversation?.id ?? null
+    );
 
     useEffect(() => {
         void useConversationStore.getState().loadConversations(workspaceId);
     }, [workspaceId]);
-
-    if (conversations.length === 0) {
-        return (
-            <p className="px-2 py-1.5 text-[11px] text-dark-400 italic">
-                No conversations yet
-            </p>
-        );
-    }
 
     return (
         <div className="flex flex-col gap-0.5">
@@ -78,15 +77,18 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                             : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                     )}
                 >
-                    <ChatCircleIcon className="size-3 shrink-0" />
+                    <MinusIcon className="size-3 shrink-0 text-dark-300" />
                     <span className="truncate flex-1">{conv.title}</span>
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            void useConversationStore.getState().deleteConversation(workspaceId, conv.id);
+                            void useConversationStore
+                                .getState()
+                                .deleteConversation(workspaceId, conv.id);
                         }}
                         className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-red-400 p-0.5"
                     >
+                        {/* TODO: Change to archiving system */}
                         <TrashIcon className="size-3" />
                     </button>
                 </div>
@@ -96,7 +98,8 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 }
 
 function WorkspaceSidebarList() {
-    const { workspaces, activeWorkspaceId, setActive } = useWorkspaceStore();
+    const { workspaces, activeWorkspaceId, setActive, remove } =
+        useWorkspaceStore();
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const navigate = useNavigate();
 
@@ -134,30 +137,62 @@ function WorkspaceSidebarList() {
 
                 return (
                     <div key={ws.id} className="flex flex-col">
-                        <button
-                            onClick={() => {
-                                void setActive(ws.id);
-                                toggleExpanded(ws.id);
-                                void navigate({ to: "/" });
-                            }}
-                            className={cn(
-                                "group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full",
-                                isActive
-                                    ? "text-dark-50"
-                                    : "text-dark-200 hover:text-dark-50"
-                            )}
-                        >
-                            <CaretRightIcon
+                        <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
+                            <button
+                                onClick={() => toggleExpanded(ws.id)}
                                 className={cn(
-                                    "size-3 shrink-0 transition-transform duration-100",
-                                    isExpanded && "rotate-90"
+                                    "flex items-center gap-1 min-w-0 flex-1 text-left",
+                                    isActive
+                                        ? "text-dark-50"
+                                        : "text-dark-200 hover:text-dark-50"
                                 )}
-                                weight="bold"
-                            />
-                            <span className="truncate font-medium">
-                                {ws.name}
-                            </span>
-                        </button>
+                            >
+                                <CaretRightIcon
+                                    className={cn(
+                                        "size-2.5 shrink-0 transition-transform duration-100",
+                                        isExpanded && "rotate-90"
+                                    )}
+                                    weight="bold"
+                                />
+                                <span className="truncate font-medium">
+                                    {ws.name}
+                                </span>
+                            </button>
+
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Tooltip content="New Agent" side="top">
+                                    <button
+                                        onClick={() => {
+                                            void setActive(ws.id);
+                                            void navigate({ to: "/" });
+                                        }}
+                                        className="text-dark-200 hover:text-dark-100"
+                                    >
+                                        <PlusIcon className="size-3.5" />
+                                    </button>
+                                </Tooltip>
+
+                                <Menu>
+                                    <Menu.Trigger className="text-dark-200 hover:text-dark-100">
+                                        <DotsThreeIcon
+                                            className="size-3.5"
+                                            weight="bold"
+                                        />
+                                    </Menu.Trigger>
+                                    <Menu.Content side="bottom" align="start">
+                                        <Menu.Item
+                                            destructive
+                                            icon={
+                                                <XIcon className="size-3.5" />
+                                            }
+                                            onClick={() => void remove(ws.id)}
+                                        >
+                                            Close workspace
+                                        </Menu.Item>
+                                    </Menu.Content>
+                                </Menu>
+                            </div>
+                        </div>
 
                         {isExpanded && (
                             <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
