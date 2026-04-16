@@ -236,9 +236,30 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     },
 
     loadConversation: async (workspaceId: string, conversationId: string) => {
+        const current = get();
+
+        // If we're currently streaming into this same conversation, don't
+        // overwrite the in-memory state with a DB fetch — doing so drops the
+        // `isStreaming` placeholder and subsequent delta/finish events have
+        // nothing to update.
+        if (
+            current.isStreaming &&
+            current.activeConversation?.id === conversationId
+        ) {
+            return;
+        }
+
         set({ isLoadingConversation: true });
         try {
             const conversation = await conversationApi.fetchConversation(workspaceId, conversationId);
+            // Guard against a stream starting while the fetch was in flight.
+            const latest = get();
+            if (
+                latest.isStreaming &&
+                latest.activeConversation?.id === conversationId
+            ) {
+                return;
+            }
             set({ activeConversation: conversation });
         } finally {
             set({ isLoadingConversation: false });

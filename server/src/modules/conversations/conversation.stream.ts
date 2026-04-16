@@ -85,11 +85,9 @@ function resolveConversationModelSettings(
         trimmedModel && trimmedModel.length > 0 ? trimmedModel : DEFAULT_MODEL;
     const model = getModelById(modelName);
 
-    const rawEffort =
-        state.reasoningEffort ??
-        state.effort ??
-        state.reasoning ??
-        null;
+    const rawEffort = Object.prototype.hasOwnProperty.call(state, "reasoningEffort")
+        ? state.reasoningEffort
+        : state.effort ?? state.reasoning ?? null;
     const reasoningEffort =
         isReasoningEffort(rawEffort) &&
         model?.supportsReasoningEffort === true &&

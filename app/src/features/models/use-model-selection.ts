@@ -29,6 +29,18 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
     );
 }
 
+function getStoredReasoningEffort(
+    values: Record<string, unknown>
+): ReasoningEffort | null {
+    if (Object.prototype.hasOwnProperty.call(values, "reasoningEffort")) {
+        return isReasoningEffort(values.reasoningEffort)
+            ? values.reasoningEffort
+            : null;
+    }
+
+    return isReasoningEffort(values.effort) ? values.effort : null;
+}
+
 function getDefaultSelection(models: ModelCatalogEntry[]): ModelSelection {
     const preferredModel =
         models.find((model) => model.status === "recommended") ?? models[0] ?? null;
@@ -77,12 +89,7 @@ function toSelection(
                 : typeof values.model === "string"
                   ? values.model
                   : null,
-        reasoningEffort:
-            isReasoningEffort(values.reasoningEffort)
-                ? values.reasoningEffort
-                : isReasoningEffort(values.effort)
-                  ? values.effort
-                  : null,
+        reasoningEffort: getStoredReasoningEffort(values),
         speed: values.fastMode === true ? "fast" : "standard"
     });
 }
@@ -221,7 +228,12 @@ export function useModelSelection({
 
     const selectModel = useCallback(
         (modelId: string) => {
-            applySelection({ ...selection, modelId });
+            applySelection({
+                ...selection,
+                modelId,
+                reasoningEffort: null,
+                speed: "standard"
+            });
         },
         [applySelection, selection]
     );
