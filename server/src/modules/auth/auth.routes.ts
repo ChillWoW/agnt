@@ -4,7 +4,9 @@ import { logger } from "../../lib/logger";
 import {
     disconnectAuth,
     getAuthState,
+    getStoredAuth,
     getOauthSessionStatus,
+    getValidAccessToken,
     startOauthConnection
 } from "./auth.service";
 import type {
@@ -67,6 +69,48 @@ const authRoutes = new Elysia({ prefix: "/auth" })
     .post("/disconnect", async (): Promise<AuthState> => {
         logger.log("[auth-routes] POST /auth/disconnect");
         return disconnectAuth();
+    })
+    .get("/rate-limits", async ({ set }) => {
+        logger.log("[auth-routes] GET /auth/rate-limits");
+
+        try {
+            const auth = await getStoredAuth();
+
+            if (!auth) {
+                set.status = 401;
+                return { error: "Not connected" };
+            }
+
+            const accessToken = await getValidAccessToken();
+            const headers: Record<string, string> = {
+                Authorization: `Bearer ${accessToken}`
+            };
+
+            if (auth.accountId) {
+                headers["ChatGPT-Account-Id"] = auth.accountId;
+            }
+
+            const response = await fetch(
+                "https://chatgpt.com/backend-api/wham/usage",
+                { headers }
+            );
+
+            if (!response.ok) {
+                set.status = response.status;
+                return { error: `Upstream error: ${response.status}` };
+            }
+
+            return response.json();
+        } catch (error) {
+            logger.error("[auth-routes] Rate limits fetch failed:", error);
+            set.status = 500;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to fetch rate limits"
+            };
+        }
     });
 
 export default authRoutes;

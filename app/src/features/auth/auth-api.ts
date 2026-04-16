@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 import type {
     AuthConnectStartResponse,
     AuthOauthSessionStatus,
+    AuthRateLimits,
     AuthState
 } from "./types";
 
@@ -12,5 +13,6 @@ export const authApi = {
         api.get<AuthOauthSessionStatus>("/auth/oauth/status", {
             query: { sessionId }
         }),
-    disconnect: () => api.post<AuthState>("/auth/disconnect")
+    disconnect: () => api.post<AuthState>("/auth/disconnect"),
+    getRateLimits: () => api.get<AuthRateLimits>("/auth/rate-limits")
 };

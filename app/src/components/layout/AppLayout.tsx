@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import {
     CopyIcon,
-    GearSixIcon,
     MinusIcon,
     SidebarIcon,
     SidebarSimpleIcon,
@@ -130,23 +129,6 @@ export function AppLayout({ children }: AppLayoutProps) {
                                 className="size-4"
                                 style={{ transform: "scaleX(-1)" }}
                             />
-                        </button>
-                    </KeybindTooltip>
-                    <KeybindTooltip
-                        keybind={useResolvedHotkeyCombo("layout.settings")}
-                        content="Open Settings"
-                    >
-                        <button
-                            type="button"
-                            onClick={() =>
-                                settingsOpen ? closeSettings() : openSettings()
-                            }
-                            className={cn(
-                                "size-6 p-0 hover:bg-dark-800 text-dark-200 hover:text-dark-50 rounded-md flex items-center justify-center",
-                                settingsOpen && "bg-dark-800 text-dark-50"
-                            )}
-                        >
-                            <GearSixIcon className="size-3.5" weight="bold" />
                         </button>
                     </KeybindTooltip>
                 </div>

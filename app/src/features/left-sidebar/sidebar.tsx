@@ -11,7 +11,8 @@ import {
     PlusIcon,
     DotsThreeIcon,
     XIcon,
-    MinusIcon
+    MinusIcon,
+    GearSixIcon
 } from "@phosphor-icons/react";
 import { Menu, Tooltip } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -22,6 +23,7 @@ import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations";
 import type { ElementType } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { AccountButton } from "./account-button";
 
 function groupCategories<T extends { group: string }>(cats: T[]) {
     const map = new Map<string, T[]>();
@@ -73,7 +75,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     className={cn(
                         "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
                         activeConversationId === conv.id
-                            ? "bg-dark-700 text-dark-50"
+                            ? "bg-dark-800 text-dark-50"
                             : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                     )}
                 >
@@ -262,6 +264,7 @@ export function LeftSidebar() {
     const {
         isOpen: settingsOpen,
         setActiveCategory: onSettingsCategoryChange,
+        open: openSettings,
         close: closeSettings,
         activeCategory
     } = useSettingsStore();
@@ -278,6 +281,15 @@ export function LeftSidebar() {
         closeSettings();
     };
 
+    const toggleSettingsPanel = () => {
+        if (settingsOpen) {
+            closeSettingsPanel();
+            return;
+        }
+
+        openSettings();
+    };
+
     return (
         <div className="relative shrink-0 border-r border-dark-700">
             <div
@@ -286,59 +298,87 @@ export function LeftSidebar() {
                     isCollapsed ? "w-0" : "w-64"
                 )}
             >
-                {settingsOpen ? (
-                    <div className="flex flex-col h-full">
-                        <div className="flex flex-col gap-4 px-2 py-3">
-                            <LeftSidebarButton
-                                Icon={ArrowLeftIcon}
-                                label="Back"
-                                onClick={closeSettingsPanel}
-                                hotkey="Esc"
-                            />
+                <div className="flex h-full flex-col">
+                    <div className="flex-1 min-h-0">
+                        {settingsOpen ? (
+                            <div className="flex h-full flex-col">
+                                <div className="flex flex-col gap-4 px-2 py-3">
+                                    <LeftSidebarButton
+                                        Icon={ArrowLeftIcon}
+                                        label="Back"
+                                        onClick={closeSettingsPanel}
+                                        hotkey="Esc"
+                                    />
 
-                            {[
-                                ...groupCategories(settingsCategories).entries()
-                            ].map(([group, items]) => (
-                                <div
-                                    key={group}
-                                    className="flex flex-col gap-0.5"
-                                >
-                                    <p className="px-1.5 pb-1 text-xs font-semibold text-dark-300 uppercase">
-                                        {group}
-                                    </p>
-                                    {items.map((cat) => (
-                                        <LeftSidebarButton
-                                            key={cat.key}
-                                            Icon={cat.icon as ElementType}
-                                            label={cat.label}
-                                            onClick={() =>
-                                                onSettingsCategoryChange?.(
-                                                    cat.key
-                                                )
-                                            }
-                                            isActive={
-                                                settingsOpen &&
-                                                activeCategory === cat.key
-                                            }
-                                        />
+                                    {[
+                                        ...groupCategories(
+                                            settingsCategories
+                                        ).entries()
+                                    ].map(([group, items]) => (
+                                        <div
+                                            key={group}
+                                            className="flex flex-col gap-0.5"
+                                        >
+                                            <p className="px-1.5 pb-1 text-xs font-semibold text-dark-300 uppercase">
+                                                {group}
+                                            </p>
+                                            {items.map((cat) => (
+                                                <LeftSidebarButton
+                                                    key={cat.key}
+                                                    Icon={
+                                                        cat.icon as ElementType
+                                                    }
+                                                    label={cat.label}
+                                                    onClick={() =>
+                                                        onSettingsCategoryChange?.(
+                                                            cat.key
+                                                        )
+                                                    }
+                                                    isActive={
+                                                        settingsOpen &&
+                                                        activeCategory ===
+                                                            cat.key
+                                                    }
+                                                />
+                                            ))}
+                                        </div>
                                     ))}
                                 </div>
-                            ))}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex flex-col h-full px-2.5 pt-2.5">
-                        <NewAgentButton />
+                            </div>
+                        ) : (
+                            <div className="flex h-full flex-col px-2.5 pt-2.5">
+                                <NewAgentButton />
 
-                        <div className="flex-1 overflow-y-auto mt-3 min-h-0">
-                            <WorkspaceSidebarList />
+                                <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+                                    <WorkspaceSidebarList />
+                                </div>
+
+                                <div className="shrink-0 pb-2.5 pt-1">
+                                    <OpenWorkspaceButton />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1 border-t border-dark-700 px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                            <AccountButton />
                         </div>
 
-                        <div className="shrink-0 pb-2.5 pt-1">
-                            <OpenWorkspaceButton />
-                        </div>
+                        <Tooltip content="Settings" side="top">
+                            <button
+                                type="button"
+                                onClick={toggleSettingsPanel}
+                                className={cn(
+                                    "flex size-9 shrink-0 items-center justify-center rounded-md text-dark-200 transition-colors hover:bg-dark-850 hover:text-dark-50",
+                                    settingsOpen && "bg-dark-850 text-dark-50"
+                                )}
+                            >
+                                <GearSixIcon className="size-4" weight="bold" />
+                            </button>
+                        </Tooltip>
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );
