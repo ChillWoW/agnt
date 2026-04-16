@@ -91,6 +91,8 @@ function ConversationRoute() {
                         onSend={handleSend}
                         onStop={stopGeneration}
                         isStreaming={isStreaming}
+                        workspaceId={activeWorkspaceId}
+                        conversationId={activeConversation.id}
                         placeholder={
                             isStreaming
                                 ? "Waiting for response..."

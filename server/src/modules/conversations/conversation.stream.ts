@@ -5,6 +5,8 @@ import { createCodexClient } from "./codex-client";
 import { buildStreamResponse, sseEvent } from "./conversation.sse";
 import { getEffectiveConversationState } from "../history/history.service";
 import type { Message } from "./conversations.types";
+import type { ReasoningEffort } from "../models/models.types";
+import { getModelById } from "../models/models.service";
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
 
@@ -51,7 +53,25 @@ function buildModelMessages(messages: Message[]): ModelMessage[] {
     return result;
 }
 
-function resolveConversationModel(workspaceId: string, conversationId: string): string {
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+    return (
+        value === "none" ||
+        value === "minimal" ||
+        value === "low" ||
+        value === "medium" ||
+        value === "high" ||
+        value === "xhigh"
+    );
+}
+
+function resolveConversationModelSettings(
+    workspaceId: string,
+    conversationId: string
+): {
+    modelName: string;
+    reasoningEffort: ReasoningEffort | null;
+    fastMode: boolean;
+} {
     const state = getEffectiveConversationState(workspaceId, conversationId).merged;
     const configuredModel =
         typeof state.activeModel === "string"
@@ -60,12 +80,28 @@ function resolveConversationModel(workspaceId: string, conversationId: string): 
               ? state.model
               : null;
 
-    if (!configuredModel) {
-        return DEFAULT_MODEL;
-    }
+    const trimmedModel = configuredModel?.trim();
+    const modelName =
+        trimmedModel && trimmedModel.length > 0 ? trimmedModel : DEFAULT_MODEL;
+    const model = getModelById(modelName);
 
-    const trimmed = configuredModel.trim();
-    return trimmed.length > 0 ? trimmed : DEFAULT_MODEL;
+    const rawEffort =
+        state.reasoningEffort ??
+        state.effort ??
+        state.reasoning ??
+        null;
+    const reasoningEffort =
+        isReasoningEffort(rawEffort) &&
+        model?.supportsReasoningEffort === true &&
+        model.allowedEfforts.includes(rawEffort)
+            ? rawEffort
+            : model?.defaultEffort ?? null;
+
+    return {
+        modelName,
+        reasoningEffort,
+        fastMode: state.fastMode === true && model?.supportsFastMode === true
+    };
 }
 
 /**
@@ -102,7 +138,8 @@ export async function streamReplyToLastMessage(
     logger.log("[stream] Loaded", history.length, "messages for context");
 
     const modelMessages = buildModelMessages(history);
-    const modelName = resolveConversationModel(workspaceId, conversationId);
+    const { modelName, reasoningEffort, fastMode } =
+        resolveConversationModelSettings(workspaceId, conversationId);
 
     const assistantMsgId = crypto.randomUUID();
     const assistantCreatedAt = new Date().toISOString();
@@ -135,18 +172,30 @@ export async function streamReplyToLastMessage(
                 "[stream] Starting streamText with model:",
                 modelName,
                 "messages:",
-                modelMessages.length
+                modelMessages.length,
+                "effort:",
+                reasoningEffort,
+                "fastMode:",
+                fastMode
             );
+
+            const openaiOptions: Record<string, string | boolean | undefined> = {
+                instructions: SYSTEM_INSTRUCTIONS,
+                store: false,
+                reasoningSummary: "detailed",
+                serviceTier: fastMode ? "priority" : undefined
+            };
+
+            if (reasoningEffort && reasoningEffort !== "none") {
+                openaiOptions.reasoningEffort = reasoningEffort;
+            }
 
             const result = streamText({
                 model: codex.responses(modelName),
                 messages: modelMessages,
                 abortSignal,
                 providerOptions: {
-                    openai: {
-                        instructions: SYSTEM_INSTRUCTIONS,
-                        store: false
-                    }
+                    openai: openaiOptions
                 },
                 onAbort: () => {
                     logger.log("[stream] Reply generation aborted", {
@@ -288,7 +337,8 @@ export async function streamConversationReply(
             created_at: now
         }
     ]);
-    const modelName = resolveConversationModel(workspaceId, conversationId);
+    const { modelName, reasoningEffort, fastMode } =
+        resolveConversationModelSettings(workspaceId, conversationId);
 
     const assistantMsgId = crypto.randomUUID();
     const assistantCreatedAt = new Date().toISOString();
@@ -328,18 +378,30 @@ export async function streamConversationReply(
                 "[stream] Starting streamText with model:",
                 modelName,
                 "messages:",
-                modelMessages.length
+                modelMessages.length,
+                "effort:",
+                reasoningEffort,
+                "fastMode:",
+                fastMode
             );
+
+            const openaiOptions: Record<string, string | boolean | undefined> = {
+                instructions: SYSTEM_INSTRUCTIONS,
+                store: false,
+                reasoningSummary: "detailed",
+                serviceTier: fastMode ? "priority" : undefined
+            };
+
+            if (reasoningEffort && reasoningEffort !== "none") {
+                openaiOptions.reasoningEffort = reasoningEffort;
+            }
 
             const result = streamText({
                 model: codex.responses(modelName),
                 messages: modelMessages,
                 abortSignal,
                 providerOptions: {
-                    openai: {
-                        instructions: SYSTEM_INSTRUCTIONS,
-                        store: false
-                    }
+                    openai: openaiOptions
                 },
                 onAbort: () => {
                     logger.log("[stream] Conversation generation aborted", {

@@ -93,7 +93,8 @@ From `server/`:
 - Conversations are created lazily on first user message.
 - Active conversation streams can be cancelled from the frontend stop button; the frontend aborts the HTTP request, the server forwards `request.signal` into AI SDK `streamText`, and partial assistant text is persisted while empty aborted placeholders are removed.
 - Workspace-level and conversation-level metadata/history are exposed under `/workspaces/:id/state|history` and `/workspaces/:id/conversations/:conversationId/state|history`, with `state/effective` providing workspace defaults merged with conversation overrides.
-- Conversation streaming resolves the active model from effective state keys (`activeModel` first, then `model`) before falling back to the built-in default model.
+- `GET /models` returns the frontend model catalog used by the chat input selector.
+- Conversation streaming resolves model settings from effective state keys: `activeModel`/`model`, `reasoningEffort`/`effort`, and `fastMode`; fast mode maps to OpenAI priority processing when the selected model supports it.
 
 ### Tauri sidecar lifecycle
 - Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
@@ -132,10 +133,12 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `server/src/modules/health/*` — health/readiness endpoints
 - `server/src/modules/conversations/*` — conversation CRUD (SQLite-backed, per-workspace)
 - `server/src/modules/history/*` — workspace/conversation metadata state snapshots + append-only history
+- `server/src/modules/models/*` — model catalog served to the frontend selector
 - `server/src/lib/db.ts` — per-workspace SQLite DB helper (open/cache/migrate)
 - `server/build.ts` — sidecar compile script + `.env` define injection
 - `app/src/features/hotkeys/` — hotkey system (store, provider, useHotkey hook, combo utils, shortcut display)
 - `app/src/features/conversations/` — conversation store, API client, types (Zustand)
+- `app/src/features/models/` — model catalog fetch + workspace/conversation model selection state sync
 - `app/src/components/ui/Tooltip.tsx` — base Tooltip + KeybindTooltip components
 
 ---
@@ -172,6 +175,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-14: Added Codex OAuth + SSE streaming. Server: `server/src/lib/agnt-home.ts`, `server/src/modules/auth/` (PKCE OAuth, token storage at `~/.agnt/auth.json`, `/auth` routes), `server/src/modules/conversations/codex-client.ts` + `conversation.sse.ts` + `conversation.stream.ts` (AI SDK streamText via `chatgpt.com/backend-api/codex`), added `/stream` and `/reply` endpoints. Frontend: `app/src/features/auth/` (Zustand store, bootstrap, API client), `CodexSettings` in settings panel, SSE stream consumer in conversation store. Server deps added: `ai`, `@ai-sdk/openai`.
 - 2026-04-15: Wired conversation stop-generation end-to-end. Frontend `ChatInput` stop action now aborts the in-flight stream request via Zustand; server conversation streaming now forwards `request.signal` into AI SDK `streamText` and persists partial aborted assistant output.
 - 2026-04-15: Added per-workspace and per-conversation state/history persistence. Server stores latest key-value snapshots plus append-only history in SQLite, exposes `/workspaces/:id/state|history` + conversation equivalents, and conversation streaming now resolves saved `activeModel`/`model` from effective state; frontend now has typed history API helpers in `app/src/features/history/`.
+- 2026-04-15: Added model catalog + chat input model selector. Server exposes `/models` and now applies effective `activeModel`/`reasoningEffort`/`fastMode` state to Codex requests (priority processing for fast mode); frontend adds `app/src/features/models/` and a chat toolbar popover for model, reasoning, speed, and hover pricing details.
 
 ---
 

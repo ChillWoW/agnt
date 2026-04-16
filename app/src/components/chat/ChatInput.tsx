@@ -2,19 +2,24 @@ import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { Button, Tooltip } from "@/components/ui";
+import { ModelSelector } from "./ModelSelector";
 
 interface ChatInputProps {
     onSend?: (value: string) => void;
     onStop?: () => void;
     isStreaming?: boolean;
     placeholder?: string;
+    workspaceId?: string | null;
+    conversationId?: string | null;
 }
 
 export function ChatInput({
     onSend,
     onStop,
     isStreaming,
-    placeholder = "Ask anything..."
+    placeholder = "Ask anything...",
+    workspaceId,
+    conversationId
 }: ChatInputProps) {
     const [value, setValue] = useState("");
 
@@ -58,7 +63,12 @@ export function ChatInput({
                 </div>
 
                 <div className="flex items-center justify-between px-2.5 h-10">
-                    <div className="flex items-center gap-1.5"></div>
+                    <div className="flex items-center gap-1.5">
+                        <ModelSelector
+                            workspaceId={workspaceId}
+                            conversationId={conversationId}
+                        />
+                    </div>
 
                     {isStreaming ? (
                         <Tooltip content="Stop generating">

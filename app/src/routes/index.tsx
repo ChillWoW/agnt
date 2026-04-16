@@ -59,6 +59,7 @@ function HomeRoute() {
                 <div className="mx-auto max-w-2xl px-4 py-4">
                     <ChatInput
                         onSend={(msg) => void handleSend(msg)}
+                        workspaceId={activeWorkspaceId}
                         placeholder={
                             activeWorkspaceId
                                 ? "Ask anything..."
