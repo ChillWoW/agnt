@@ -16,7 +16,18 @@ export const toolInvocationSchema = z.object({
     output: z.unknown(),
     error: z.string().nullable(),
     status: toolInvocationStatusSchema,
-    created_at: z.string()
+    created_at: z.string(),
+    message_seq: z.number().int().nonnegative().nullable().optional()
+});
+
+export const reasoningPartSchema = z.object({
+    id: z.string().uuid(),
+    message_id: z.string().uuid(),
+    text: z.string(),
+    started_at: z.string(),
+    ended_at: z.string().nullable(),
+    sort_index: z.number().int().nonnegative(),
+    message_seq: z.number().int().nonnegative().nullable().optional()
 });
 
 export const attachmentKindSchema = z.enum(["image", "file"]);
@@ -41,6 +52,7 @@ export const messageSchema = z.object({
     reasoning: z.string().optional(),
     reasoning_started_at: z.string().optional(),
     reasoning_ended_at: z.string().optional(),
+    reasoning_parts: z.array(reasoningPartSchema).optional(),
     created_at: z.string(),
     tool_invocations: z.array(toolInvocationSchema).optional(),
     attachments: z.array(attachmentSchema).optional(),
@@ -66,6 +78,7 @@ export const conversationWithMessagesSchema = conversationSchema.extend({
 export type MessageRole = z.infer<typeof messageRoleSchema>;
 export type ToolInvocationStatus = z.infer<typeof toolInvocationStatusSchema>;
 export type ToolInvocation = z.infer<typeof toolInvocationSchema>;
+export type ReasoningPart = z.infer<typeof reasoningPartSchema>;
 export type AttachmentKind = z.infer<typeof attachmentKindSchema>;
 export type Attachment = z.infer<typeof attachmentSchema>;
 export type Message = z.infer<typeof messageSchema>;

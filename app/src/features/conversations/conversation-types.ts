@@ -13,6 +13,17 @@ export interface ToolInvocation {
     error: string | null;
     status: ToolInvocationStatus;
     created_at: string;
+    message_seq?: number | null;
+}
+
+export interface ReasoningPart {
+    id: string;
+    message_id: string;
+    text: string;
+    started_at: string;
+    ended_at: string | null;
+    sort_index: number;
+    message_seq?: number | null;
 }
 
 export interface Message {
@@ -24,6 +35,7 @@ export interface Message {
     isStreaming?: boolean;
     tool_invocations?: ToolInvocation[];
     attachments?: Attachment[];
+    reasoning_parts?: ReasoningPart[];
     reasoning?: string;
     isReasoning?: boolean;
     reasoning_started_at?: string;

@@ -2,56 +2,55 @@ import { BrainIcon } from "@phosphor-icons/react";
 import { ToolBlock } from "./ToolCallCard";
 
 interface ThinkingBlockProps {
-    reasoning?: string;
-    isReasoning?: boolean;
-    reasoningStartedAt?: string;
-    reasoningEndedAt?: string;
+    text?: string;
+    startedAt?: string;
+    endedAt?: string | null;
+    isActive?: boolean;
 }
 
-function formatThinkingDuration(
-    reasoningStartedAt?: string,
-    reasoningEndedAt?: string
-): string | undefined {
-    if (!reasoningStartedAt || !reasoningEndedAt) {
-        return undefined;
-    }
+function parseIso(value: string | null | undefined): number | null {
+    if (!value) return null;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : null;
+}
 
-    const startedAt = new Date(reasoningStartedAt).getTime();
-    const endedAt = new Date(reasoningEndedAt).getTime();
-
-    if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
-        return undefined;
-    }
-
-    const seconds = Math.max(1, Math.round((endedAt - startedAt) / 1000));
-    return `for ${seconds} second${seconds === 1 ? "" : "s"}`;
+function formatDurationSeconds(seconds: number): string {
+    const rounded = Math.max(1, Math.round(seconds));
+    return `for ${rounded} second${rounded === 1 ? "" : "s"}`;
 }
 
 export function ThinkingBlock({
-    reasoning,
-    isReasoning,
-    reasoningStartedAt,
-    reasoningEndedAt
+    text,
+    startedAt,
+    endedAt,
+    isActive
 }: ThinkingBlockProps) {
-    if (!isReasoning && !reasoning) return null;
+    const showPending = !!isActive && !endedAt;
 
-    const detail = !isReasoning
-        ? formatThinkingDuration(reasoningStartedAt, reasoningEndedAt)
-        : undefined;
+    let detail: string | undefined;
+    if (!showPending) {
+        const started = parseIso(startedAt);
+        const ended = parseIso(endedAt);
+        if (started !== null && ended !== null && ended >= started) {
+            detail = formatDurationSeconds((ended - started) / 1000);
+        }
+    }
+
+    if (!showPending && !text) return null;
 
     return (
         <ToolBlock
             icon={<BrainIcon className="size-3.5 shrink-0" weight="bold" />}
             pendingLabel="Thinking"
             successLabel="Thought"
-            detail={detail || undefined}
-            status={isReasoning ? "pending" : "success"}
+            detail={detail}
+            status={showPending ? "pending" : "success"}
             autoOpen
             autoClose
         >
-            {reasoning && (
+            {text && (
                 <p className="whitespace-pre-wrap text-xs leading-relaxed text-dark-300">
-                    {reasoning}
+                    {text}
                 </p>
             )}
         </ToolBlock>

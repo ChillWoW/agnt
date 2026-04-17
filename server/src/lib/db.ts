@@ -57,7 +57,18 @@ CREATE TABLE IF NOT EXISTS tool_invocations (
     output_json TEXT,
     error TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending', 'success', 'error')),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    message_seq INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS message_reasoning_parts (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    text TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    sort_index INTEGER NOT NULL,
+    message_seq INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -79,6 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_state_entries_scope ON state_entries(scope_type, 
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope ON history_entries(scope_type, scope_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope_key ON history_entries(scope_type, scope_id, key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_invocations_message ON tool_invocations(message_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_reasoning_parts_message ON message_reasoning_parts(message_id, sort_index);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(conversation_id, message_id, created_at);
 `;
@@ -123,6 +135,57 @@ function runMigrations(db: Database): void {
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_messages_compacted ON messages(conversation_id, compacted, created_at);"
     );
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS message_reasoning_parts (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            text TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            sort_index INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reasoning_parts_message ON message_reasoning_parts(message_id, sort_index);
+    `);
+
+    addColumnIfMissing(db, "tool_invocations", "message_seq", "INTEGER");
+    addColumnIfMissing(db, "message_reasoning_parts", "message_seq", "INTEGER");
+
+    backfillLegacyReasoningParts(db);
+}
+
+function backfillLegacyReasoningParts(db: Database): void {
+    interface LegacyRow {
+        id: string;
+        reasoning_content: string | null;
+        reasoning_started_at: string | null;
+        reasoning_ended_at: string | null;
+        created_at: string;
+    }
+
+    const legacyRows = db
+        .query(
+            `SELECT m.id, m.reasoning_content, m.reasoning_started_at, m.reasoning_ended_at, m.created_at
+             FROM messages m
+             WHERE m.reasoning_content IS NOT NULL AND length(m.reasoning_content) > 0
+             AND NOT EXISTS (
+                 SELECT 1 FROM message_reasoning_parts p WHERE p.message_id = m.id
+             )`
+        )
+        .all() as LegacyRow[];
+
+    if (legacyRows.length === 0) return;
+
+    const insert = db.query(
+        "INSERT INTO message_reasoning_parts (id, message_id, text, started_at, ended_at, sort_index) VALUES (?, ?, ?, ?, ?, 0)"
+    );
+
+    for (const row of legacyRows) {
+        const id = crypto.randomUUID();
+        const startedAt = row.reasoning_started_at ?? row.created_at;
+        const endedAt = row.reasoning_ended_at ?? row.reasoning_started_at ?? row.created_at;
+        insert.run(id, row.id, row.reasoning_content ?? "", startedAt, endedAt);
+    }
 }
 
 function ensureDir(dir: string): void {

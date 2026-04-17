@@ -50,27 +50,67 @@ function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === "AbortError";
 }
 
+interface StreamReasoningPart {
+    id: string;
+    text: string;
+    startedAt: string;
+    endedAt: string | null;
+    sortIndex: number;
+    messageSeq: number;
+}
+
 function finalizeAbortedAssistantMessage(
     db: ReturnType<typeof getWorkspaceDb>,
     assistantMsgId: string,
     conversationId: string,
     partialContent: string,
-    reasoningContent: string,
-    reasoningStartedAt: string | null,
-    reasoningEndedAt: string | null
+    reasoningParts: StreamReasoningPart[]
 ) {
-    if (partialContent.length > 0 || reasoningContent.length > 0) {
+    const hasReasoning = reasoningParts.some((part) => part.text.length > 0);
+    if (partialContent.length > 0 || hasReasoning) {
+        const legacyText =
+            reasoningParts
+                .map((part) => part.text)
+                .filter((text) => text.length > 0)
+                .join("\n\n") || null;
+        const firstStartedAt =
+            reasoningParts.find((part) => part.text.length > 0)?.startedAt ??
+            null;
+        const lastEndedAt =
+            [...reasoningParts]
+                .reverse()
+                .find((part) => part.endedAt)?.endedAt ?? null;
+
         db.query(
             "UPDATE messages SET content = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
         ).run(
             partialContent,
-            reasoningContent.length > 0 ? reasoningContent : null,
-            reasoningStartedAt,
-            reasoningEndedAt,
+            legacyText,
+            firstStartedAt,
+            lastEndedAt,
             assistantMsgId
         );
+
+        const finalizedAt = new Date().toISOString();
+        const upsert = db.query(
+            "INSERT INTO message_reasoning_parts (id, message_id, text, started_at, ended_at, sort_index, message_seq) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT(id) DO UPDATE SET text = excluded.text, ended_at = COALESCE(message_reasoning_parts.ended_at, excluded.ended_at)"
+        );
+        for (const part of reasoningParts) {
+            if (part.text.length === 0) continue;
+            upsert.run(
+                part.id,
+                assistantMsgId,
+                part.text,
+                part.startedAt,
+                part.endedAt ?? finalizedAt,
+                part.sortIndex,
+                part.messageSeq
+            );
+        }
+
         db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
-            new Date().toISOString(),
+            finalizedAt,
             conversationId
         );
         return;
@@ -405,9 +445,53 @@ async function runStreamTextIntoController({
         resolveConversationModelSettings(workspaceId, conversationId);
 
     let fullText = "";
-    let reasoningText = "";
-    let reasoningStartedAt: string | null = null;
-    let reasoningEndedAt: string | null = null;
+    const reasoningParts: StreamReasoningPart[] = [];
+    let currentReasoningPart: StreamReasoningPart | null = null;
+    let nextMessageSeq = 0;
+
+    function allocateMessageSeq(): number {
+        const seq = nextMessageSeq;
+        nextMessageSeq += 1;
+        return seq;
+    }
+
+    function insertReasoningPart(part: StreamReasoningPart) {
+        db.query(
+            "INSERT INTO message_reasoning_parts (id, message_id, text, started_at, ended_at, sort_index, message_seq) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+            part.id,
+            assistantMsgId,
+            part.text,
+            part.startedAt,
+            part.endedAt,
+            part.sortIndex,
+            part.messageSeq
+        );
+    }
+
+    function updateReasoningPart(part: StreamReasoningPart) {
+        db.query(
+            "UPDATE message_reasoning_parts SET text = ?, ended_at = ? WHERE id = ?"
+        ).run(part.text, part.endedAt, part.id);
+    }
+
+    function collapseLegacyReasoning(): {
+        text: string | null;
+        startedAt: string | null;
+        endedAt: string | null;
+    } {
+        const withText = reasoningParts.filter((part) => part.text.length > 0);
+        if (withText.length === 0) {
+            return { text: null, startedAt: null, endedAt: null };
+        }
+        const text = withText.map((part) => part.text).join("\n\n");
+        const startedAt = withText[0]?.startedAt ?? null;
+        const endedAt =
+            [...withText].reverse().find((part) => part.endedAt)?.endedAt ??
+            null;
+        return { text, startedAt, endedAt };
+    }
+
     let lastUsage: {
         inputTokens: number | null;
         outputTokens: number | null;
@@ -534,6 +618,7 @@ async function runStreamTextIntoController({
                     totalTokens: total
                 };
 
+                const legacy = collapseLegacyReasoning();
                 db.query(
                     "UPDATE messages SET input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, total_tokens = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
                 ).run(
@@ -541,9 +626,9 @@ async function runStreamTextIntoController({
                     output,
                     reasoning,
                     total,
-                    reasoningText.length > 0 ? reasoningText : null,
-                    reasoningStartedAt,
-                    reasoningEndedAt,
+                    legacy.text,
+                    legacy.startedAt,
+                    legacy.endedAt,
                     assistantMsgId
                 );
             },
@@ -564,22 +649,57 @@ async function runStreamTextIntoController({
             }
 
             if (part.type === "reasoning-start") {
-                reasoningStartedAt ??= new Date().toISOString();
-                reasoningEndedAt = null;
+                const newPart: StreamReasoningPart = {
+                    id: crypto.randomUUID(),
+                    text: "",
+                    startedAt: new Date().toISOString(),
+                    endedAt: null,
+                    sortIndex: reasoningParts.length,
+                    messageSeq: allocateMessageSeq()
+                };
+                reasoningParts.push(newPart);
+                currentReasoningPart = newPart;
+                insertReasoningPart(newPart);
                 controller.enqueue(
                     sseEvent("reasoning-start", {
                         messageId: assistantMsgId,
-                        startedAt: reasoningStartedAt
+                        partId: newPart.id,
+                        sortIndex: newPart.sortIndex,
+                        messageSeq: newPart.messageSeq,
+                        startedAt: newPart.startedAt
                     })
                 );
                 continue;
             }
 
             if (part.type === "reasoning-delta") {
-                reasoningText += part.text;
+                if (!currentReasoningPart) {
+                    currentReasoningPart = {
+                        id: crypto.randomUUID(),
+                        text: "",
+                        startedAt: new Date().toISOString(),
+                        endedAt: null,
+                        sortIndex: reasoningParts.length,
+                        messageSeq: allocateMessageSeq()
+                    };
+                    reasoningParts.push(currentReasoningPart);
+                    insertReasoningPart(currentReasoningPart);
+                    controller.enqueue(
+                        sseEvent("reasoning-start", {
+                            messageId: assistantMsgId,
+                            partId: currentReasoningPart.id,
+                            sortIndex: currentReasoningPart.sortIndex,
+                            messageSeq: currentReasoningPart.messageSeq,
+                            startedAt: currentReasoningPart.startedAt
+                        })
+                    );
+                }
+                currentReasoningPart.text += part.text;
+                updateReasoningPart(currentReasoningPart);
                 controller.enqueue(
                     sseEvent("reasoning-delta", {
                         messageId: assistantMsgId,
+                        partId: currentReasoningPart.id,
                         text: part.text
                     })
                 );
@@ -587,13 +707,19 @@ async function runStreamTextIntoController({
             }
 
             if (part.type === "reasoning-end") {
-                reasoningEndedAt = new Date().toISOString();
-                controller.enqueue(
-                    sseEvent("reasoning-end", {
-                        messageId: assistantMsgId,
-                        endedAt: reasoningEndedAt
-                    })
-                );
+                const endedAt = new Date().toISOString();
+                if (currentReasoningPart) {
+                    currentReasoningPart.endedAt = endedAt;
+                    updateReasoningPart(currentReasoningPart);
+                    controller.enqueue(
+                        sseEvent("reasoning-end", {
+                            messageId: assistantMsgId,
+                            partId: currentReasoningPart.id,
+                            endedAt
+                        })
+                    );
+                    currentReasoningPart = null;
+                }
                 continue;
             }
 
@@ -602,16 +728,18 @@ async function runStreamTextIntoController({
                 const createdAt = new Date().toISOString();
                 const inputJson = safeStringify(part.input);
                 const status: ToolInvocationStatus = "pending";
+                const messageSeq = allocateMessageSeq();
 
                 db.query(
-                    "INSERT INTO tool_invocations (id, message_id, tool_name, input_json, output_json, error, status, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)"
+                    "INSERT INTO tool_invocations (id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)"
                 ).run(
                     invocationId,
                     assistantMsgId,
                     part.toolName,
                     inputJson,
                     status,
-                    createdAt
+                    createdAt,
+                    messageSeq
                 );
 
                 controller.enqueue(
@@ -622,7 +750,8 @@ async function runStreamTextIntoController({
                         toolName: part.toolName,
                         input: part.input,
                         status,
-                        createdAt
+                        createdAt,
+                        messageSeq
                     })
                 );
                 continue;
@@ -695,11 +824,17 @@ async function runStreamTextIntoController({
                     assistantMsgId,
                     "aborted"
                 );
+                if (currentReasoningPart && !currentReasoningPart.endedAt) {
+                    currentReasoningPart.endedAt = new Date().toISOString();
+                    updateReasoningPart(currentReasoningPart);
+                    currentReasoningPart = null;
+                }
                 finalizeAbortedAssistantMessage(
                     db,
                     assistantMsgId,
                     conversationId,
-                    fullText
+                    fullText,
+                    reasoningParts
                 );
                 controller.enqueue(
                     sseEvent("abort", {
@@ -718,13 +853,20 @@ async function runStreamTextIntoController({
             "chars"
         );
 
+        if (currentReasoningPart && !currentReasoningPart.endedAt) {
+            currentReasoningPart.endedAt = new Date().toISOString();
+            updateReasoningPart(currentReasoningPart);
+            currentReasoningPart = null;
+        }
+
+        const legacy = collapseLegacyReasoning();
         db.query(
             "UPDATE messages SET content = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
         ).run(
             fullText,
-            reasoningText.length > 0 ? reasoningText : null,
-            reasoningStartedAt,
-            reasoningEndedAt,
+            legacy.text,
+            legacy.startedAt,
+            legacy.endedAt,
             assistantMsgId
         );
         db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
@@ -749,14 +891,17 @@ async function runStreamTextIntoController({
             });
             abortPermissions(conversationId, "aborted");
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
+            if (currentReasoningPart && !currentReasoningPart.endedAt) {
+                currentReasoningPart.endedAt = new Date().toISOString();
+                updateReasoningPart(currentReasoningPart);
+                currentReasoningPart = null;
+            }
             finalizeAbortedAssistantMessage(
                 db,
                 assistantMsgId,
                 conversationId,
                 fullText,
-                reasoningText,
-                reasoningStartedAt,
-                reasoningEndedAt ?? (reasoningStartedAt ? new Date().toISOString() : null)
+                reasoningParts
             );
             return;
         }

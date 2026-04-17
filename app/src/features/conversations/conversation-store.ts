@@ -3,6 +3,7 @@ import type {
     Conversation,
     ConversationWithMessages,
     Message,
+    ReasoningPart,
     ToolInvocation,
     ToolInvocationStatus
 } from "./conversation-types";
@@ -75,7 +76,27 @@ function isAssistantMessageEmpty(message: Message): boolean {
     if (message.content.length > 0) return false;
     if ((message.tool_invocations?.length ?? 0) > 0) return false;
     if ((message.reasoning?.length ?? 0) > 0) return false;
+    if (
+        (message.reasoning_parts?.some((part) => part.text.length > 0) ??
+            false)
+    ) {
+        return false;
+    }
     return true;
+}
+
+function closeOpenReasoningParts(
+    parts: ReasoningPart[] | undefined,
+    endedAt: string
+): ReasoningPart[] | undefined {
+    if (!parts || parts.length === 0) return parts;
+    let mutated = false;
+    const next = parts.map((part) => {
+        if (part.ended_at) return part;
+        mutated = true;
+        return { ...part, ended_at: endedAt };
+    });
+    return mutated ? next : parts;
 }
 
 function finalizeStreamingMessages(messages: Message[]): Message[] {
@@ -88,11 +109,16 @@ function finalizeStreamingMessages(messages: Message[]): Message[] {
             return [];
         }
 
+        const nowIso = new Date().toISOString();
         return [
             {
                 ...message,
                 isStreaming: false,
-                isReasoning: false
+                isReasoning: false,
+                reasoning_parts: closeOpenReasoningParts(
+                    message.reasoning_parts,
+                    nowIso
+                )
             }
         ];
     });
@@ -227,56 +253,113 @@ async function runStream(
 
             case "reasoning-start": {
                 const messageId = data.messageId as string;
+                const partId = data.partId as string;
                 const startedAt =
                     (data.startedAt as string | undefined) ??
                     new Date().toISOString();
+                const sortIndex =
+                    typeof data.sortIndex === "number"
+                        ? (data.sortIndex as number)
+                        : undefined;
+                const messageSeq =
+                    typeof data.messageSeq === "number"
+                        ? (data.messageSeq as number)
+                        : null;
                 updateConversation((prev) => ({
                     ...prev,
-                    messages: prev.messages.map((m) =>
-                        m.id === messageId
-                            ? {
-                                  ...m,
-                                  isReasoning: true,
-                                  reasoning_started_at:
-                                      m.reasoning_started_at ?? startedAt,
-                                  reasoning_ended_at: undefined
-                              }
-                            : m
-                    )
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.reasoning_parts ?? [];
+                        if (existing.some((part) => part.id === partId)) {
+                            return { ...m, isReasoning: true };
+                        }
+                        const newPart: ReasoningPart = {
+                            id: partId,
+                            message_id: messageId,
+                            text: "",
+                            started_at: startedAt,
+                            ended_at: null,
+                            sort_index: sortIndex ?? existing.length,
+                            message_seq: messageSeq
+                        };
+                        return {
+                            ...m,
+                            isReasoning: true,
+                            reasoning_parts: [...existing, newPart],
+                            reasoning_started_at:
+                                m.reasoning_started_at ?? startedAt,
+                            reasoning_ended_at: undefined
+                        };
+                    })
                 }));
                 break;
             }
 
             case "reasoning-delta": {
                 const messageId = data.messageId as string;
+                const partId = data.partId as string | undefined;
                 const text = data.text as string;
                 updateConversation((prev) => ({
                     ...prev,
-                    messages: prev.messages.map((m) =>
-                        m.id === messageId
-                            ? { ...m, reasoning: (m.reasoning ?? "") + text }
-                            : m
-                    )
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.reasoning_parts ?? [];
+                        let targetIndex = partId
+                            ? existing.findIndex((part) => part.id === partId)
+                            : -1;
+                        let parts = existing;
+                        if (targetIndex === -1) {
+                            const nowIso = new Date().toISOString();
+                            const fallback: ReasoningPart = {
+                                id: partId ?? `local-${crypto.randomUUID()}`,
+                                message_id: messageId,
+                                text: "",
+                                started_at: nowIso,
+                                ended_at: null,
+                                sort_index: existing.length
+                            };
+                            parts = [...existing, fallback];
+                            targetIndex = parts.length - 1;
+                        }
+                        const nextParts = parts.map((part, idx) =>
+                            idx === targetIndex
+                                ? { ...part, text: part.text + text }
+                                : part
+                        );
+                        return {
+                            ...m,
+                            reasoning_parts: nextParts,
+                            reasoning: (m.reasoning ?? "") + text,
+                            isReasoning: true
+                        };
+                    })
                 }));
                 break;
             }
 
             case "reasoning-end": {
                 const messageId = data.messageId as string;
+                const partId = data.partId as string | undefined;
                 const endedAt =
                     (data.endedAt as string | undefined) ??
                     new Date().toISOString();
                 updateConversation((prev) => ({
                     ...prev,
-                    messages: prev.messages.map((m) =>
-                        m.id === messageId
-                            ? {
-                                  ...m,
-                                  isReasoning: false,
-                                  reasoning_ended_at: endedAt
-                              }
-                            : m
-                    )
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.reasoning_parts ?? [];
+                        const nextParts = existing.map((part) => {
+                            if (partId && part.id !== partId) return part;
+                            if (!partId && part.ended_at) return part;
+                            return { ...part, ended_at: endedAt };
+                        });
+                        return {
+                            ...m,
+                            reasoning_parts: nextParts,
+                            isReasoning: false,
+                            reasoning_ended_at: endedAt
+                        };
+                    })
                 }));
                 break;
             }
@@ -292,7 +375,11 @@ async function runStream(
                     status: (data.status as ToolInvocationStatus) ?? "pending",
                     created_at:
                         (data.createdAt as string) ??
-                        new Date().toISOString()
+                        new Date().toISOString(),
+                    message_seq:
+                        typeof data.messageSeq === "number"
+                            ? (data.messageSeq as number)
+                            : null
                 };
                 updateConversation((prev) => ({
                     ...prev,
@@ -384,12 +471,18 @@ async function runStream(
                     ...prev,
                     messages: prev.messages.map((m) => {
                         if (m.role === "assistant" && m.isStreaming) {
+                            const nowIso = new Date().toISOString();
                             return {
                                 ...m,
                                 isStreaming: false,
+                                isReasoning: false,
+                                reasoning_parts: closeOpenReasoningParts(
+                                    m.reasoning_parts,
+                                    nowIso
+                                ),
                                 reasoning_ended_at:
                                     m.reasoning_started_at && !m.reasoning_ended_at
-                                        ? new Date().toISOString()
+                                        ? nowIso
                                         : m.reasoning_ended_at,
                                 ...(assistantMessageId &&
                                 m.id === assistantMessageId &&
@@ -479,15 +572,20 @@ async function runStream(
                             return [];
                         }
 
+                        const nowIso = new Date().toISOString();
                         return [
                             {
                                 ...message,
                                 isStreaming: false,
                                 isReasoning: false,
+                                reasoning_parts: closeOpenReasoningParts(
+                                    message.reasoning_parts,
+                                    nowIso
+                                ),
                                 reasoning_ended_at:
                                     message.reasoning_started_at &&
                                     !message.reasoning_ended_at
-                                        ? new Date().toISOString()
+                                        ? nowIso
                                         : message.reasoning_ended_at
                             }
                         ];

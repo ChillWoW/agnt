@@ -8,6 +8,7 @@ import type {
     ConversationWithMessages,
     Message,
     MessageRole,
+    ReasoningPart,
     ToolInvocation,
     ToolInvocationStatus
 } from "./conversations.types";
@@ -21,6 +22,17 @@ interface ToolInvocationRow {
     error: string | null;
     status: ToolInvocationStatus;
     created_at: string;
+    message_seq: number | null;
+}
+
+interface ReasoningPartRow {
+    id: string;
+    message_id: string;
+    text: string;
+    started_at: string;
+    ended_at: string | null;
+    sort_index: number;
+    message_seq: number | null;
 }
 
 function parseJsonOrNull(value: string | null): unknown {
@@ -41,7 +53,8 @@ function toolInvocationFromRow(row: ToolInvocationRow): ToolInvocation {
         output: parseJsonOrNull(row.output_json),
         error: row.error,
         status: row.status,
-        created_at: row.created_at
+        created_at: row.created_at,
+        message_seq: row.message_seq ?? null
     };
 }
 
@@ -115,7 +128,7 @@ export function getConversation(workspaceId: string, conversationId: string): Co
     const placeholders = messageIds.map(() => "?").join(",");
     const invocationRows = db
         .query(
-            `SELECT id, message_id, tool_name, input_json, output_json, error, status, created_at FROM tool_invocations WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+            `SELECT id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq FROM tool_invocations WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
         )
         .all(...messageIds) as ToolInvocationRow[];
 
@@ -124,6 +137,27 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         const list = invocationsByMessage.get(row.message_id) ?? [];
         list.push(toolInvocationFromRow(row));
         invocationsByMessage.set(row.message_id, list);
+    }
+
+    const reasoningRows = db
+        .query(
+            `SELECT id, message_id, text, started_at, ended_at, sort_index, message_seq FROM message_reasoning_parts WHERE message_id IN (${placeholders}) ORDER BY sort_index ASC`
+        )
+        .all(...messageIds) as ReasoningPartRow[];
+
+    const reasoningByMessage = new Map<string, ReasoningPart[]>();
+    for (const row of reasoningRows) {
+        const list = reasoningByMessage.get(row.message_id) ?? [];
+        list.push({
+            id: row.id,
+            message_id: row.message_id,
+            text: row.text,
+            started_at: row.started_at,
+            ended_at: row.ended_at,
+            sort_index: row.sort_index,
+            message_seq: row.message_seq ?? null
+        });
+        reasoningByMessage.set(row.message_id, list);
     }
 
     const attachmentDtos = listAttachmentsForMessages(workspaceId, messageIds);
@@ -138,11 +172,15 @@ export function getConversation(workspaceId: string, conversationId: string): Co
     const messagesWithTools: Message[] = messages.map((m) => {
         const tools = invocationsByMessage.get(m.id);
         const attachments = attachmentsByMessage.get(m.id);
+        const reasoningParts = reasoningByMessage.get(m.id);
         const enriched: Message = {
             ...m,
             ...(tools && tools.length > 0 ? { tool_invocations: tools } : {}),
             ...(attachments && attachments.length > 0
                 ? { attachments }
+                : {}),
+            ...(reasoningParts && reasoningParts.length > 0
+                ? { reasoning_parts: reasoningParts }
                 : {})
         };
         return enriched;
