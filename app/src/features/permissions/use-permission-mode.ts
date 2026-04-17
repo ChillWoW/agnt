@@ -22,15 +22,22 @@ function toMode(values: Record<string, unknown>): PermissionMode {
         : "ask";
 }
 
+// Module-level cache survives component unmounts caused by route changes
+let cachedMode: PermissionMode | null = null;
+
 export function usePermissionMode({
     workspaceId,
     conversationId
 }: PermissionModeScope) {
-    const [mode, setMode] = useState<PermissionMode>("ask");
+    const [mode, setMode] = useState<PermissionMode>(() => cachedMode ?? "ask");
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
         if (!workspaceId) return;
+
+        // When navigating to root (new agent), preserve the last known mode
+        // instead of resetting to the workspace default.
+        if (!conversationId && cachedMode !== null) return;
 
         const nextWorkspaceId = workspaceId;
         let cancelled = false;
@@ -48,7 +55,9 @@ export function usePermissionMode({
                     : (await fetchWorkspaceState(nextWorkspaceId)).values;
 
                 if (!cancelled) {
-                    setMode(toMode(values));
+                    const nextMode = toMode(values);
+                    cachedMode = nextMode;
+                    setMode(nextMode);
                 }
             } finally {
                 if (!cancelled) {
@@ -66,6 +75,7 @@ export function usePermissionMode({
 
     const setPermissionMode = useCallback(
         async (next: PermissionMode) => {
+            cachedMode = next;
             setMode(next);
 
             if (!workspaceId) return;
