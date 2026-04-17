@@ -1,4 +1,4 @@
-import { ShieldWarningIcon, WrenchIcon } from "@phosphor-icons/react";
+import { ShieldWarningIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui";
 import {
     usePermissionStore,
@@ -55,8 +55,8 @@ export function PermissionCard({
     queueLength = 1
 }: PermissionCardProps) {
     const respond = usePermissionStore((s) => s.respond);
-    const responding = usePermissionStore(
-        (s) => Boolean(s.respondingIds[request.id])
+    const responding = usePermissionStore((s) =>
+        Boolean(s.respondingIds[request.id])
     );
 
     const summary = summarizeInput(request.input);
@@ -67,70 +67,61 @@ export function PermissionCard({
     };
 
     return (
-        <div className="border-b border-dark-700 bg-dark-850 px-3 py-2.5">
-            <div className="flex items-start gap-2.5">
-                <div className="mt-0.5 shrink-0 rounded-md bg-amber-500/10 p-1.5 text-amber-300">
-                    <ShieldWarningIcon className="size-3.5" weight="fill" />
-                </div>
+        <div className="border-b border-dark-700 px-3 py-2.5">
+            <div className="flex items-center gap-1.5">
+                <ShieldWarningIcon
+                    className="size-3.5 shrink-0 text-dark-200"
+                    weight="fill"
+                />
+                <span className="text-xs font-medium text-dark-100">
+                    {formatToolLabel(request.toolName)}
+                </span>
+                <span className="text-xs text-dark-200">
+                    wants permission to run
+                </span>
+                {summary && (
+                    <span
+                        className="min-w-0 truncate text-xs text-dark-200"
+                        title={summary}
+                    >
+                        · {summary}
+                    </span>
+                )}
+                {queued > 0 && (
+                    <span className="ml-auto shrink-0 rounded-md bg-dark-700 px-1.5 py-0.5 text-xs font-medium text-dark-200">
+                        +{queued} more
+                    </span>
+                )}
+            </div>
 
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-xs text-dark-50">
-                        <WrenchIcon className="size-3 text-dark-300" />
-                        <span className="font-medium">
-                            {formatToolLabel(request.toolName)}
-                        </span>
-                        <span className="text-dark-300">
-                            wants permission to run
-                        </span>
-                        {queued > 0 && (
-                            <span
-                                className="ml-auto rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
-                                title={`${queued} more pending permission request${queued === 1 ? "" : "s"}`}
-                            >
-                                +{queued} more
-                            </span>
-                        )}
-                    </div>
-
-                    {summary && (
-                        <p
-                            className="mt-0.5 truncate text-[11px] text-dark-300"
-                            title={summary}
-                        >
-                            {summary}
-                        </p>
-                    )}
-
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={responding}
-                            onClick={() => handle("deny")}
-                            className="h-7 px-2.5 text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200"
-                        >
-                            Deny
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={responding}
-                            onClick={() => handle("allow_session")}
-                            className="h-7 px-2.5 text-xs text-dark-100 hover:bg-dark-800 hover:text-dark-50"
-                        >
-                            Allow for session
-                        </Button>
-                        <Button
-                            variant="primary"
-                            size="sm"
-                            disabled={responding}
-                            onClick={() => handle("allow_once")}
-                            className="h-7 px-2.5 text-xs"
-                        >
-                            Allow once
-                        </Button>
-                    </div>
-                </div>
+            <div className="mt-2 flex items-center gap-1.5">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={responding}
+                    onClick={() => handle("deny")}
+                    className="h-7 text-dark-200 hover:bg-dark-800 hover:text-red-400"
+                >
+                    Deny
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={responding}
+                    onClick={() => handle("allow_session")}
+                    className="h-7 text-dark-200 hover:bg-dark-800 hover:text-dark-50"
+                >
+                    Allow for session
+                </Button>
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={responding}
+                    onClick={() => handle("allow_once")}
+                    className="h-7"
+                >
+                    Allow once
+                </Button>
             </div>
         </div>
     );
