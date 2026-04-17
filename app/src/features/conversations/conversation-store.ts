@@ -10,6 +10,11 @@ import * as conversationApi from "./conversation-api";
 import { usePermissionStore } from "@/features/permissions";
 import type { PermissionRequest } from "@/features/permissions";
 import type { Attachment } from "@/features/attachments";
+import type {
+    CompactedSseEvent,
+    ContextSummary,
+    UsageSseEvent
+} from "@/features/context/context-types";
 
 interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
@@ -19,10 +24,17 @@ interface ConversationStoreState {
     loadingConversationIds: Record<string, true>;
     streamControllersById: Record<string, AbortController>;
     unreadConversationIds: Record<string, true>;
+    contextByConversationId: Record<string, ContextSummary>;
+    contextRefreshTokens: Record<string, number>;
 
     setActiveConversation: (conversationId: string | null) => void;
     markConversationRead: (conversationId: string) => void;
     stopGeneration: (conversationId?: string) => void;
+    setContextSummary: (
+        conversationId: string,
+        summary: ContextSummary
+    ) => void;
+    bumpContextRefresh: (conversationId: string) => void;
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -139,7 +151,9 @@ async function runStream(
     response: Response,
     updateConversation: (
         updater: (prev: ConversationWithMessages) => ConversationWithMessages
-    ) => void
+    ) => void,
+    onCompacted: (event: CompactedSseEvent) => void,
+    onUsage: () => void
 ): Promise<StreamOutcome> {
     let outcome: StreamOutcome = "aborted";
 
@@ -342,15 +356,77 @@ async function runStream(
             case "finish": {
                 outcome = "finished";
                 usePermissionStore.getState().clearPending(conversationId);
+                const usage = (data.usage ?? null) as UsageSseEvent | null;
+                const assistantMessageId = data.assistantMessageId as
+                    | string
+                    | undefined;
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) => {
                         if (m.role === "assistant" && m.isStreaming) {
-                            return { ...m, isStreaming: false };
+                            return {
+                                ...m,
+                                isStreaming: false,
+                                ...(assistantMessageId &&
+                                m.id === assistantMessageId &&
+                                usage
+                                    ? {
+                                          input_tokens: usage.inputTokens,
+                                          output_tokens: usage.outputTokens,
+                                          reasoning_tokens: usage.reasoningTokens,
+                                          total_tokens: usage.totalTokens
+                                      }
+                                    : {})
+                            };
                         }
                         return m;
                     })
                 }));
+                onUsage();
+                break;
+            }
+
+            case "compacted": {
+                const evt = data as unknown as CompactedSseEvent;
+                const summarizedSet = new Set(evt.summarizedMessageIds);
+                updateConversation((prev) => {
+                    const hasSummary = prev.messages.some(
+                        (m) => m.id === evt.summaryMessageId
+                    );
+                    const summaryRow = hasSummary
+                        ? null
+                        : ({
+                              id: evt.summaryMessageId,
+                              conversation_id: conversationId,
+                              role: "system" as const,
+                              content: evt.summaryContent,
+                              created_at: evt.summaryCreatedAt,
+                              compacted: false,
+                              summary_of_until: evt.summaryOfUntil
+                          } satisfies (typeof prev.messages)[number]);
+
+                    const messages = prev.messages.map((m) =>
+                        summarizedSet.has(m.id)
+                            ? { ...m, compacted: true }
+                            : m
+                    );
+
+                    if (summaryRow) {
+                        const idx = messages.findIndex(
+                            (m) =>
+                                new Date(m.created_at).getTime() >
+                                new Date(summaryRow.created_at).getTime()
+                        );
+                        if (idx === -1) {
+                            messages.push(summaryRow);
+                        } else {
+                            messages.splice(idx, 0, summaryRow);
+                        }
+                    }
+
+                    return { ...prev, messages };
+                });
+                onCompacted(evt);
                 break;
             }
 
@@ -447,8 +523,16 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
 
         try {
             const response = await startRequest(controller.signal);
-            outcome = await runStream(conversationId, response, (updater) =>
-                applyConversationUpdate(conversationId, updater)
+            outcome = await runStream(
+                conversationId,
+                response,
+                (updater) => applyConversationUpdate(conversationId, updater),
+                () => {
+                    get().bumpContextRefresh(conversationId);
+                },
+                () => {
+                    get().bumpContextRefresh(conversationId);
+                }
             );
         } catch (error) {
             if (!isAbortError(error) && !controller.signal.aborted) {
@@ -492,6 +576,30 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         loadingConversationIds: {},
         streamControllersById: {},
         unreadConversationIds: {},
+        contextByConversationId: {},
+        contextRefreshTokens: {},
+
+        setContextSummary: (
+            conversationId: string,
+            summary: ContextSummary
+        ) => {
+            set((state) => ({
+                contextByConversationId: {
+                    ...state.contextByConversationId,
+                    [conversationId]: summary
+                }
+            }));
+        },
+
+        bumpContextRefresh: (conversationId: string) => {
+            set((state) => ({
+                contextRefreshTokens: {
+                    ...state.contextRefreshTokens,
+                    [conversationId]:
+                        (state.contextRefreshTokens[conversationId] ?? 0) + 1
+                }
+            }));
+        },
 
         setActiveConversation: (conversationId: string | null) => {
             set((state) => {
@@ -720,6 +828,14 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     ),
                     loadingConversationIds: omitKey(
                         state.loadingConversationIds,
+                        conversationId
+                    ),
+                    contextByConversationId: omitKey(
+                        state.contextByConversationId,
+                        conversationId
+                    ),
+                    contextRefreshTokens: omitKey(
+                        state.contextRefreshTokens,
                         conversationId
                     ),
                     activeConversationId:

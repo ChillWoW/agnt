@@ -24,6 +24,7 @@ import { usePermissionStore } from "@/features/permissions";
 import { usePendingAttachments } from "@/features/attachments";
 import { cn } from "@/lib/cn";
 import { AttachmentBar } from "./AttachmentBar";
+import { ContextMeter } from "./ContextMeter";
 import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
@@ -237,34 +238,43 @@ export function ChatInput({
                             />
                         </div>
 
-                        {isStreaming ? (
-                            <Tooltip content="Stop generating">
-                                <Button
-                                    variant="ghost"
-                                    onClick={onStop}
-                                    className="size-7 shrink-0 rounded-md p-0 text-xs text-red-500 bg-red-500/15 hover:bg-red-500/20 hover:text-red-600"
-                                >
-                                    <StopIcon
-                                        className="size-3.5"
-                                        weight="fill"
-                                    />
-                                </Button>
-                            </Tooltip>
-                        ) : (
-                            <Tooltip content="Send">
-                                <Button
-                                    variant="primary"
-                                    disabled={!canSend}
-                                    onClick={() => handleSend()}
-                                    className="size-7 shrink-0 rounded-md p-0 text-xs"
-                                >
-                                    <ArrowUpIcon
-                                        className="size-3.5"
-                                        weight="bold"
-                                    />
-                                </Button>
-                            </Tooltip>
-                        )}
+                        <div className="flex items-center gap-1">
+                            <ContextMeter
+                                workspaceId={workspaceId}
+                                conversationId={conversationId}
+                                draft={value}
+                                pendingAttachments={pending}
+                            />
+
+                            {isStreaming ? (
+                                <Tooltip content="Stop generating">
+                                    <Button
+                                        variant="ghost"
+                                        onClick={onStop}
+                                        className="size-7 shrink-0 rounded-md p-0 text-xs text-red-500 bg-red-500/15 hover:bg-red-500/20 hover:text-red-600"
+                                    >
+                                        <StopIcon
+                                            className="size-3.5"
+                                            weight="fill"
+                                        />
+                                    </Button>
+                                </Tooltip>
+                            ) : (
+                                <Tooltip content="Send">
+                                    <Button
+                                        variant="primary"
+                                        disabled={!canSend}
+                                        onClick={() => handleSend()}
+                                        className="size-7 shrink-0 rounded-md p-0 text-xs"
+                                    >
+                                        <ArrowUpIcon
+                                            className="size-3.5"
+                                            weight="bold"
+                                        />
+                                    </Button>
+                                </Tooltip>
+                            )}
+                        </div>
                     </div>
                 </form>
 

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
-import { ArrowDownIcon } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { ArrowDownIcon, ArchiveIcon } from "@phosphor-icons/react";
 import type { Message } from "@/features/conversations/conversation-types";
 import { MessageBubble } from "./MessageBubble";
 
@@ -81,13 +81,71 @@ export function MessageList({ messages }: MessageListProps) {
         }
     }, [messages, snapToBottom]);
 
+    const renderedItems = useMemo(() => {
+        const items: Array<
+            | { kind: "message"; message: Message }
+            | { kind: "banner"; id: string; count: number }
+        > = [];
+
+        let pendingCompactedCount = 0;
+
+        for (const message of messages) {
+            if (message.compacted) {
+                pendingCompactedCount += 1;
+                continue;
+            }
+
+            if (
+                message.role === "system" &&
+                message.summary_of_until &&
+                pendingCompactedCount > 0
+            ) {
+                items.push({
+                    kind: "banner",
+                    id: `banner-${message.id}`,
+                    count: pendingCompactedCount
+                });
+                pendingCompactedCount = 0;
+            }
+
+            items.push({ kind: "message", message });
+        }
+
+        return items;
+    }, [messages]);
+
     return (
         <div className="relative h-full overflow-hidden">
             <div ref={scrollRef} className="h-full overflow-y-auto">
                 <div className="mx-auto max-w-3xl px-4 py-6">
-                    {messages.map((message) => (
-                        <MessageBubble key={message.id} message={message} />
-                    ))}
+                    {renderedItems.map((item) => {
+                        if (item.kind === "banner") {
+                            return (
+                                <CompactionBanner
+                                    key={item.id}
+                                    count={item.count}
+                                />
+                            );
+                        }
+                        const message = item.message;
+                        if (
+                            message.role === "system" &&
+                            message.summary_of_until
+                        ) {
+                            return (
+                                <CompactionSummary
+                                    key={message.id}
+                                    message={message}
+                                />
+                            );
+                        }
+                        return (
+                            <MessageBubble
+                                key={message.id}
+                                message={message}
+                            />
+                        );
+                    })}
                 </div>
             </div>
 
@@ -113,5 +171,36 @@ export function MessageList({ messages }: MessageListProps) {
                 </button>
             </div>
         </div>
+    );
+}
+
+function CompactionBanner({ count }: { count: number }) {
+    return (
+        <div className="my-4 flex items-center gap-2 text-[11px] uppercase tracking-wide text-dark-300">
+            <div className="h-px flex-1 bg-dark-700" />
+            <ArchiveIcon className="size-3.5" weight="bold" />
+            <span>
+                Compacted {count} older {count === 1 ? "message" : "messages"}{" "}
+                into a summary
+            </span>
+            <div className="h-px flex-1 bg-dark-700" />
+        </div>
+    );
+}
+
+function CompactionSummary({ message }: { message: Message }) {
+    return (
+        <details className="mb-4 rounded-md border border-dark-700 bg-dark-900 text-xs text-dark-100">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-dark-200 transition-colors hover:text-dark-50">
+                <ArchiveIcon className="size-3.5" weight="bold" />
+                <span>Conversation summary</span>
+                <span className="ml-auto text-[11px] text-dark-300">
+                    click to expand
+                </span>
+            </summary>
+            <div className="whitespace-pre-wrap border-t border-dark-800 px-3 py-2 text-dark-100">
+                {message.content}
+            </div>
+        </details>
     );
 }

@@ -9,6 +9,7 @@ export interface Attachment {
     size_bytes: number;
     kind: AttachmentKind;
     created_at: string;
+    estimated_tokens: number | null;
 }
 
 export interface PendingAttachment {
@@ -21,4 +22,5 @@ export interface PendingAttachment {
     previewUrl: string | null;
     status: "uploading" | "ready" | "error";
     error?: string;
+    estimated_tokens: number | null;
 }

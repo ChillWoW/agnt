@@ -26,6 +26,12 @@ export interface Message {
     attachments?: Attachment[];
     reasoning?: string;
     isReasoning?: boolean;
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    reasoning_tokens?: number | null;
+    total_tokens?: number | null;
+    compacted?: boolean;
+    summary_of_until?: string | null;
 }
 
 export interface Conversation {

@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { getWorkspaceDb } from "../../lib/db";
 import { getHomePath } from "../../lib/homedir";
+import { isKnownTextMime, looksLikeUtf8Text } from "../../lib/mime-detect";
+import { countTokens } from "../../lib/tokenizer";
 
 export type AttachmentKind = "image" | "file";
 
@@ -15,6 +17,7 @@ export interface AttachmentRow {
     storage_path: string;
     kind: AttachmentKind;
     created_at: string;
+    estimated_tokens: number | null;
 }
 
 export interface AttachmentDto {
@@ -26,6 +29,48 @@ export interface AttachmentDto {
     size_bytes: number;
     kind: AttachmentKind;
     created_at: string;
+    estimated_tokens: number | null;
+}
+
+const IMAGE_TOKEN_ESTIMATE = 1105;
+const MAX_INLINE_TEXT_BYTES = 200_000;
+
+function estimateTokensFromBytes(
+    fileName: string,
+    mime: string,
+    bytes: Uint8Array
+): number {
+    const normalized = mime.toLowerCase();
+
+    if (normalized.startsWith("image/")) {
+        return IMAGE_TOKEN_ESTIMATE;
+    }
+
+    if (normalized === "application/pdf") {
+        return Math.ceil(bytes.byteLength / 4);
+    }
+
+    if (!isKnownTextMime(normalized) && !looksLikeUtf8Text(bytes)) {
+        return 0;
+    }
+
+    const slice =
+        bytes.byteLength > MAX_INLINE_TEXT_BYTES
+            ? bytes.subarray(0, MAX_INLINE_TEXT_BYTES)
+            : bytes;
+
+    let text: string;
+    try {
+        text = new TextDecoder("utf-8").decode(slice);
+    } catch {
+        return 0;
+    }
+
+    const filenameOverhead = countTokens(
+        `Attached file: ${fileName}\n\n\`\`\`\n`
+    );
+    const fenceOverhead = 4;
+    return countTokens(text) + filenameOverhead + fenceOverhead;
 }
 
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -47,7 +92,8 @@ function toDto(row: AttachmentRow): AttachmentDto {
         mime_type: row.mime_type,
         size_bytes: row.size_bytes,
         kind: row.kind,
-        created_at: row.created_at
+        created_at: row.created_at,
+        estimated_tokens: row.estimated_tokens
     };
 }
 
@@ -91,12 +137,22 @@ export async function createAttachment(
             ? file.type
             : "application/octet-stream";
     const kind = kindFromMime(mime);
+    const estimatedTokens = estimateTokensFromBytes(rawName, mime, bytes);
 
     const db = getWorkspaceDb(workspaceId);
     db.query(
-        `INSERT INTO attachments (id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at)
-         VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?)`
-    ).run(id, rawName, mime, bytes.byteLength, relative, kind, now);
+        `INSERT INTO attachments (id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at, estimated_tokens)
+         VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+        id,
+        rawName,
+        mime,
+        bytes.byteLength,
+        relative,
+        kind,
+        now,
+        estimatedTokens
+    );
 
     return {
         id,
@@ -106,7 +162,8 @@ export async function createAttachment(
         mime_type: mime,
         size_bytes: bytes.byteLength,
         kind,
-        created_at: now
+        created_at: now,
+        estimated_tokens: estimatedTokens
     };
 }
 
@@ -117,7 +174,7 @@ export function getAttachment(
     const db = getWorkspaceDb(workspaceId);
     return (db
         .query(
-            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at
+            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at, estimated_tokens
              FROM attachments WHERE id = ?`
         )
         .get(attachmentId) as AttachmentRow | null) ?? null;
@@ -149,7 +206,7 @@ export function listAttachmentsForMessages(
     const placeholders = messageIds.map(() => "?").join(",");
     const rows = db
         .query(
-            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at
+            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at, estimated_tokens
              FROM attachments WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
         )
         .all(...messageIds) as AttachmentRow[];
@@ -163,7 +220,7 @@ export function listAttachmentsForMessage(
     const db = getWorkspaceDb(workspaceId);
     return db
         .query(
-            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at
+            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at, estimated_tokens
              FROM attachments WHERE message_id = ? ORDER BY created_at ASC`
         )
         .all(messageId) as AttachmentRow[];
@@ -206,7 +263,7 @@ export function linkAttachmentsToMessage(
     const placeholders = attachmentIds.map(() => "?").join(",");
     const rows = db
         .query(
-            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at
+            `SELECT id, conversation_id, message_id, file_name, mime_type, size_bytes, storage_path, kind, created_at, estimated_tokens
              FROM attachments WHERE id IN (${placeholders}) ORDER BY created_at ASC`
         )
         .all(...attachmentIds) as AttachmentRow[];

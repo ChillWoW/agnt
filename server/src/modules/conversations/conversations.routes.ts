@@ -8,6 +8,8 @@ import {
     updateConversation
 } from "./conversations.service";
 import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
+import { computeContextSummary } from "./context.service";
+import { compactConversation } from "./compact.service";
 import type { MessageRole } from "./conversations.types";
 import {
     clearConversationPermissionState,
@@ -172,6 +174,50 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
+    .get(
+        "/:id/conversations/:conversationId/context",
+        ({ params, set }) => {
+            try {
+                return computeContextSummary(params.id, params.conversationId);
+            } catch (error) {
+                set.status =
+                    error instanceof Error &&
+                    error.message.includes("not found")
+                        ? 404
+                        : 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to compute context"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/compact",
+        async ({ params, set }) => {
+            try {
+                const result = await compactConversation(
+                    params.id,
+                    params.conversationId
+                );
+                return result;
+            } catch (error) {
+                set.status =
+                    error instanceof Error &&
+                    error.message.includes("not found")
+                        ? 404
+                        : 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to compact conversation"
+                };
+            }
+        }
+    )
     .post(
         "/:id/conversations/:conversationId/permissions/:requestId/respond",
         ({ params, body, set }) => {

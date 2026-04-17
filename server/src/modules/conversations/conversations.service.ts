@@ -63,9 +63,39 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
-    const messages = db
-        .query("SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
-        .all(conversationId) as Message[];
+    interface MessageRow {
+        id: string;
+        conversation_id: string;
+        role: MessageRole;
+        content: string;
+        created_at: string;
+        input_tokens: number | null;
+        output_tokens: number | null;
+        reasoning_tokens: number | null;
+        total_tokens: number | null;
+        compacted: number;
+        summary_of_until: string | null;
+    }
+
+    const rows = db
+        .query(
+            "SELECT id, conversation_id, role, content, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+        )
+        .all(conversationId) as MessageRow[];
+
+    const messages: Message[] = rows.map((row) => ({
+        id: row.id,
+        conversation_id: row.conversation_id,
+        role: row.role,
+        content: row.content,
+        created_at: row.created_at,
+        input_tokens: row.input_tokens,
+        output_tokens: row.output_tokens,
+        reasoning_tokens: row.reasoning_tokens,
+        total_tokens: row.total_tokens,
+        compacted: row.compacted === 1,
+        summary_of_until: row.summary_of_until
+    }));
 
     if (messages.length === 0) {
         return { ...conversation, messages };

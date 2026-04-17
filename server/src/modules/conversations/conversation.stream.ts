@@ -20,10 +20,15 @@ import {
     subscribeToPermissions,
     type PermissionMode
 } from "./permissions";
+import { compactConversation } from "./compact.service";
+import {
+    COMPACT_THRESHOLD,
+    computeContextSummary
+} from "./context.service";
+import { countTokens } from "../../lib/tokenizer";
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
-
-const SYSTEM_INSTRUCTIONS = `You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.`;
+import { DEFAULT_MODEL, SYSTEM_INSTRUCTIONS } from "./conversation.constants";
+export { DEFAULT_MODEL, SYSTEM_INSTRUCTIONS };
 
 type UserTextPart = { type: "text"; text: string };
 type UserImagePart = { type: "image"; image: Uint8Array; mediaType: string };
@@ -36,6 +41,7 @@ type UserFilePart = {
 type UserContentPart = UserTextPart | UserImagePart | UserFilePart;
 
 type ModelMessage =
+    | { role: "system"; content: string }
     | { role: "user"; content: string | UserContentPart[] }
     | { role: "assistant"; content: string };
 
@@ -230,6 +236,14 @@ function buildModelMessages(
             continue;
         }
 
+        if (msg.role === "system") {
+            // System rows in history are compaction summaries inserted by
+            // compact.service.ts. Forward them so the model keeps context
+            // across a compaction.
+            result.push({ role: "system", content: msg.content });
+            continue;
+        }
+
         if (msg.role !== "user") continue;
 
         const hasAttachments = (attachmentsByMessage.get(msg.id)?.length ?? 0) > 0;
@@ -382,6 +396,12 @@ async function runStreamTextIntoController({
         resolveConversationModelSettings(workspaceId, conversationId);
 
     let fullText = "";
+    let lastUsage: {
+        inputTokens: number | null;
+        outputTokens: number | null;
+        reasoningTokens: number | null;
+        totalTokens: number | null;
+    } | null = null;
 
     const unsubscribePermissions = subscribeToPermissions(
         conversationId,
@@ -466,6 +486,37 @@ async function runStreamTextIntoController({
             abortSignal,
             providerOptions: {
                 openai: openaiOptions
+            },
+            onFinish: ({ usage }) => {
+                const input =
+                    typeof usage.inputTokens === "number"
+                        ? usage.inputTokens
+                        : null;
+                const output =
+                    typeof usage.outputTokens === "number"
+                        ? usage.outputTokens
+                        : null;
+                const reasoning =
+                    typeof usage.reasoningTokens === "number"
+                        ? usage.reasoningTokens
+                        : null;
+                const total =
+                    typeof usage.totalTokens === "number"
+                        ? usage.totalTokens
+                        : input !== null && output !== null
+                          ? input + output + (reasoning ?? 0)
+                          : null;
+
+                lastUsage = {
+                    inputTokens: input,
+                    outputTokens: output,
+                    reasoningTokens: reasoning,
+                    totalTokens: total
+                };
+
+                db.query(
+                    "UPDATE messages SET input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, total_tokens = ? WHERE id = ?"
+                ).run(input, output, reasoning, total, assistantMsgId);
             },
             onAbort: () => {
                 logger.log("[stream] Generation aborted", {
@@ -641,7 +692,8 @@ async function runStreamTextIntoController({
             sseEvent("finish", {
                 reason: "stop",
                 content: fullText,
-                assistantMessageId: assistantMsgId
+                assistantMessageId: assistantMsgId,
+                usage: lastUsage
             })
         );
     } catch (error) {
@@ -702,7 +754,7 @@ export async function streamReplyToLastMessage(
 
     const history = db
         .query(
-            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
         )
         .all(conversationId) as Message[];
 
@@ -714,7 +766,7 @@ export async function streamReplyToLastMessage(
     const assistantCreatedAt = new Date().toISOString();
 
     db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
     ).run(assistantMsgId, conversationId, "assistant", "", assistantCreatedAt);
 
     logger.log(
@@ -768,9 +820,70 @@ export async function streamConversationReply(
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
+    let compactionEvent: {
+        summaryMessageId: string;
+        summarizedMessageIds: string[];
+        summarizedCount: number;
+        usedTokensAfter: number;
+        summaryContent: string;
+        summaryCreatedAt: string;
+        summaryOfUntil: string;
+    } | null = null;
+
+    try {
+        const currentContext = computeContextSummary(
+            workspaceId,
+            conversationId
+        );
+        const attachmentTokens =
+            attachmentIds.length > 0
+                ? db
+                      .query(
+                          `SELECT COALESCE(SUM(estimated_tokens), 0) AS total FROM attachments WHERE id IN (${attachmentIds
+                              .map(() => "?")
+                              .join(",")})`
+                      )
+                      .get(...attachmentIds) as { total: number }
+                : { total: 0 };
+        const projected =
+            currentContext.usedTokens +
+            countTokens(userContent) +
+            attachmentTokens.total;
+        if (
+            currentContext.contextWindow > 0 &&
+            projected / currentContext.contextWindow > COMPACT_THRESHOLD
+        ) {
+            logger.log("[stream] Auto-compact threshold hit", {
+                projected,
+                window: currentContext.contextWindow,
+                threshold: COMPACT_THRESHOLD
+            });
+            const outcome = await compactConversation(
+                workspaceId,
+                conversationId
+            );
+            if (outcome.summaryMessageId) {
+                compactionEvent = {
+                    summaryMessageId: outcome.summaryMessageId,
+                    summarizedMessageIds: outcome.summarizedMessageIds,
+                    summarizedCount: outcome.summarizedCount,
+                    usedTokensAfter: outcome.usedTokensAfter,
+                    summaryContent: outcome.summaryContent,
+                    summaryCreatedAt: outcome.summaryCreatedAt,
+                    summaryOfUntil: outcome.summaryOfUntil
+                };
+            }
+        }
+    } catch (error) {
+        logger.error(
+            "[stream] Auto-compact check failed (continuing without compaction)",
+            error
+        );
+    }
+
     const history = db
         .query(
-            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
         )
         .all(conversationId) as Message[];
 
@@ -784,7 +897,7 @@ export async function streamConversationReply(
     const now = new Date().toISOString();
 
     db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
     ).run(userMsgId, conversationId, "user", userContent, now);
 
     db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
@@ -824,12 +937,21 @@ export async function streamConversationReply(
     const assistantCreatedAt = new Date().toISOString();
 
     db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
     ).run(assistantMsgId, conversationId, "assistant", "", assistantCreatedAt);
 
     logger.log("[stream] Created assistant placeholder:", assistantMsgId);
 
     return buildStreamResponse(async (controller) => {
+        if (compactionEvent) {
+            controller.enqueue(
+                sseEvent("compacted", {
+                    conversation_id: conversationId,
+                    ...compactionEvent
+                })
+            );
+        }
+
         controller.enqueue(
             sseEvent("user-message", {
                 id: userMsgId,

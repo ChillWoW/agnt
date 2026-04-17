@@ -84,7 +84,8 @@ export function usePendingAttachments(
                     status: tooLarge ? "error" : "uploading",
                     error: tooLarge
                         ? `File too large (max ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB)`
-                        : undefined
+                        : undefined,
+                    estimated_tokens: null
                 };
 
                 newEntries.push({ entry, file });
@@ -110,7 +111,9 @@ export function usePendingAttachments(
                                           status: "ready",
                                           mime_type: uploaded.mime_type,
                                           size_bytes: uploaded.size_bytes,
-                                          kind: uploaded.kind
+                                          kind: uploaded.kind,
+                                          estimated_tokens:
+                                              uploaded.estimated_tokens
                                       }
                                     : item
                             )

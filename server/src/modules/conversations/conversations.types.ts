@@ -29,7 +29,8 @@ export const attachmentSchema = z.object({
     mime_type: z.string(),
     size_bytes: z.number().int().nonnegative(),
     kind: attachmentKindSchema,
-    created_at: z.string()
+    created_at: z.string(),
+    estimated_tokens: z.number().int().nonnegative().nullable()
 });
 
 export const messageSchema = z.object({
@@ -39,7 +40,13 @@ export const messageSchema = z.object({
     content: z.string(),
     created_at: z.string(),
     tool_invocations: z.array(toolInvocationSchema).optional(),
-    attachments: z.array(attachmentSchema).optional()
+    attachments: z.array(attachmentSchema).optional(),
+    input_tokens: z.number().int().nonnegative().nullable().optional(),
+    output_tokens: z.number().int().nonnegative().nullable().optional(),
+    reasoning_tokens: z.number().int().nonnegative().nullable().optional(),
+    total_tokens: z.number().int().nonnegative().nullable().optional(),
+    compacted: z.boolean().optional(),
+    summary_of_until: z.string().nullable().optional()
 });
 
 export const conversationSchema = z.object({
