@@ -14,6 +14,12 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
                 ...DEFAULT_SETTINGS.hotkeys.bindings,
                 ...raw.hotkeys?.bindings
             }
+        },
+        toolPermissions: {
+            defaults: {
+                ...DEFAULT_SETTINGS.toolPermissions.defaults,
+                ...raw.toolPermissions?.defaults
+            }
         }
     };
 }

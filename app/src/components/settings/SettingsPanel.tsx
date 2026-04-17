@@ -1,8 +1,14 @@
 import { type ElementType, useEffect } from "react";
-import { GearIcon, KeyboardIcon, RobotIcon } from "@phosphor-icons/react";
+import {
+    GearIcon,
+    KeyboardIcon,
+    RobotIcon,
+    ShieldCheckIcon
+} from "@phosphor-icons/react";
 import { GeneralSettings } from "./GeneralSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { CodexSettings } from "./CodexSettings";
+import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
 import { useSettingsStore } from "./settings-store";
 
 export type SettingsCategory = {
@@ -30,6 +36,12 @@ export const settingsCategories: SettingsCategory[] = [
         label: "Codex",
         icon: RobotIcon,
         group: "AI"
+    },
+    {
+        key: "toolPermissions",
+        label: "Tool permissions",
+        icon: ShieldCheckIcon,
+        group: "AI"
     }
 ];
 
@@ -53,6 +65,9 @@ export function SettingsPanel() {
                 {activeCategory === "general" && <GeneralSettings />}
                 {activeCategory === "hotkeys" && <HotkeySettings />}
                 {activeCategory === "codex" && <CodexSettings />}
+                {activeCategory === "toolPermissions" && (
+                    <ToolPermissionsSettings />
+                )}
             </div>
         </div>
     );

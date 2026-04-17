@@ -9,6 +9,19 @@ import {
 } from "./conversations.service";
 import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
 import type { MessageRole } from "./conversations.types";
+import {
+    clearConversationPermissionState,
+    resolvePermission,
+    type PermissionDecision
+} from "./permissions";
+
+function isPermissionDecision(value: unknown): value is PermissionDecision {
+    return (
+        value === "allow_once" ||
+        value === "allow_session" ||
+        value === "deny"
+    );
+}
 
 const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     .get("/:id/conversations", ({ params }) => {
@@ -69,6 +82,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     })
     .delete("/:id/conversations/:conversationId", ({ params, set }) => {
         try {
+            clearConversationPermissionState(params.conversationId);
             deleteConversation(params.id, params.conversationId);
             return { success: true };
         } catch (error) {
@@ -138,6 +152,31 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                         : "Failed to stream reply"
             };
         }
-    });
+    })
+    .post(
+        "/:id/conversations/:conversationId/permissions/:requestId/respond",
+        ({ params, body, set }) => {
+            const { decision } = (body ?? {}) as {
+                decision?: unknown;
+            };
+
+            if (!isPermissionDecision(decision)) {
+                set.status = 400;
+                return {
+                    error:
+                        "Missing or invalid 'decision' field. Expected 'allow_once', 'allow_session', or 'deny'."
+                };
+            }
+
+            const result = resolvePermission(params.requestId, decision);
+
+            if (!result.ok) {
+                set.status = 404;
+                return { error: result.error };
+            }
+
+            return { success: true };
+        }
+    );
 
 export default conversationsRoutes;

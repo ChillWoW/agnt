@@ -7,7 +7,12 @@ import { getEffectiveConversationState } from "../history/history.service";
 import type { Message, ToolInvocationStatus } from "./conversations.types";
 import type { ReasoningEffort } from "../models/models.types";
 import { getModelById } from "../models/models.service";
-import { AGNT_TOOLS } from "./tools";
+import {
+    abortPermissions,
+    buildConversationTools,
+    subscribeToPermissions,
+    type PermissionMode
+} from "./permissions";
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
 
@@ -75,6 +80,10 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
     );
 }
 
+function isPermissionMode(value: unknown): value is PermissionMode {
+    return value === "ask" || value === "bypass";
+}
+
 function resolveConversationModelSettings(
     workspaceId: string,
     conversationId: string
@@ -82,6 +91,7 @@ function resolveConversationModelSettings(
     modelName: string;
     reasoningEffort: ReasoningEffort | null;
     fastMode: boolean;
+    permissionMode: PermissionMode;
 } {
     const state = getEffectiveConversationState(workspaceId, conversationId).merged;
     const configuredModel =
@@ -106,10 +116,15 @@ function resolveConversationModelSettings(
             ? rawEffort
             : model?.defaultEffort ?? null;
 
+    const permissionMode = isPermissionMode(state.permissionMode)
+        ? state.permissionMode
+        : "ask";
+
     return {
         modelName,
         reasoningEffort,
-        fastMode: state.fastMode === true && model?.supportsFastMode === true
+        fastMode: state.fastMode === true && model?.supportsFastMode === true,
+        permissionMode
     };
 }
 
@@ -137,10 +152,36 @@ async function runStreamTextIntoController({
     abortSignal?: AbortSignal;
 }): Promise<void> {
     const db = getWorkspaceDb(workspaceId);
-    const { modelName, reasoningEffort, fastMode } =
+    const { modelName, reasoningEffort, fastMode, permissionMode } =
         resolveConversationModelSettings(workspaceId, conversationId);
 
     let fullText = "";
+
+    const unsubscribePermissions = subscribeToPermissions(
+        conversationId,
+        (event) => {
+            if (event.type === "requested") {
+                controller.enqueue(
+                    sseEvent("permission-required", {
+                        id: event.request.id,
+                        messageId: assistantMsgId,
+                        toolName: event.request.toolName,
+                        input: event.request.input,
+                        createdAt: event.request.createdAt
+                    })
+                );
+                return;
+            }
+
+            controller.enqueue(
+                sseEvent("permission-resolved", {
+                    id: event.requestId,
+                    messageId: assistantMsgId,
+                    decision: event.decision
+                })
+            );
+        }
+    );
 
     try {
         const codex = await createCodexClient();
@@ -153,7 +194,9 @@ async function runStreamTextIntoController({
             "effort:",
             reasoningEffort,
             "fastMode:",
-            fastMode
+            fastMode,
+            "permissionMode:",
+            permissionMode
         );
 
         const openaiOptions: Record<string, string | boolean | undefined> = {
@@ -167,10 +210,32 @@ async function runStreamTextIntoController({
             openaiOptions.reasoningEffort = reasoningEffort;
         }
 
+        const tools = buildConversationTools({
+            conversationId,
+            getMode: () => {
+                // Re-resolve permission mode from effective conversation
+                // state on every tool invocation so toggling the selector
+                // takes effect immediately (even mid-stream). Falls back
+                // to the mode captured at stream start on any error.
+                try {
+                    return resolveConversationModelSettings(
+                        workspaceId,
+                        conversationId
+                    ).permissionMode;
+                } catch (error) {
+                    logger.error(
+                        "[stream] failed to resolve permission mode, falling back",
+                        error
+                    );
+                    return permissionMode;
+                }
+            }
+        });
+
         const result = streamText({
             model: codex.responses(modelName),
             messages: modelMessages,
-            tools: AGNT_TOOLS,
+            tools,
             stopWhen: stepCountIs(5),
             abortSignal,
             providerOptions: {
@@ -308,6 +373,7 @@ async function runStreamTextIntoController({
             }
 
             if (part.type === "abort") {
+                abortPermissions(conversationId, "aborted");
                 markPendingToolInvocationsAsError(
                     db,
                     assistantMsgId,
@@ -359,6 +425,7 @@ async function runStreamTextIntoController({
                 conversationId,
                 assistantMsgId
             });
+            abortPermissions(conversationId, "aborted");
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
             finalizeAbortedAssistantMessage(
                 db,
@@ -373,9 +440,12 @@ async function runStreamTextIntoController({
 
         logger.error("[stream] Stream error:", error);
 
+        abortPermissions(conversationId, message);
         markPendingToolInvocationsAsError(db, assistantMsgId, message);
         db.query("DELETE FROM messages WHERE id = ?").run(assistantMsgId);
         controller.enqueue(sseEvent("error", { message }));
+    } finally {
+        unsubscribePermissions();
     }
 }
 

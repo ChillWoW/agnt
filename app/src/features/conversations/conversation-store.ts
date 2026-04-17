@@ -7,6 +7,8 @@ import type {
     ToolInvocationStatus
 } from "./conversation-types";
 import * as conversationApi from "./conversation-api";
+import { usePermissionStore } from "@/features/permissions";
+import type { PermissionRequest } from "@/features/permissions";
 
 interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
@@ -109,6 +111,7 @@ async function consumeSseStream(
 }
 
 async function runStream(
+    conversationId: string,
     response: Response,
     updateConversation: (
         updater: (prev: ConversationWithMessages) => ConversationWithMessages
@@ -265,8 +268,38 @@ async function runStream(
                 break;
             }
 
+            case "permission-required": {
+                const request: PermissionRequest = {
+                    id: data.id as string,
+                    conversationId,
+                    messageId: data.messageId as string,
+                    toolName: data.toolName as string,
+                    input: data.input,
+                    createdAt:
+                        (data.createdAt as string) ??
+                        new Date().toISOString()
+                };
+                usePermissionStore
+                    .getState()
+                    .setPending(conversationId, request);
+                break;
+            }
+
+            case "permission-resolved": {
+                const requestId = data.id as string | undefined;
+                if (requestId) {
+                    usePermissionStore
+                        .getState()
+                        .clearPendingById(conversationId, requestId);
+                } else {
+                    usePermissionStore.getState().clearPending(conversationId);
+                }
+                break;
+            }
+
             case "finish": {
                 outcome = "finished";
+                usePermissionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) => {
@@ -281,6 +314,7 @@ async function runStream(
 
             case "abort": {
                 outcome = "aborted";
+                usePermissionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => {
                     const lastStreamingAssistantIndex = [...prev.messages]
                         .map((message, index) => ({ message, index }))
@@ -313,6 +347,7 @@ async function runStream(
 
             case "error": {
                 outcome = "errored";
+                usePermissionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.filter(
@@ -364,7 +399,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
 
         try {
             const response = await startRequest(controller.signal);
-            outcome = await runStream(response, (updater) =>
+            outcome = await runStream(conversationId, response, (updater) =>
                 applyConversationUpdate(conversationId, updater)
             );
         } catch (error) {
@@ -379,6 +414,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     conversationId
                 )
             }));
+
+            usePermissionStore.getState().clearPending(conversationId);
 
             applyConversationUpdate(conversationId, (prev) => ({
                 ...prev,
@@ -441,6 +478,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             const controller = get().streamControllersById[targetId];
             if (!controller) return;
             controller.abort();
+            usePermissionStore.getState().clearPending(targetId);
             set((state) => ({
                 streamControllersById: omitKey(
                     state.streamControllersById,
@@ -595,6 +633,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             conversationId: string
         ) => {
             get().streamControllersById[conversationId]?.abort();
+            usePermissionStore.getState().clearPending(conversationId);
 
             await conversationApi.deleteConversation(
                 workspaceId,

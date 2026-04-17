@@ -12,6 +12,7 @@ import {
     DotsThreeIcon,
     XIcon,
     MinusIcon,
+    ShieldWarningIcon,
     GearSixIcon
 } from "@phosphor-icons/react";
 import { Menu, Tooltip } from "@/components/ui";
@@ -21,6 +22,7 @@ import { settingsCategories } from "@/components/settings/SettingsPanel";
 import { useSettingsStore } from "@/components/settings";
 import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations";
+import { usePermissionStore } from "@/features/permissions";
 import type { ElementType } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AccountButton } from "./account-button";
@@ -52,6 +54,9 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const streamingConversationIds = useConversationStore(
         (s) => s.streamControllersById
     );
+    const pendingPermissions = usePermissionStore(
+        (s) => s.pendingByConversationId
+    );
 
     useEffect(() => {
         void useConversationStore.getState().loadConversations(workspaceId);
@@ -64,6 +69,8 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                 const isStreaming = Boolean(
                     streamingConversationIds[conv.id]
                 );
+                const isPendingPermission =
+                    (pendingPermissions[conv.id]?.length ?? 0) > 0;
                 const isActive = activeConversationId === conv.id;
 
                 return (
@@ -89,21 +96,30 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                         "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
                         isActive
                             ? "bg-dark-800 text-dark-50"
-                            : isUnread
-                              ? "text-dark-50 hover:bg-dark-800"
-                              : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                            : isPendingPermission
+                              ? "text-amber-200 hover:bg-dark-800"
+                              : isUnread
+                                ? "text-dark-50 hover:bg-dark-800"
+                                : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                     )}
                 >
-                    <MinusIcon
-                        className={cn(
-                            "size-3 shrink-0 transition-colors",
-                            isUnread
-                                ? "text-dark-50"
-                                : isStreaming
-                                  ? "text-dark-100 animate-pulse"
-                                  : "text-dark-300"
-                        )}
-                    />
+                    {isPendingPermission ? (
+                        <ShieldWarningIcon
+                            className="size-3 shrink-0 text-amber-300 animate-pulse"
+                            weight="fill"
+                        />
+                    ) : (
+                        <MinusIcon
+                            className={cn(
+                                "size-3 shrink-0 transition-colors",
+                                isUnread
+                                    ? "text-dark-50"
+                                    : isStreaming
+                                      ? "text-dark-100 animate-pulse"
+                                      : "text-dark-300"
+                            )}
+                        />
+                    )}
                     <span className="truncate flex-1">{conv.title}</span>
                     <button
                         onClick={(e) => {

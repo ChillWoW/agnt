@@ -5,3 +5,4 @@ export { SettingHeader } from "./SettingHeader";
 export { SettingRow } from "./SettingRow";
 export { GeneralSettings } from "./GeneralSettings";
 export { HotkeySettings } from "./HotkeySettings";
+export { ToolPermissionsSettings } from "./ToolPermissionsSettings";

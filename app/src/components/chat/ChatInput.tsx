@@ -2,7 +2,10 @@ import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react";
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { Button, Tooltip } from "@/components/ui";
+import { usePermissionStore } from "@/features/permissions";
 import { ModelSelector } from "./ModelSelector";
+import { PermissionCard } from "./PermissionCard";
+import { PermissionModeSelector } from "./PermissionModeSelector";
 
 interface ChatInputProps {
     onSend?: (value: string) => void;
@@ -22,6 +25,12 @@ export function ChatInput({
     conversationId
 }: ChatInputProps) {
     const [value, setValue] = useState("");
+
+    const pendingQueue = usePermissionStore((s) =>
+        conversationId ? s.pendingByConversationId[conversationId] : undefined
+    );
+    const pendingPermission = pendingQueue?.[0];
+    const pendingCount = pendingQueue?.length ?? 0;
 
     const trimmedValue = value.trim();
 
@@ -49,6 +58,15 @@ export function ChatInput({
 
     return (
         <div className="rounded-sm border border-dark-700 bg-dark-900">
+            {pendingPermission && workspaceId && conversationId && (
+                <PermissionCard
+                    workspaceId={workspaceId}
+                    conversationId={conversationId}
+                    request={pendingPermission}
+                    queueLength={pendingCount}
+                />
+            )}
+
             <form className="flex flex-col gap-3" onSubmit={handleSend}>
                 <div className="px-2.5 pt-1.5">
                     <TextareaAutosize
@@ -65,6 +83,10 @@ export function ChatInput({
                 <div className="flex items-center justify-between px-2.5 h-10">
                     <div className="flex items-center gap-1.5">
                         <ModelSelector
+                            workspaceId={workspaceId}
+                            conversationId={conversationId}
+                        />
+                        <PermissionModeSelector
                             workspaceId={workspaceId}
                             conversationId={conversationId}
                         />

@@ -97,12 +97,15 @@ From `server/`:
 - Conversation streaming resolves model settings from effective state keys: `activeModel`/`model`, `reasoningEffort`/`effort`, and `fastMode`; fast mode maps to OpenAI priority processing when the selected model supports it.
 
 ### Agent tools
-- The assistant can call tools defined in `server/src/modules/conversations/tools/`. Registry: `server/src/modules/conversations/tools/index.ts` exports `AGNT_TOOLS`.
-- `streamText` in `conversation.stream.ts` passes `AGNT_TOOLS` and `stopWhen: stepCountIs(5)`, allowing the model to call tools and then continue generating.
+- Tool *definitions* live in `server/src/modules/conversations/tools/` as plain `{ name, description, inputSchema, execute }` objects (`ToolDefinition`). Registry: `server/src/modules/conversations/tools/index.ts` exports `AGNT_TOOL_DEFS`.
+- `conversation.stream.ts` builds a per-conversation tool set via `buildConversationTools({ conversationId, mode })` (`server/src/modules/conversations/permissions/with-permission.ts`) which wraps each definition's `execute` through `withPermission`. The wrapped tools are passed to `streamText` with `stopWhen: stepCountIs(5)`.
+- Permission gate: each tool call is decided by (1) conversation permission mode (`ask`/`bypass`, effective-state key `permissionMode`), (2) the per-tool setting from the `toolPermissions` settings category (`ask`/`allow`/`deny`), and (3) the in-memory session-allow cache (`allow_session` decisions). `deny` short-circuits with an error. `ask` routes through `requestPermission` which returns a promise resolved by the frontend.
 - Tool invocations are persisted in `tool_invocations`: a row is inserted on `tool-call` (status `pending`) and updated on `tool-result` (`success`) / `tool-error` (`error`). Pending rows are marked `error` when the stream aborts or errors.
-- SSE protocol adds `tool-call` and `tool-result` events. Each carries `messageId` so the frontend attaches them to the right assistant message. `Message.tool_invocations` is now part of the conversation fetch payload.
+- SSE protocol events: `tool-call`, `tool-result`, plus permission events `permission-required` (`{ id, messageId, toolName, input, createdAt }`) and `permission-resolved` (`{ id, messageId, decision }`). Each carries `messageId` so the frontend attaches them to the right assistant message. `Message.tool_invocations` is part of the conversation fetch payload.
+- Permission HTTP endpoint: `POST /workspaces/:id/conversations/:conversationId/permissions/:requestId/respond` with `{ decision: "allow_once" | "allow_session" | "deny" }`. Deleting a conversation also calls `clearConversationPermissionState` to reject pending requests and clear the session-allow cache.
+- Tool listing endpoint: `GET /tools` returns `[{ name, description }]` used by the settings panel.
 - Current tool set: `read_file(path, maxBytes?)` — reads a utf-8 file by absolute path, rejects binary (NUL-byte scan), default 256KB cap, hard cap 1MB. Located at `server/src/modules/conversations/tools/read-file.ts`.
-- Frontend renders tool calls as `ToolCallCard` (`app/src/components/chat/ToolCallCard.tsx`) inside the assistant bubble: collapsed summary (tool name + input preview + status), expandable to show full input/output JSON.
+- Frontend renders tool calls as `ToolCallCard` (`app/src/components/chat/ToolCallCard.tsx`) inside the assistant bubble. Pending permission requests are surfaced by the `PermissionCard` above the chat textarea and the sidebar swaps `MinusIcon` for a pulsing `ShieldWarningIcon` on the affected conversation. Mode is toggled via `PermissionModeSelector` next to the model selector. Per-tool defaults live in the new `Tool permissions` settings category.
 
 ### Tauri sidecar lifecycle
 - Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
@@ -148,6 +151,8 @@ When touching networking/startup/auth, explicitly decide which mode is canonical
 - `app/src/features/hotkeys/` — hotkey system (store, provider, useHotkey hook, combo utils, shortcut display)
 - `app/src/features/conversations/` — conversation store, API client, types (Zustand)
 - `app/src/features/models/` — model catalog fetch + workspace/conversation model selection state sync
+- `app/src/features/permissions/` — permission mode hook, pending-request Zustand store, tools catalog API, types
+- `server/src/modules/conversations/permissions/` — in-memory permission gate (request/resolve/abort/session-allow) and `buildConversationTools`/`withPermission` tool adapter
 - `app/src/components/ui/Tooltip.tsx` — base Tooltip + KeybindTooltip components
 
 ---
@@ -187,6 +192,7 @@ Keep this section compact to avoid context bloat:
 - 2026-04-15: Added model catalog + chat input model selector. Server exposes `/models` and now applies effective `activeModel`/`reasoningEffort`/`fastMode` state to Codex requests (priority processing for fast mode); frontend adds `app/src/features/models/` and a chat toolbar popover for model, reasoning, speed, and hover pricing details.
 - 2026-04-16: Added agent tool framework and first tool `read_file`. Server: `server/src/modules/conversations/tools/` with `read-file.ts` + registry, `conversation.stream.ts` passes tools + `stopWhen: stepCountIs(5)`, new `tool_invocations` SQLite table, new SSE events `tool-call`/`tool-result` carrying `messageId`, `getConversation` loads invocations into `Message.tool_invocations`. Frontend: extended `Message` type, store handles tool SSE events, new `ToolCallCard` component rendered inside `MessageBubble`.
 - 2026-04-17: Per-conversation SSE streams + unread indicator. Conversation store now keeps messages in `conversationsById`, abort controllers in `streamControllersById`, and `unreadConversationIds`; `activeConversation` replaced by `activeConversationId` (derived via `conversationsById[activeConversationId]`). Switching conversations no longer interrupts streams — each conversation streams independently. When a stream finishes while its conversation is not active, it is flagged unread; the sidebar renders a whiter `MinusIcon` for unread conversations and a pulsing icon while streaming. `stopGeneration` accepts a `conversationId`; `deleteConversation` aborts any in-flight stream and cleans up per-id state.
+- 2026-04-17: Added tool permission system. Server: new `server/src/modules/conversations/permissions/` (in-memory gate + `withPermission`/`buildConversationTools` adapter), new `toolPermissions` settings category (`ask`/`allow`/`deny` per tool), new `permissionMode` conversation effective-state key (`ask`/`bypass`), new SSE events `permission-required`/`permission-resolved`, new `POST /workspaces/:id/conversations/:conversationId/permissions/:requestId/respond` endpoint, new `GET /tools` catalog endpoint; tool registry now exports `AGNT_TOOL_DEFS` (raw definitions) instead of pre-wrapped `AGNT_TOOLS`. Frontend: new `app/src/features/permissions/` (Zustand pending-request store + `usePermissionMode` hook + tools API), new `PermissionModeSelector` and `PermissionCard` in chat input, sidebar pulses `ShieldWarningIcon` for conversations awaiting approval, new `Tool permissions` settings panel.
 
 ---
 
