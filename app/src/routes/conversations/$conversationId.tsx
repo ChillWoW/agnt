@@ -70,7 +70,7 @@ function ConversationRoute() {
             </div>
 
             <div className="shrink-0">
-                <div className="mx-auto max-w-3xl px-4 py-3">
+                <div className="mx-auto max-w-3xl px-4 py-4">
                     <ChatInput
                         onSend={handleSend}
                         onStop={handleStop}

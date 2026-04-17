@@ -5,7 +5,7 @@ import {
     updateConversationState,
     updateWorkspaceState
 } from "@/features/history";
-import { fetchModels } from "./models-api";
+import { fetchModels, getCachedModels } from "./models-api";
 import type {
     ModelCatalogEntry,
     ModelSelection,
@@ -98,16 +98,26 @@ export function useModelSelection({
     workspaceId,
     conversationId
 }: ModelSelectionScope) {
-    const [models, setModels] = useState<ModelCatalogEntry[]>([]);
+    const [models, setModels] = useState<ModelCatalogEntry[]>(
+        () => getCachedModels() ?? []
+    );
     const [selection, setSelection] = useState<ModelSelection>({
         modelId: null,
         reasoningEffort: null,
         speed: "standard"
     });
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(() => getCachedModels() == null);
 
     useEffect(() => {
         let cancelled = false;
+        const cachedModels = getCachedModels();
+
+        if (cachedModels) {
+            setModels(cachedModels);
+            setSelection((current) => normalizeSelection(cachedModels, current));
+            setIsLoading(false);
+            return;
+        }
 
         async function loadModels() {
             setIsLoading(true);
