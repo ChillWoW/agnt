@@ -227,10 +227,21 @@ async function runStream(
 
             case "reasoning-start": {
                 const messageId = data.messageId as string;
+                const startedAt =
+                    (data.startedAt as string | undefined) ??
+                    new Date().toISOString();
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) =>
-                        m.id === messageId ? { ...m, isReasoning: true } : m
+                        m.id === messageId
+                            ? {
+                                  ...m,
+                                  isReasoning: true,
+                                  reasoning_started_at:
+                                      m.reasoning_started_at ?? startedAt,
+                                  reasoning_ended_at: undefined
+                              }
+                            : m
                     )
                 }));
                 break;
@@ -252,10 +263,19 @@ async function runStream(
 
             case "reasoning-end": {
                 const messageId = data.messageId as string;
+                const endedAt =
+                    (data.endedAt as string | undefined) ??
+                    new Date().toISOString();
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) =>
-                        m.id === messageId ? { ...m, isReasoning: false } : m
+                        m.id === messageId
+                            ? {
+                                  ...m,
+                                  isReasoning: false,
+                                  reasoning_ended_at: endedAt
+                              }
+                            : m
                     )
                 }));
                 break;
@@ -367,6 +387,10 @@ async function runStream(
                             return {
                                 ...m,
                                 isStreaming: false,
+                                reasoning_ended_at:
+                                    m.reasoning_started_at && !m.reasoning_ended_at
+                                        ? new Date().toISOString()
+                                        : m.reasoning_ended_at,
                                 ...(assistantMessageId &&
                                 m.id === assistantMessageId &&
                                 usage
@@ -459,7 +483,12 @@ async function runStream(
                             {
                                 ...message,
                                 isStreaming: false,
-                                isReasoning: false
+                                isReasoning: false,
+                                reasoning_ended_at:
+                                    message.reasoning_started_at &&
+                                    !message.reasoning_ended_at
+                                        ? new Date().toISOString()
+                                        : message.reasoning_ended_at
                             }
                         ];
                     });

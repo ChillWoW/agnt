@@ -53,6 +53,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     <ThinkingBlock
                         reasoning={message.reasoning}
                         isReasoning={message.isReasoning}
+                        reasoningStartedAt={message.reasoning_started_at}
+                        reasoningEndedAt={message.reasoning_ended_at}
                     />
                 )}
 

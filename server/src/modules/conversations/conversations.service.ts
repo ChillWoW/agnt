@@ -68,6 +68,9 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         conversation_id: string;
         role: MessageRole;
         content: string;
+        reasoning_content: string | null;
+        reasoning_started_at: string | null;
+        reasoning_ended_at: string | null;
         created_at: string;
         input_tokens: number | null;
         output_tokens: number | null;
@@ -79,7 +82,7 @@ export function getConversation(workspaceId: string, conversationId: string): Co
 
     const rows = db
         .query(
-            "SELECT id, conversation_id, role, content, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            "SELECT id, conversation_id, role, content, reasoning_content, reasoning_started_at, reasoning_ended_at, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
         )
         .all(conversationId) as MessageRow[];
 
@@ -88,6 +91,13 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         conversation_id: row.conversation_id,
         role: row.role,
         content: row.content,
+        ...(row.reasoning_content ? { reasoning: row.reasoning_content } : {}),
+        ...(row.reasoning_started_at
+            ? { reasoning_started_at: row.reasoning_started_at }
+            : {}),
+        ...(row.reasoning_ended_at
+            ? { reasoning_ended_at: row.reasoning_ended_at }
+            : {}),
         created_at: row.created_at,
         input_tokens: row.input_tokens,
         output_tokens: row.output_tokens,

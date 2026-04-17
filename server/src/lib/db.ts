@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
     content TEXT NOT NULL,
+    reasoning_content TEXT,
+    reasoning_started_at TEXT,
+    reasoning_ended_at TEXT,
     created_at TEXT NOT NULL,
     input_tokens INTEGER,
     output_tokens INTEGER,
@@ -100,6 +103,9 @@ function addColumnIfMissing(
 }
 
 function runMigrations(db: Database): void {
+    addColumnIfMissing(db, "messages", "reasoning_content", "TEXT");
+    addColumnIfMissing(db, "messages", "reasoning_started_at", "TEXT");
+    addColumnIfMissing(db, "messages", "reasoning_ended_at", "TEXT");
     addColumnIfMissing(db, "messages", "input_tokens", "INTEGER");
     addColumnIfMissing(db, "messages", "output_tokens", "INTEGER");
     addColumnIfMissing(db, "messages", "reasoning_tokens", "INTEGER");

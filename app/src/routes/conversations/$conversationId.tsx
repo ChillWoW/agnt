@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { ArrowDownIcon } from "@phosphor-icons/react";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
 import { useConversationStore } from "@/features/conversations";
@@ -25,6 +26,9 @@ function ConversationRoute() {
     const loadConversation = useConversationStore((s) => s.loadConversation);
     const sendMessage = useConversationStore((s) => s.sendMessage);
     const stopGeneration = useConversationStore((s) => s.stopGeneration);
+
+    const scrollButtonRef = useRef<HTMLDivElement>(null);
+    const scrollToBottomRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
         if (activeWorkspaceId) {
@@ -77,11 +81,34 @@ function ConversationRoute() {
                     maskImage: "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)"
                 }}
             >
-                <MessageList messages={visibleMessages} />
+                <MessageList
+                    messages={visibleMessages}
+                    scrollButtonRef={scrollButtonRef}
+                    scrollToBottomRef={scrollToBottomRef}
+                />
             </div>
 
             <div className="shrink-0">
                 <div className="mx-auto max-w-3xl px-4 pt-4 pb-2">
+                    <div
+                        ref={scrollButtonRef}
+                        style={{
+                            opacity: 0,
+                            pointerEvents: "none",
+                            transform: "translateY(4px)",
+                            transition: "opacity 150ms ease, transform 150ms ease"
+                        }}
+                        className="mb-2 inline-flex"
+                    >
+                        <button
+                            type="button"
+                            onClick={() => scrollToBottomRef.current?.()}
+                            className="flex items-center gap-1.5 rounded-full border border-dark-700 bg-dark-850 px-3 py-1.5 text-xs text-dark-100 shadow-sm transition-colors hover:bg-dark-700 hover:text-dark-50"
+                        >
+                            <ArrowDownIcon className="size-3.5" weight="bold" />
+                            Back to bottom
+                        </button>
+                    </div>
                     <ChatInput
                         onSend={handleSend}
                         onStop={handleStop}

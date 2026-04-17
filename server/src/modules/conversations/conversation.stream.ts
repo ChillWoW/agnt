@@ -53,11 +53,19 @@ function finalizeAbortedAssistantMessage(
     db: ReturnType<typeof getWorkspaceDb>,
     assistantMsgId: string,
     conversationId: string,
-    partialContent: string
+    partialContent: string,
+    reasoningContent: string,
+    reasoningStartedAt: string | null,
+    reasoningEndedAt: string | null
 ) {
-    if (partialContent.length > 0) {
-        db.query("UPDATE messages SET content = ? WHERE id = ?").run(
+    if (partialContent.length > 0 || reasoningContent.length > 0) {
+        db.query(
+            "UPDATE messages SET content = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
+        ).run(
             partialContent,
+            reasoningContent.length > 0 ? reasoningContent : null,
+            reasoningStartedAt,
+            reasoningEndedAt,
             assistantMsgId
         );
         db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
@@ -396,6 +404,9 @@ async function runStreamTextIntoController({
         resolveConversationModelSettings(workspaceId, conversationId);
 
     let fullText = "";
+    let reasoningText = "";
+    let reasoningStartedAt: string | null = null;
+    let reasoningEndedAt: string | null = null;
     let lastUsage: {
         inputTokens: number | null;
         outputTokens: number | null;
@@ -515,8 +526,17 @@ async function runStreamTextIntoController({
                 };
 
                 db.query(
-                    "UPDATE messages SET input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, total_tokens = ? WHERE id = ?"
-                ).run(input, output, reasoning, total, assistantMsgId);
+                    "UPDATE messages SET input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, total_tokens = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
+                ).run(
+                    input,
+                    output,
+                    reasoning,
+                    total,
+                    reasoningText.length > 0 ? reasoningText : null,
+                    reasoningStartedAt,
+                    reasoningEndedAt,
+                    assistantMsgId
+                );
             },
             onAbort: () => {
                 logger.log("[stream] Generation aborted", {
@@ -535,13 +555,19 @@ async function runStreamTextIntoController({
             }
 
             if (part.type === "reasoning-start") {
+                reasoningStartedAt ??= new Date().toISOString();
+                reasoningEndedAt = null;
                 controller.enqueue(
-                    sseEvent("reasoning-start", { messageId: assistantMsgId })
+                    sseEvent("reasoning-start", {
+                        messageId: assistantMsgId,
+                        startedAt: reasoningStartedAt
+                    })
                 );
                 continue;
             }
 
             if (part.type === "reasoning-delta") {
+                reasoningText += part.text;
                 controller.enqueue(
                     sseEvent("reasoning-delta", {
                         messageId: assistantMsgId,
@@ -552,8 +578,12 @@ async function runStreamTextIntoController({
             }
 
             if (part.type === "reasoning-end") {
+                reasoningEndedAt = new Date().toISOString();
                 controller.enqueue(
-                    sseEvent("reasoning-end", { messageId: assistantMsgId })
+                    sseEvent("reasoning-end", {
+                        messageId: assistantMsgId,
+                        endedAt: reasoningEndedAt
+                    })
                 );
                 continue;
             }
@@ -679,8 +709,13 @@ async function runStreamTextIntoController({
             "chars"
         );
 
-        db.query("UPDATE messages SET content = ? WHERE id = ?").run(
+        db.query(
+            "UPDATE messages SET content = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
+        ).run(
             fullText,
+            reasoningText.length > 0 ? reasoningText : null,
+            reasoningStartedAt,
+            reasoningEndedAt,
             assistantMsgId
         );
         db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
@@ -709,7 +744,10 @@ async function runStreamTextIntoController({
                 db,
                 assistantMsgId,
                 conversationId,
-                fullText
+                fullText,
+                reasoningText,
+                reasoningStartedAt,
+                reasoningEndedAt ?? (reasoningStartedAt ? new Date().toISOString() : null)
             );
             return;
         }

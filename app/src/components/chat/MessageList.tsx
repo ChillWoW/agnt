@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { ArrowDownIcon, ArchiveIcon } from "@phosphor-icons/react";
+import { ArchiveIcon } from "@phosphor-icons/react";
 import type { Message } from "@/features/conversations/conversation-types";
 import { MessageBubble } from "./MessageBubble";
 
@@ -7,13 +7,15 @@ const SCROLL_THRESHOLD = 80;
 
 interface MessageListProps {
     messages: Message[];
+    scrollButtonRef?: React.RefObject<HTMLDivElement | null>;
+    scrollToBottomRef?: React.RefObject<(() => void) | null>;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, scrollButtonRef, scrollToBottomRef }: MessageListProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const isAtBottom = useRef(true);
     const showScrollButton = useRef(false);
-    const buttonRef = useRef<HTMLDivElement>(null);
+    const buttonRef = scrollButtonRef ?? { current: null };
     const scrollThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(
         null
     );
@@ -24,8 +26,8 @@ export function MessageList({ messages }: MessageListProps) {
         if (buttonRef.current) {
             buttonRef.current.style.opacity = visible ? "1" : "0";
             buttonRef.current.style.transform = visible
-                ? "translateX(-50%) translateY(0)"
-                : "translateX(-50%) translateY(8px)";
+                ? "translateY(0)"
+                : "translateY(4px)";
             buttonRef.current.style.pointerEvents = visible ? "auto" : "none";
         }
     }, []);
@@ -45,6 +47,10 @@ export function MessageList({ messages }: MessageListProps) {
         setButtonVisible(false);
         container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
     }, [setButtonVisible]);
+
+    useEffect(() => {
+        if (scrollToBottomRef) scrollToBottomRef.current = smoothScrollToBottom;
+    }, [scrollToBottomRef, smoothScrollToBottom]);
 
     useEffect(() => {
         const container = scrollRef.current;
@@ -147,28 +153,6 @@ export function MessageList({ messages }: MessageListProps) {
                         );
                     })}
                 </div>
-            </div>
-
-            <div
-                ref={buttonRef}
-                style={{
-                    position: "absolute",
-                    bottom: "1rem",
-                    left: "50%",
-                    transform: "translateX(-50%) translateY(8px)",
-                    opacity: 0,
-                    pointerEvents: "none",
-                    transition: "opacity 150ms ease, transform 150ms ease"
-                }}
-            >
-                <button
-                    type="button"
-                    onClick={smoothScrollToBottom}
-                    className="flex items-center gap-1.5 rounded-full border border-dark-700 bg-dark-850 px-3 py-1.5 text-xs text-dark-100 shadow-sm transition-colors hover:bg-dark-700 hover:text-dark-50"
-                >
-                    <ArrowDownIcon className="size-3.5" weight="bold" />
-                    Back to bottom
-                </button>
             </div>
         </div>
     );
