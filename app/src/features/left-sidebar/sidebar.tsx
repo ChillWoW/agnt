@@ -44,7 +44,13 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
         (s) => s.conversationsByWorkspace[workspaceId] ?? EMPTY_CONVERSATIONS
     );
     const activeConversationId = useConversationStore(
-        (s) => s.activeConversation?.id ?? null
+        (s) => s.activeConversationId
+    );
+    const unreadConversationIds = useConversationStore(
+        (s) => s.unreadConversationIds
+    );
+    const streamingConversationIds = useConversationStore(
+        (s) => s.streamControllersById
     );
 
     useEffect(() => {
@@ -53,7 +59,14 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     return (
         <div className="flex flex-col gap-0.5">
-            {conversations.map((conv) => (
+            {conversations.map((conv) => {
+                const isUnread = Boolean(unreadConversationIds[conv.id]);
+                const isStreaming = Boolean(
+                    streamingConversationIds[conv.id]
+                );
+                const isActive = activeConversationId === conv.id;
+
+                return (
                 <div
                     key={conv.id}
                     role="button"
@@ -74,12 +87,23 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     }}
                     className={cn(
                         "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
-                        activeConversationId === conv.id
+                        isActive
                             ? "bg-dark-800 text-dark-50"
-                            : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                            : isUnread
+                              ? "text-dark-50 hover:bg-dark-800"
+                              : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                     )}
                 >
-                    <MinusIcon className="size-3 shrink-0 text-dark-300" />
+                    <MinusIcon
+                        className={cn(
+                            "size-3 shrink-0 transition-colors",
+                            isUnread
+                                ? "text-dark-50"
+                                : isStreaming
+                                  ? "text-dark-100 animate-pulse"
+                                  : "text-dark-300"
+                        )}
+                    />
                     <span className="truncate flex-1">{conv.title}</span>
                     <button
                         onClick={(e) => {
@@ -94,7 +118,8 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                         <TrashIcon className="size-3" />
                     </button>
                 </div>
-            ))}
+                );
+            })}
         </div>
     );
 }

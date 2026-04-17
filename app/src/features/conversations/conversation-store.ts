@@ -10,12 +10,16 @@ import * as conversationApi from "./conversation-api";
 
 interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
-    activeConversation: ConversationWithMessages | null;
+    conversationsById: Record<string, ConversationWithMessages>;
+    activeConversationId: string | null;
     isLoadingList: boolean;
-    isLoadingConversation: boolean;
-    isStreaming: boolean;
-    streamAbortController: AbortController | null;
-    stopGeneration: () => void;
+    loadingConversationIds: Record<string, true>;
+    streamControllersById: Record<string, AbortController>;
+    unreadConversationIds: Record<string, true>;
+
+    setActiveConversation: (conversationId: string | null) => void;
+    markConversationRead: (conversationId: string) => void;
+    stopGeneration: (conversationId?: string) => void;
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -27,9 +31,19 @@ interface ConversationStoreState {
 }
 
 type SseEventPayload = Record<string, unknown>;
+type StreamOutcome = "finished" | "aborted" | "errored";
 
 function isAbortError(error: unknown): boolean {
     return error instanceof DOMException && error.name === "AbortError";
+}
+
+function omitKey<V>(
+    record: Record<string, V>,
+    key: string
+): Record<string, V> {
+    if (!(key in record)) return record;
+    const { [key]: _removed, ...rest } = record;
+    return rest;
 }
 
 function finalizeStreamingMessages(messages: Message[]): Message[] {
@@ -96,9 +110,12 @@ async function consumeSseStream(
 
 async function runStream(
     response: Response,
-    conversationId: string,
-    updateFn: (updater: (prev: ConversationWithMessages) => ConversationWithMessages) => void
-): Promise<void> {
+    updateConversation: (
+        updater: (prev: ConversationWithMessages) => ConversationWithMessages
+    ) => void
+): Promise<StreamOutcome> {
+    let outcome: StreamOutcome = "aborted";
+
     await consumeSseStream(response, (event, data) => {
         switch (event) {
             case "user-message": {
@@ -109,9 +126,7 @@ async function runStream(
                     content: data.content as string,
                     created_at: data.created_at as string
                 };
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    // Replace optimistic message or add if not already present
+                updateConversation((prev) => {
                     const exists = prev.messages.some((m) => m.id === msg.id);
                     return {
                         ...prev,
@@ -130,17 +145,16 @@ async function runStream(
                     created_at: data.created_at as string,
                     isStreaming: true
                 };
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    return { ...prev, messages: [...prev.messages, msg] };
-                });
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: [...prev.messages, msg]
+                }));
                 break;
             }
 
             case "delta": {
                 const delta = data.content as string;
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
+                updateConversation((prev) => {
                     const messages = prev.messages.map((m) => {
                         if (m.role === "assistant" && m.isStreaming) {
                             return { ...m, content: m.content + delta };
@@ -154,40 +168,37 @@ async function runStream(
 
             case "reasoning-start": {
                 const messageId = data.messageId as string;
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) =>
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) =>
                         m.id === messageId ? { ...m, isReasoning: true } : m
-                    );
-                    return { ...prev, messages };
-                });
+                    )
+                }));
                 break;
             }
 
             case "reasoning-delta": {
                 const messageId = data.messageId as string;
                 const text = data.text as string;
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) =>
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) =>
                         m.id === messageId
                             ? { ...m, reasoning: (m.reasoning ?? "") + text }
                             : m
-                    );
-                    return { ...prev, messages };
-                });
+                    )
+                }));
                 break;
             }
 
             case "reasoning-end": {
                 const messageId = data.messageId as string;
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) =>
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) =>
                         m.id === messageId ? { ...m, isReasoning: false } : m
-                    );
-                    return { ...prev, messages };
-                });
+                    )
+                }));
                 break;
             }
 
@@ -204,18 +215,17 @@ async function runStream(
                         (data.createdAt as string) ??
                         new Date().toISOString()
                 };
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) => {
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
                         if (m.id !== invocation.message_id) return m;
                         const existing = m.tool_invocations ?? [];
                         return {
                             ...m,
                             tool_invocations: [...existing, invocation]
                         };
-                    });
-                    return { ...prev, messages };
-                });
+                    })
+                }));
                 break;
             }
 
@@ -227,9 +237,9 @@ async function runStream(
                 const status =
                     (data.status as ToolInvocationStatus) ??
                     (error ? "error" : "success");
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) => {
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
                         if (m.id !== messageId) return m;
                         const existing = m.tool_invocations ?? [];
                         let applied = false;
@@ -250,35 +260,35 @@ async function runStream(
                             };
                         });
                         return { ...m, tool_invocations };
-                    });
-                    return { ...prev, messages };
-                });
+                    })
+                }));
                 break;
             }
 
             case "finish": {
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.map((m) => {
+                outcome = "finished";
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
                         if (m.role === "assistant" && m.isStreaming) {
                             return { ...m, isStreaming: false };
                         }
                         return m;
-                    });
-                    return { ...prev, messages };
-                });
+                    })
+                }));
                 break;
             }
 
             case "abort": {
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-
+                outcome = "aborted";
+                updateConversation((prev) => {
                     const lastStreamingAssistantIndex = [...prev.messages]
                         .map((message, index) => ({ message, index }))
                         .reverse()
-                        .find(({ message }) => message.role === "assistant" && message.isStreaming)
-                        ?.index;
+                        .find(
+                            ({ message }) =>
+                                message.role === "assistant" && message.isStreaming
+                        )?.index;
 
                     if (lastStreamingAssistantIndex == null) {
                         return prev;
@@ -302,204 +312,332 @@ async function runStream(
             }
 
             case "error": {
-                // Remove any streaming placeholder on error
-                updateFn((prev) => {
-                    if (prev.id !== conversationId) return prev;
-                    const messages = prev.messages.filter(
+                outcome = "errored";
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.filter(
                         (m) => !(m.role === "assistant" && m.isStreaming)
-                    );
-                    return { ...prev, messages };
-                });
+                    )
+                }));
                 break;
             }
         }
     });
+
+    return outcome;
 }
 
-export const useConversationStore = create<ConversationStoreState>()((set, get) => ({
-    conversationsByWorkspace: {},
-    activeConversation: null,
-    isLoadingList: false,
-    isLoadingConversation: false,
-    isStreaming: false,
-    streamAbortController: null,
-
-    stopGeneration: () => {
-        get().streamAbortController?.abort();
-        set({ streamAbortController: null });
-    },
-
-    loadConversations: async (workspaceId: string) => {
-        const hadCached = workspaceId in get().conversationsByWorkspace;
-        if (!hadCached) set({ isLoadingList: true });
-        try {
-            const conversations = await conversationApi.fetchConversations(workspaceId);
-            set((state) => ({
-                conversationsByWorkspace: {
-                    ...state.conversationsByWorkspace,
-                    [workspaceId]: conversations
+export const useConversationStore = create<ConversationStoreState>()((set, get) => {
+    function applyConversationUpdate(
+        conversationId: string,
+        updater: (prev: ConversationWithMessages) => ConversationWithMessages
+    ) {
+        set((state) => {
+            const existing = state.conversationsById[conversationId];
+            if (!existing) return {};
+            return {
+                conversationsById: {
+                    ...state.conversationsById,
+                    [conversationId]: updater(existing)
                 }
-            }));
-        } finally {
-            if (!hadCached) set({ isLoadingList: false });
-        }
-    },
+            };
+        });
+    }
 
-    loadConversation: async (workspaceId: string, conversationId: string) => {
-        const current = get();
-
-        // If we're currently streaming into this same conversation, don't
-        // overwrite the in-memory state with a DB fetch — doing so drops the
-        // `isStreaming` placeholder and subsequent delta/finish events have
-        // nothing to update.
-        if (
-            current.isStreaming &&
-            current.activeConversation?.id === conversationId
-        ) {
+    async function runConversationStream(
+        conversationId: string,
+        startRequest: (signal: AbortSignal) => Promise<Response>
+    ): Promise<void> {
+        if (get().streamControllersById[conversationId]) {
             return;
         }
 
-        set({ isLoadingConversation: true });
+        const controller = new AbortController();
+        set((state) => ({
+            streamControllersById: {
+                ...state.streamControllersById,
+                [conversationId]: controller
+            }
+        }));
+
+        let outcome: StreamOutcome = "aborted";
+
         try {
-            const conversation = await conversationApi.fetchConversation(workspaceId, conversationId);
-            // Guard against a stream starting while the fetch was in flight.
-            const latest = get();
+            const response = await startRequest(controller.signal);
+            outcome = await runStream(response, (updater) =>
+                applyConversationUpdate(conversationId, updater)
+            );
+        } catch (error) {
+            if (!isAbortError(error) && !controller.signal.aborted) {
+                outcome = "errored";
+                throw error;
+            }
+        } finally {
+            set((state) => ({
+                streamControllersById: omitKey(
+                    state.streamControllersById,
+                    conversationId
+                )
+            }));
+
+            applyConversationUpdate(conversationId, (prev) => ({
+                ...prev,
+                messages: finalizeStreamingMessages(prev.messages)
+            }));
+
             if (
-                latest.isStreaming &&
-                latest.activeConversation?.id === conversationId
+                outcome === "finished" &&
+                get().activeConversationId !== conversationId
             ) {
+                set((state) => ({
+                    unreadConversationIds: {
+                        ...state.unreadConversationIds,
+                        [conversationId]: true
+                    }
+                }));
+            }
+        }
+    }
+
+    return {
+        conversationsByWorkspace: {},
+        conversationsById: {},
+        activeConversationId: null,
+        isLoadingList: false,
+        loadingConversationIds: {},
+        streamControllersById: {},
+        unreadConversationIds: {},
+
+        setActiveConversation: (conversationId: string | null) => {
+            set((state) => {
+                const patch: Partial<ConversationStoreState> = {
+                    activeConversationId: conversationId
+                };
+                if (conversationId && state.unreadConversationIds[conversationId]) {
+                    patch.unreadConversationIds = omitKey(
+                        state.unreadConversationIds,
+                        conversationId
+                    );
+                }
+                return patch;
+            });
+        },
+
+        markConversationRead: (conversationId: string) => {
+            set((state) => {
+                if (!state.unreadConversationIds[conversationId]) return {};
+                return {
+                    unreadConversationIds: omitKey(
+                        state.unreadConversationIds,
+                        conversationId
+                    )
+                };
+            });
+        },
+
+        stopGeneration: (conversationId?: string) => {
+            const targetId = conversationId ?? get().activeConversationId;
+            if (!targetId) return;
+            const controller = get().streamControllersById[targetId];
+            if (!controller) return;
+            controller.abort();
+            set((state) => ({
+                streamControllersById: omitKey(
+                    state.streamControllersById,
+                    targetId
+                )
+            }));
+        },
+
+        loadConversations: async (workspaceId: string) => {
+            const hadCached = workspaceId in get().conversationsByWorkspace;
+            if (!hadCached) set({ isLoadingList: true });
+            try {
+                const conversations =
+                    await conversationApi.fetchConversations(workspaceId);
+                set((state) => ({
+                    conversationsByWorkspace: {
+                        ...state.conversationsByWorkspace,
+                        [workspaceId]: conversations
+                    }
+                }));
+            } finally {
+                if (!hadCached) set({ isLoadingList: false });
+            }
+        },
+
+        loadConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            set((state) => {
+                const patch: Partial<ConversationStoreState> = {
+                    activeConversationId: conversationId
+                };
+                if (state.unreadConversationIds[conversationId]) {
+                    patch.unreadConversationIds = omitKey(
+                        state.unreadConversationIds,
+                        conversationId
+                    );
+                }
+                return patch;
+            });
+
+            const state = get();
+
+            // Already in memory (may be streaming) — nothing to fetch.
+            if (state.conversationsById[conversationId]) {
                 return;
             }
-            set({ activeConversation: conversation });
-        } finally {
-            set({ isLoadingConversation: false });
-        }
-    },
 
-    createConversation: async (workspaceId: string, message: string) => {
-        const conversation = await conversationApi.createConversation(workspaceId, message);
+            if (state.loadingConversationIds[conversationId]) {
+                return;
+            }
 
-        set((state) => {
-            const existing = state.conversationsByWorkspace[workspaceId] ?? [];
-            return {
-                activeConversation: conversation,
-                conversationsByWorkspace: {
-                    ...state.conversationsByWorkspace,
-                    [workspaceId]: [conversation, ...existing]
+            set((s) => ({
+                loadingConversationIds: {
+                    ...s.loadingConversationIds,
+                    [conversationId]: true
                 }
-            };
-        });
+            }));
 
-        return conversation;
-    },
+            try {
+                const conversation = await conversationApi.fetchConversation(
+                    workspaceId,
+                    conversationId
+                );
 
-    sendMessage: async (workspaceId: string, conversationId: string, content: string) => {
-        if (get().isStreaming) {
-            return;
-        }
+                set((s) => {
+                    const next: Partial<ConversationStoreState> = {
+                        loadingConversationIds: omitKey(
+                            s.loadingConversationIds,
+                            conversationId
+                        )
+                    };
 
-        const streamAbortController = new AbortController();
-        set({ isStreaming: true, streamAbortController });
+                    // Don't clobber a stream that populated state while
+                    // the fetch was in flight.
+                    if (!s.conversationsById[conversationId]) {
+                        next.conversationsById = {
+                            ...s.conversationsById,
+                            [conversationId]: conversation
+                        };
+                    }
 
-        const updateActive = (
-            updater: (prev: ConversationWithMessages) => ConversationWithMessages
-        ) => {
-            set((state) => {
-                if (!state.activeConversation) return {};
-                return { activeConversation: updater(state.activeConversation) };
-            });
-        };
-
-        try {
-            const response = await conversationApi.streamMessage(
-                workspaceId,
-                conversationId,
-                content,
-                streamAbortController.signal
-            );
-            await runStream(response, conversationId, updateActive);
-        } catch (error) {
-            if (!isAbortError(error) && !streamAbortController.signal.aborted) {
+                    return next;
+                });
+            } catch (error) {
+                set((s) => ({
+                    loadingConversationIds: omitKey(
+                        s.loadingConversationIds,
+                        conversationId
+                    )
+                }));
                 throw error;
             }
-        } finally {
-            set({ isStreaming: false, streamAbortController: null });
-            // Ensure no lingering streaming flags
+        },
+
+        createConversation: async (workspaceId: string, message: string) => {
+            const conversation = await conversationApi.createConversation(
+                workspaceId,
+                message
+            );
+
             set((state) => {
-                if (!state.activeConversation) return {};
+                const existing =
+                    state.conversationsByWorkspace[workspaceId] ?? [];
                 return {
-                    activeConversation: {
-                        ...state.activeConversation,
-                        messages: finalizeStreamingMessages(state.activeConversation.messages)
+                    activeConversationId: conversation.id,
+                    conversationsById: {
+                        ...state.conversationsById,
+                        [conversation.id]: conversation
+                    },
+                    conversationsByWorkspace: {
+                        ...state.conversationsByWorkspace,
+                        [workspaceId]: [conversation, ...existing]
                     }
                 };
             });
-        }
-    },
 
-    replyToConversation: async (workspaceId: string, conversationId: string) => {
-        if (get().isStreaming) {
-            return;
-        }
+            return conversation;
+        },
 
-        const streamAbortController = new AbortController();
-        set({ isStreaming: true, streamAbortController });
-
-        const updateActive = (
-            updater: (prev: ConversationWithMessages) => ConversationWithMessages
+        sendMessage: async (
+            workspaceId: string,
+            conversationId: string,
+            content: string
         ) => {
-            set((state) => {
-                if (!state.activeConversation) return {};
-                return { activeConversation: updater(state.activeConversation) };
-            });
-        };
-
-        try {
-            const response = await conversationApi.replyToConversation(
-                workspaceId,
-                conversationId,
-                streamAbortController.signal
+            await runConversationStream(conversationId, (signal) =>
+                conversationApi.streamMessage(
+                    workspaceId,
+                    conversationId,
+                    content,
+                    signal
+                )
             );
-            await runStream(response, conversationId, updateActive);
-        } catch (error) {
-            if (!isAbortError(error) && !streamAbortController.signal.aborted) {
-                throw error;
-            }
-        } finally {
-            set({ isStreaming: false, streamAbortController: null });
+        },
+
+        replyToConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            await runConversationStream(conversationId, (signal) =>
+                conversationApi.replyToConversation(
+                    workspaceId,
+                    conversationId,
+                    signal
+                )
+            );
+        },
+
+        deleteConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            get().streamControllersById[conversationId]?.abort();
+
+            await conversationApi.deleteConversation(
+                workspaceId,
+                conversationId
+            );
+
             set((state) => {
-                if (!state.activeConversation) return {};
+                const existing =
+                    state.conversationsByWorkspace[workspaceId] ?? [];
+
                 return {
-                    activeConversation: {
-                        ...state.activeConversation,
-                        messages: finalizeStreamingMessages(state.activeConversation.messages)
-                    }
+                    conversationsByWorkspace: {
+                        ...state.conversationsByWorkspace,
+                        [workspaceId]: existing.filter(
+                            (c) => c.id !== conversationId
+                        )
+                    },
+                    conversationsById: omitKey(
+                        state.conversationsById,
+                        conversationId
+                    ),
+                    streamControllersById: omitKey(
+                        state.streamControllersById,
+                        conversationId
+                    ),
+                    unreadConversationIds: omitKey(
+                        state.unreadConversationIds,
+                        conversationId
+                    ),
+                    loadingConversationIds: omitKey(
+                        state.loadingConversationIds,
+                        conversationId
+                    ),
+                    activeConversationId:
+                        state.activeConversationId === conversationId
+                            ? null
+                            : state.activeConversationId
                 };
             });
+        },
+
+        clearActiveConversation: () => {
+            set({ activeConversationId: null });
         }
-    },
-
-    deleteConversation: async (workspaceId: string, conversationId: string) => {
-        await conversationApi.deleteConversation(workspaceId, conversationId);
-
-        set((state) => {
-            const existing = state.conversationsByWorkspace[workspaceId] ?? [];
-            const updated = existing.filter((c) => c.id !== conversationId);
-
-            return {
-                conversationsByWorkspace: {
-                    ...state.conversationsByWorkspace,
-                    [workspaceId]: updated
-                },
-                activeConversation:
-                    state.activeConversation?.id === conversationId
-                        ? null
-                        : state.activeConversation
-            };
-        });
-    },
-
-    clearActiveConversation: () => {
-        set({ activeConversation: null });
-    }
-}));
+    };
+});

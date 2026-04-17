@@ -12,14 +12,19 @@ export const Route = createFileRoute("/conversations/$conversationId")({
 function ConversationRoute() {
     const { conversationId } = Route.useParams();
     const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-    const {
-        activeConversation,
-        isLoadingConversation,
-        isStreaming,
-        loadConversation,
-        sendMessage,
-        stopGeneration
-    } = useConversationStore();
+
+    const conversation = useConversationStore(
+        (s) => s.conversationsById[conversationId] ?? null
+    );
+    const isLoadingConversation = useConversationStore(
+        (s) => Boolean(s.loadingConversationIds[conversationId])
+    );
+    const isStreaming = useConversationStore(
+        (s) => Boolean(s.streamControllersById[conversationId])
+    );
+    const loadConversation = useConversationStore((s) => s.loadConversation);
+    const sendMessage = useConversationStore((s) => s.sendMessage);
+    const stopGeneration = useConversationStore((s) => s.stopGeneration);
 
     useEffect(() => {
         if (activeWorkspaceId) {
@@ -28,11 +33,15 @@ function ConversationRoute() {
     }, [activeWorkspaceId, conversationId, loadConversation]);
 
     const handleSend = (content: string) => {
-        if (!activeWorkspaceId || !activeConversation) return;
-        void sendMessage(activeWorkspaceId, activeConversation.id, content);
+        if (!activeWorkspaceId || !conversation) return;
+        void sendMessage(activeWorkspaceId, conversation.id, content);
     };
 
-    if (isLoadingConversation && !activeConversation) {
+    const handleStop = () => {
+        stopGeneration(conversationId);
+    };
+
+    if (isLoadingConversation && !conversation) {
         return (
             <div className="flex h-full items-center justify-center">
                 <span className="text-sm text-dark-300">Loading...</span>
@@ -40,7 +49,7 @@ function ConversationRoute() {
         );
     }
 
-    if (!activeConversation) {
+    if (!conversation) {
         return (
             <div className="flex h-full items-center justify-center">
                 <span className="text-sm text-dark-300">
@@ -50,7 +59,7 @@ function ConversationRoute() {
         );
     }
 
-    const visibleMessages = activeConversation.messages.filter(
+    const visibleMessages = conversation.messages.filter(
         (m) => m.role === "user" || m.role === "assistant"
     );
 
@@ -64,10 +73,10 @@ function ConversationRoute() {
                 <div className="mx-auto max-w-3xl px-4 py-3">
                     <ChatInput
                         onSend={handleSend}
-                        onStop={stopGeneration}
+                        onStop={handleStop}
                         isStreaming={isStreaming}
                         workspaceId={activeWorkspaceId}
-                        conversationId={activeConversation.id}
+                        conversationId={conversation.id}
                         placeholder={
                             isStreaming
                                 ? "Waiting for response..."
