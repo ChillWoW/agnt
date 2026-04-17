@@ -2,7 +2,13 @@ import { tool, type Tool } from "ai";
 import { logger } from "../../../lib/logger";
 import { getCategory } from "../../settings/settings.service";
 import type { ToolPermissionDecision } from "../../settings/settings.types";
-import { AGNT_TOOL_DEFS, createReadFileToolDef, type ToolDefinition } from "../tools";
+import {
+    AGNT_TOOL_DEFS,
+    createGlobToolDef,
+    createGrepToolDef,
+    createReadFileToolDef,
+    type ToolDefinition
+} from "../tools";
 import {
     isSessionAllowed,
     rememberSessionAllow,
@@ -91,10 +97,18 @@ export function buildConversationTools(
     const tools: Record<string, Tool> = {};
 
     const defs = AGNT_TOOL_DEFS.map((rawDef) => {
-        if (rawDef.name === "read_file") {
-            return createReadFileToolDef(ctx.workspacePath) as ToolDefinition;
+        switch (rawDef.name) {
+            case "read_file":
+                return createReadFileToolDef(
+                    ctx.workspacePath
+                ) as ToolDefinition;
+            case "glob":
+                return createGlobToolDef(ctx.workspacePath) as ToolDefinition;
+            case "grep":
+                return createGrepToolDef(ctx.workspacePath) as ToolDefinition;
+            default:
+                return rawDef;
         }
-        return rawDef;
     });
 
     for (const rawDef of defs) {
