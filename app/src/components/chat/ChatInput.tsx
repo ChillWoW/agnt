@@ -180,10 +180,7 @@ export function ChatInput({
                     />
                 )}
 
-                <AttachmentBar
-                    attachments={pending}
-                    onRemove={removePending}
-                />
+                <AttachmentBar attachments={pending} onRemove={removePending} />
 
                 <form className="flex flex-col gap-3" onSubmit={handleSend}>
                     <div className="px-2.5 pt-1.5">
@@ -201,11 +198,14 @@ export function ChatInput({
 
                     <div className="flex items-center justify-between px-2.5 h-10 gap-1">
                         <div className="flex items-center gap-1">
-                            <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+                            <Popover
+                                open={addMenuOpen}
+                                onOpenChange={setAddMenuOpen}
+                            >
                                 <PopoverTrigger
                                     disabled={!workspaceId}
                                     aria-label="Add attachments"
-                                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-dark-100 transition-colors hover:bg-dark-800 hover:text-dark-50 disabled:opacity-40 disabled:pointer-events-none outline-none"
+                                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-dark-200 transition-colors hover:bg-dark-800 hover:text-dark-50 disabled:opacity-40 disabled:pointer-events-none outline-none"
                                 >
                                     <PlusIcon
                                         className="size-4"
@@ -239,13 +239,6 @@ export function ChatInput({
                         </div>
 
                         <div className="flex items-center gap-1">
-                            <ContextMeter
-                                workspaceId={workspaceId}
-                                conversationId={conversationId}
-                                draft={value}
-                                pendingAttachments={pending}
-                            />
-
                             {isStreaming ? (
                                 <Tooltip content="Stop generating">
                                     <Button
@@ -293,10 +286,16 @@ export function ChatInput({
                 />
             </div>
 
-            <div className="flex items-center gap-1 px-1">
+            <div className="flex items-center justify-between px-1">
                 <PermissionModeSelector
                     workspaceId={workspaceId}
                     conversationId={conversationId}
+                />
+                <ContextMeter
+                    workspaceId={workspaceId}
+                    conversationId={conversationId}
+                    draft={value}
+                    pendingAttachments={pending}
                 />
             </div>
         </div>

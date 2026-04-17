@@ -215,7 +215,7 @@ function ContextMeterBody({
                     {summary.modelDisplayName}
                 </div>
                 <div className="mt-0.5 flex items-baseline gap-1.5 text-dark-50">
-                    <span className="font-mono text-xs">{headline}</span>
+                    <span className="text-xs">{headline}</span>
                     <span
                         className={cn(
                             "text-xs font-medium",
