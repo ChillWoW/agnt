@@ -110,7 +110,7 @@ export const readFileToolDef: ToolDefinition<
 > = {
     name: "read_file",
     description:
-        "Read the contents of a text file from the user's local filesystem. Use this when the user references a specific file or asks about its contents. The path must be absolute. Binary files are refused. Large files are truncated to the requested byte cap.",
+        "Read a text file from the local filesystem.",
     inputSchema: readFileInputSchema,
     execute: executeReadFile
 };
