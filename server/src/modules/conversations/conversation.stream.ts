@@ -8,6 +8,13 @@ import type { Message, ToolInvocationStatus } from "./conversations.types";
 import type { ReasoningEffort } from "../models/models.types";
 import { getModelById } from "../models/models.service";
 import {
+    linkAttachmentsToMessage,
+    listAttachmentsForMessage,
+    listAttachmentsForMessages,
+    readAttachmentBytes,
+    type AttachmentRow
+} from "../attachments/attachments.service";
+import {
     abortPermissions,
     buildConversationTools,
     subscribeToPermissions,
@@ -18,8 +25,18 @@ const DEFAULT_MODEL = "gpt-5.4-mini";
 
 const SYSTEM_INSTRUCTIONS = `You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.`;
 
+type UserTextPart = { type: "text"; text: string };
+type UserImagePart = { type: "image"; image: Uint8Array; mediaType: string };
+type UserFilePart = {
+    type: "file";
+    data: Uint8Array;
+    mediaType: string;
+    filename?: string;
+};
+type UserContentPart = UserTextPart | UserImagePart | UserFilePart;
+
 type ModelMessage =
-    | { role: "user"; content: string }
+    | { role: "user"; content: string | UserContentPart[] }
     | { role: "assistant"; content: string };
 
 function isAbortError(error: unknown): boolean {
@@ -57,13 +74,222 @@ function markPendingToolInvocationsAsError(
     ).run(reason, assistantMsgId);
 }
 
-function buildModelMessages(messages: Message[]): ModelMessage[] {
+const MAX_INLINE_TEXT_BYTES = 200_000;
+
+const TEXT_MIME_PATTERNS = [
+    /^text\//,
+    /\+json$/,
+    /\+xml$/,
+    /\+yaml$/,
+    /\/json$/,
+    /\/xml$/,
+    /\/javascript$/,
+    /\/typescript$/,
+    /\/yaml$/,
+    /\/toml$/,
+    /\/csv$/,
+    /\/markdown$/,
+    /\/x-sh$/,
+    /\/x-shellscript$/,
+    /\/x-python$/
+];
+
+function isKnownTextMime(mime: string): boolean {
+    const normalized = mime.toLowerCase();
+    return TEXT_MIME_PATTERNS.some((re) => re.test(normalized));
+}
+
+function looksLikeUtf8Text(bytes: Uint8Array): boolean {
+    const sample = bytes.subarray(0, Math.min(bytes.byteLength, 4096));
+
+    for (const byte of sample) {
+        if (byte === 0) return false;
+        if (byte === 9 || byte === 10 || byte === 13) continue;
+        if (byte < 32) return false;
+    }
+
+    try {
+        new TextDecoder("utf-8", { fatal: true }).decode(sample);
+    } catch {
+        return false;
+    }
+
+    return true;
+}
+
+function decodeAsText(bytes: Uint8Array): string {
+    const truncated = bytes.byteLength > MAX_INLINE_TEXT_BYTES;
+    const slice = truncated
+        ? bytes.subarray(0, MAX_INLINE_TEXT_BYTES)
+        : bytes;
+
+    try {
+        const text = new TextDecoder("utf-8").decode(slice);
+        return truncated
+            ? `${text}\n\n[...truncated ${bytes.byteLength - MAX_INLINE_TEXT_BYTES} bytes...]`
+            : text;
+    } catch {
+        return "";
+    }
+}
+
+function extFromName(name: string): string {
+    const idx = name.lastIndexOf(".");
+    if (idx <= 0 || idx === name.length - 1) return "";
+    return name.slice(idx + 1).toLowerCase();
+}
+
+type AttachmentEncoding =
+    | { kind: "image"; part: UserImagePart }
+    | { kind: "pdf"; part: UserFilePart }
+    | { kind: "text"; text: string }
+    | { kind: "unsupported" };
+
+function encodeAttachmentForModel(
+    workspaceId: string,
+    row: AttachmentRow
+): AttachmentEncoding {
+    let bytes: Uint8Array;
+    try {
+        bytes = readAttachmentBytes(workspaceId, row);
+    } catch (error) {
+        logger.error(
+            "[stream] Failed to read attachment bytes",
+            { id: row.id, path: row.storage_path },
+            error
+        );
+        return { kind: "unsupported" };
+    }
+
+    const mime = row.mime_type.toLowerCase();
+
+    if (mime.startsWith("image/")) {
+        return {
+            kind: "image",
+            part: {
+                type: "image",
+                image: bytes,
+                mediaType: row.mime_type
+            }
+        };
+    }
+
+    if (mime === "application/pdf") {
+        return {
+            kind: "pdf",
+            part: {
+                type: "file",
+                data: bytes,
+                mediaType: "application/pdf",
+                filename: row.file_name
+            }
+        };
+    }
+
+    if (isKnownTextMime(mime) || looksLikeUtf8Text(bytes)) {
+        const ext = extFromName(row.file_name);
+        const fence = ext || "";
+        const body = decodeAsText(bytes);
+        const text = `Attached file: ${row.file_name}\n\n\`\`\`${fence}\n${body}\n\`\`\``;
+        return { kind: "text", text };
+    }
+
+    logger.log(
+        "[stream] Skipping unsupported attachment media type for model input",
+        { id: row.id, mime: row.mime_type, name: row.file_name }
+    );
+    return { kind: "unsupported" };
+}
+
+function buildModelMessages(
+    workspaceId: string,
+    messages: Message[]
+): ModelMessage[] {
     const result: ModelMessage[] = [];
 
+    const userMessageIds = messages
+        .filter((m) => m.role === "user")
+        .map((m) => m.id);
+
+    const allAttachments =
+        userMessageIds.length > 0
+            ? listAttachmentsForMessages(workspaceId, userMessageIds)
+            : [];
+
+    const attachmentsByMessage = new Map<string, string[]>();
+    for (const att of allAttachments) {
+        if (!att.message_id) continue;
+        const list = attachmentsByMessage.get(att.message_id) ?? [];
+        list.push(att.id);
+        attachmentsByMessage.set(att.message_id, list);
+    }
+
     for (const msg of messages) {
-        if (msg.role === "user" || msg.role === "assistant") {
-            result.push({ role: msg.role, content: msg.content });
+        if (msg.role === "assistant") {
+            result.push({ role: "assistant", content: msg.content });
+            continue;
         }
+
+        if (msg.role !== "user") continue;
+
+        const hasAttachments = (attachmentsByMessage.get(msg.id)?.length ?? 0) > 0;
+
+        if (!hasAttachments) {
+            result.push({ role: "user", content: msg.content });
+            continue;
+        }
+
+        const rows = listAttachmentsForMessage(workspaceId, msg.id);
+        const binaryParts: UserContentPart[] = [];
+        const textBlocks: string[] = [];
+        const skippedNames: string[] = [];
+
+        for (const row of rows) {
+            const encoded = encodeAttachmentForModel(workspaceId, row);
+            switch (encoded.kind) {
+                case "image":
+                case "pdf":
+                    binaryParts.push(encoded.part);
+                    break;
+                case "text":
+                    textBlocks.push(encoded.text);
+                    break;
+                case "unsupported":
+                    skippedNames.push(row.file_name);
+                    break;
+            }
+        }
+
+        const textSegments: string[] = [];
+        if (msg.content.length > 0) {
+            textSegments.push(msg.content);
+        }
+        for (const block of textBlocks) {
+            textSegments.push(block);
+        }
+        if (skippedNames.length > 0) {
+            textSegments.push(
+                `[Note: the following attachments could not be sent to the model: ${skippedNames.join(", ")}]`
+            );
+        }
+
+        const combinedText = textSegments.join("\n\n");
+
+        if (binaryParts.length === 0) {
+            result.push({
+                role: "user",
+                content: combinedText.length > 0 ? combinedText : msg.content
+            });
+            continue;
+        }
+
+        const parts: UserContentPart[] = [];
+        if (combinedText.length > 0) {
+            parts.push({ type: "text", text: combinedText });
+        }
+        parts.push(...binaryParts);
+
+        result.push({ role: "user", content: parts });
     }
 
     return result;
@@ -482,7 +708,7 @@ export async function streamReplyToLastMessage(
 
     logger.log("[stream] Loaded", history.length, "messages for context");
 
-    const modelMessages = buildModelMessages(history);
+    const modelMessages = buildModelMessages(workspaceId, history);
 
     const assistantMsgId = crypto.randomUUID();
     const assistantCreatedAt = new Date().toISOString();
@@ -521,12 +747,14 @@ export async function streamConversationReply(
     workspaceId: string,
     conversationId: string,
     userContent: string,
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    attachmentIds: string[] = []
 ): Promise<Response> {
     logger.log("[stream] streamConversationReply start", {
         workspaceId,
         conversationId,
-        userContentLength: userContent.length
+        userContentLength: userContent.length,
+        attachmentCount: attachmentIds.length
     });
 
     const db = getWorkspaceDb(workspaceId);
@@ -564,9 +792,24 @@ export async function streamConversationReply(
         conversationId
     );
 
-    logger.log("[stream] Persisted user message:", userMsgId);
+    const linkedAttachments =
+        attachmentIds.length > 0
+            ? linkAttachmentsToMessage(
+                  workspaceId,
+                  attachmentIds,
+                  conversationId,
+                  userMsgId
+              )
+            : [];
 
-    const modelMessages = buildModelMessages([
+    logger.log(
+        "[stream] Persisted user message:",
+        userMsgId,
+        "attachments:",
+        linkedAttachments.length
+    );
+
+    const modelMessages = buildModelMessages(workspaceId, [
         ...history,
         {
             id: userMsgId,
@@ -593,7 +836,8 @@ export async function streamConversationReply(
                 role: "user" as const,
                 content: userContent,
                 conversation_id: conversationId,
-                created_at: now
+                created_at: now,
+                attachments: linkedAttachments
             })
         );
 

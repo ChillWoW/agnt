@@ -51,11 +51,25 @@ CREATE TABLE IF NOT EXISTS tool_invocations (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    storage_path TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('image', 'file')),
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_state_entries_scope ON state_entries(scope_type, scope_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope ON history_entries(scope_type, scope_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_history_entries_scope_key ON history_entries(scope_type, scope_id, key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_invocations_message ON tool_invocations(message_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(conversation_id, message_id, created_at);
 `;
 
 function ensureDir(dir: string): void {

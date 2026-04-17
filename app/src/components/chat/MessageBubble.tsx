@@ -1,9 +1,12 @@
 import { cn } from "@/lib/cn";
 import type { Message } from "@/features/conversations/conversation-types";
+import { resolveAttachmentContentUrl } from "@/features/attachments";
+import { useWorkspaceStore } from "@/features/workspaces";
 import { StreamingDots } from "./StreamingDots";
 import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
+import { MessageAttachments } from "./MessageAttachments";
 
 interface MessageBubbleProps {
     message: Message;
@@ -14,6 +17,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     const hasContent = message.content.trim().length > 0;
     const toolInvocations = message.tool_invocations ?? [];
     const hasToolCalls = toolInvocations.length > 0;
+    const attachments = message.attachments ?? [];
+    const hasAttachments = attachments.length > 0;
+    const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
     const showStreamingDots =
         message.isStreaming && !hasContent && !hasToolCalls && !message.isReasoning && !message.reasoning;
 
@@ -32,6 +38,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         : "w-full text-dark-50"
                 )}
             >
+                {hasAttachments && workspaceId && (
+                    <MessageAttachments
+                        attachments={attachments}
+                        workspaceId={workspaceId}
+                        resolveUrl={(id) =>
+                            resolveAttachmentContentUrl(workspaceId, id)
+                        }
+                        isUser={isUser}
+                    />
+                )}
+
                 {(message.reasoning || message.isReasoning) && (
                     <ThinkingBlock
                         reasoning={message.reasoning}

@@ -66,74 +66,70 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
         <div className="flex flex-col gap-0.5">
             {conversations.map((conv) => {
                 const isUnread = Boolean(unreadConversationIds[conv.id]);
-                const isStreaming = Boolean(
-                    streamingConversationIds[conv.id]
-                );
+                const isStreaming = Boolean(streamingConversationIds[conv.id]);
                 const isPendingPermission =
                     (pendingPermissions[conv.id]?.length ?? 0) > 0;
                 const isActive = activeConversationId === conv.id;
 
                 return (
-                <div
-                    key={conv.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() =>
-                        void navigate({
-                            to: "/conversations/$conversationId",
-                            params: { conversationId: conv.id }
-                        })
-                    }
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+                    <div
+                        key={conv.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
                             void navigate({
                                 to: "/conversations/$conversationId",
                                 params: { conversationId: conv.id }
-                            });
+                            })
                         }
-                    }}
-                    className={cn(
-                        "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
-                        isActive
-                            ? "bg-dark-800 text-dark-50"
-                            : isPendingPermission
-                              ? "text-amber-200 hover:bg-dark-800"
-                              : isUnread
-                                ? "text-dark-50 hover:bg-dark-800"
-                                : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
-                    )}
-                >
-                    {isPendingPermission ? (
-                        <ShieldWarningIcon
-                            className="size-3 shrink-0 text-amber-300 animate-pulse"
-                            weight="fill"
-                        />
-                    ) : (
-                        <MinusIcon
-                            className={cn(
-                                "size-3 shrink-0 transition-colors",
-                                isUnread
-                                    ? "text-dark-50"
-                                    : isStreaming
-                                      ? "text-dark-100 animate-pulse"
-                                      : "text-dark-300"
-                            )}
-                        />
-                    )}
-                    <span className="truncate flex-1">{conv.title}</span>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            void useConversationStore
-                                .getState()
-                                .deleteConversation(workspaceId, conv.id);
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                void navigate({
+                                    to: "/conversations/$conversationId",
+                                    params: { conversationId: conv.id }
+                                });
+                            }
                         }}
-                        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-red-400 p-0.5"
+                        className={cn(
+                            "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
+                            isActive
+                                ? "bg-dark-800 text-dark-50"
+                                : isUnread
+                                  ? "text-dark-50 hover:bg-dark-800"
+                                  : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                        )}
                     >
-                        {/* TODO: Change to archiving system */}
-                        <TrashIcon className="size-3" />
-                    </button>
-                </div>
+                        {isPendingPermission ? (
+                            <ShieldWarningIcon
+                                className="size-3 shrink-0 text-dark-50 animate-pulse"
+                                weight="fill"
+                            />
+                        ) : (
+                            <MinusIcon
+                                className={cn(
+                                    "size-3 shrink-0 transition-colors",
+                                    isUnread
+                                        ? "text-dark-50"
+                                        : isStreaming
+                                          ? "text-dark-100 animate-pulse"
+                                          : "text-dark-300"
+                                )}
+                            />
+                        )}
+                        <span className="truncate flex-1">{conv.title}</span>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                void useConversationStore
+                                    .getState()
+                                    .deleteConversation(workspaceId, conv.id);
+                            }}
+                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-red-400 p-0.5"
+                        >
+                            {/* TODO: Change to archiving system */}
+                            <TrashIcon className="size-3" />
+                        </button>
+                    </div>
                 );
             })}
         </div>

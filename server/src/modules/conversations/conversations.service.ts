@@ -1,4 +1,8 @@
 import { getWorkspaceDb } from "../../lib/db";
+import {
+    linkAttachmentsToMessage,
+    listAttachmentsForMessages
+} from "../attachments/attachments.service";
 import type {
     Conversation,
     ConversationWithMessages,
@@ -82,17 +86,36 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         invocationsByMessage.set(row.message_id, list);
     }
 
+    const attachmentDtos = listAttachmentsForMessages(workspaceId, messageIds);
+    const attachmentsByMessage = new Map<string, typeof attachmentDtos>();
+    for (const att of attachmentDtos) {
+        if (!att.message_id) continue;
+        const list = attachmentsByMessage.get(att.message_id) ?? [];
+        list.push(att);
+        attachmentsByMessage.set(att.message_id, list);
+    }
+
     const messagesWithTools: Message[] = messages.map((m) => {
         const tools = invocationsByMessage.get(m.id);
-        return tools && tools.length > 0
-            ? { ...m, tool_invocations: tools }
-            : m;
+        const attachments = attachmentsByMessage.get(m.id);
+        const enriched: Message = {
+            ...m,
+            ...(tools && tools.length > 0 ? { tool_invocations: tools } : {}),
+            ...(attachments && attachments.length > 0
+                ? { attachments }
+                : {})
+        };
+        return enriched;
     });
 
     return { ...conversation, messages: messagesWithTools };
 }
 
-export function createConversation(workspaceId: string, firstMessage: string): ConversationWithMessages {
+export function createConversation(
+    workspaceId: string,
+    firstMessage: string,
+    attachmentIds: string[] = []
+): ConversationWithMessages {
     const db = getWorkspaceDb(workspaceId);
 
     const conversationId = crypto.randomUUID();
@@ -111,6 +134,16 @@ export function createConversation(workspaceId: string, firstMessage: string): C
 
     tx();
 
+    const attachments =
+        attachmentIds.length > 0
+            ? linkAttachmentsToMessage(
+                  workspaceId,
+                  attachmentIds,
+                  conversationId,
+                  messageId
+              )
+            : [];
+
     return {
         id: conversationId,
         title: "New conversation",
@@ -122,7 +155,8 @@ export function createConversation(workspaceId: string, firstMessage: string): C
                 conversation_id: conversationId,
                 role: "user",
                 content: firstMessage,
-                created_at: now
+                created_at: now,
+                ...(attachments.length > 0 ? { attachments } : {})
             }
         ]
     };

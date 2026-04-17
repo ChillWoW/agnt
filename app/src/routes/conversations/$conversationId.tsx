@@ -32,9 +32,14 @@ function ConversationRoute() {
         }
     }, [activeWorkspaceId, conversationId, loadConversation]);
 
-    const handleSend = (content: string) => {
+    const handleSend = (content: string, attachmentIds: string[]) => {
         if (!activeWorkspaceId || !conversation) return;
-        void sendMessage(activeWorkspaceId, conversation.id, content);
+        void sendMessage(
+            activeWorkspaceId,
+            conversation.id,
+            content,
+            attachmentIds
+        );
     };
 
     const handleStop = () => {

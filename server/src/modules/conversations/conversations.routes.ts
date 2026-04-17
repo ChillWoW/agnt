@@ -29,14 +29,23 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     })
     .post("/:id/conversations", async ({ params, body, set }) => {
         try {
-            const { message } = body as { message: string };
+            const { message, attachmentIds } = body as {
+                message: string;
+                attachmentIds?: unknown;
+            };
 
             if (!message || typeof message !== "string") {
                 set.status = 400;
                 return { error: "Missing or invalid 'message' field" };
             }
 
-            return createConversation(params.id, message);
+            const ids = Array.isArray(attachmentIds)
+                ? (attachmentIds.filter(
+                      (id) => typeof id === "string"
+                  ) as string[])
+                : [];
+
+            return createConversation(params.id, message, ids);
         } catch (error) {
             set.status = 400;
             return {
@@ -111,18 +120,28 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     })
     .post("/:id/conversations/:conversationId/stream", async ({ params, body, request, set }) => {
         try {
-            const { content } = body as { content: string };
+            const { content, attachmentIds } = body as {
+                content: string;
+                attachmentIds?: unknown;
+            };
 
             if (!content || typeof content !== "string") {
                 set.status = 400;
                 return { error: "Missing or invalid 'content' field" };
             }
 
+            const ids = Array.isArray(attachmentIds)
+                ? (attachmentIds.filter(
+                      (id) => typeof id === "string"
+                  ) as string[])
+                : [];
+
             return streamConversationReply(
                 params.id,
                 params.conversationId,
                 content,
-                request.signal
+                request.signal,
+                ids
             );
         } catch (error) {
             set.status =

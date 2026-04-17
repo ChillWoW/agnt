@@ -1,3 +1,5 @@
+import type { Attachment } from "@/features/attachments";
+
 export type MessageRole = "user" | "assistant" | "system";
 
 export type ToolInvocationStatus = "pending" | "success" | "error";
@@ -21,6 +23,7 @@ export interface Message {
     created_at: string;
     isStreaming?: boolean;
     tool_invocations?: ToolInvocation[];
+    attachments?: Attachment[];
     reasoning?: string;
     isReasoning?: boolean;
 }

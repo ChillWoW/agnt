@@ -19,13 +19,27 @@ export const toolInvocationSchema = z.object({
     created_at: z.string()
 });
 
+export const attachmentKindSchema = z.enum(["image", "file"]);
+
+export const attachmentSchema = z.object({
+    id: z.string().uuid(),
+    conversation_id: z.string().uuid().nullable(),
+    message_id: z.string().uuid().nullable(),
+    file_name: z.string(),
+    mime_type: z.string(),
+    size_bytes: z.number().int().nonnegative(),
+    kind: attachmentKindSchema,
+    created_at: z.string()
+});
+
 export const messageSchema = z.object({
     id: z.string().uuid(),
     conversation_id: z.string().uuid(),
     role: messageRoleSchema,
     content: z.string(),
     created_at: z.string(),
-    tool_invocations: z.array(toolInvocationSchema).optional()
+    tool_invocations: z.array(toolInvocationSchema).optional(),
+    attachments: z.array(attachmentSchema).optional()
 });
 
 export const conversationSchema = z.object({
@@ -42,6 +56,8 @@ export const conversationWithMessagesSchema = conversationSchema.extend({
 export type MessageRole = z.infer<typeof messageRoleSchema>;
 export type ToolInvocationStatus = z.infer<typeof toolInvocationStatusSchema>;
 export type ToolInvocation = z.infer<typeof toolInvocationSchema>;
+export type AttachmentKind = z.infer<typeof attachmentKindSchema>;
+export type Attachment = z.infer<typeof attachmentSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type ConversationWithMessages = z.infer<typeof conversationWithMessagesSchema>;

@@ -9,6 +9,7 @@ import type {
 import * as conversationApi from "./conversation-api";
 import { usePermissionStore } from "@/features/permissions";
 import type { PermissionRequest } from "@/features/permissions";
+import type { Attachment } from "@/features/attachments";
 
 interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
@@ -25,8 +26,17 @@ interface ConversationStoreState {
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
-    createConversation: (workspaceId: string, message: string) => Promise<ConversationWithMessages>;
-    sendMessage: (workspaceId: string, conversationId: string, content: string) => Promise<void>;
+    createConversation: (
+        workspaceId: string,
+        message: string,
+        attachmentIds?: string[]
+    ) => Promise<ConversationWithMessages>;
+    sendMessage: (
+        workspaceId: string,
+        conversationId: string,
+        content: string,
+        attachmentIds?: string[]
+    ) => Promise<void>;
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     deleteConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     clearActiveConversation: () => void;
@@ -136,19 +146,37 @@ async function runStream(
     await consumeSseStream(response, (event, data) => {
         switch (event) {
             case "user-message": {
+                const attachments = Array.isArray(data.attachments)
+                    ? (data.attachments as Attachment[])
+                    : undefined;
                 const msg: Message = {
                     id: data.id as string,
                     conversation_id: data.conversation_id as string,
                     role: "user",
                     content: data.content as string,
-                    created_at: data.created_at as string
+                    created_at: data.created_at as string,
+                    ...(attachments && attachments.length > 0
+                        ? { attachments }
+                        : {})
                 };
                 updateConversation((prev) => {
                     const exists = prev.messages.some((m) => m.id === msg.id);
-                    return {
-                        ...prev,
-                        messages: exists ? prev.messages : [...prev.messages, msg]
-                    };
+                    if (exists) {
+                        return {
+                            ...prev,
+                            messages: prev.messages.map((m) =>
+                                m.id === msg.id
+                                    ? {
+                                          ...m,
+                                          ...(attachments && attachments.length > 0
+                                              ? { attachments }
+                                              : {})
+                                      }
+                                    : m
+                            )
+                        };
+                    }
+                    return { ...prev, messages: [...prev.messages, msg] };
                 });
                 break;
             }
@@ -595,10 +623,15 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             }
         },
 
-        createConversation: async (workspaceId: string, message: string) => {
+        createConversation: async (
+            workspaceId: string,
+            message: string,
+            attachmentIds: string[] = []
+        ) => {
             const conversation = await conversationApi.createConversation(
                 workspaceId,
-                message
+                message,
+                attachmentIds
             );
 
             set((state) => {
@@ -623,14 +656,16 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         sendMessage: async (
             workspaceId: string,
             conversationId: string,
-            content: string
+            content: string,
+            attachmentIds: string[] = []
         ) => {
             await runConversationStream(conversationId, (signal) =>
                 conversationApi.streamMessage(
                     workspaceId,
                     conversationId,
                     content,
-                    signal
+                    signal,
+                    attachmentIds
                 )
             );
         },

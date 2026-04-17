@@ -11,10 +11,14 @@ export function fetchConversation(workspaceId: string, conversationId: string) {
     );
 }
 
-export function createConversation(workspaceId: string, message: string) {
+export function createConversation(
+    workspaceId: string,
+    message: string,
+    attachmentIds: string[] = []
+) {
     return api.post<ConversationWithMessages>(
         `/workspaces/${workspaceId}/conversations`,
-        { body: { message } }
+        { body: { message, attachmentIds } }
     );
 }
 
@@ -34,11 +38,12 @@ export function streamMessage(
     workspaceId: string,
     conversationId: string,
     content: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    attachmentIds: string[] = []
 ): Promise<Response> {
     return api.post<Response>(
         `/workspaces/${workspaceId}/conversations/${conversationId}/stream`,
-        { body: { content }, parseAs: "response", signal }
+        { body: { content, attachmentIds }, parseAs: "response", signal }
     );
 }
 
