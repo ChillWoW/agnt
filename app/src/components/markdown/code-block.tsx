@@ -20,17 +20,17 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
     }, [children]);
 
     return (
-        <div className="my-3 overflow-hidden rounded-md border border-dark-600 bg-dark-900">
-            <div className="flex items-center justify-between border-b border-dark-600 px-2.5 h-8">
+        <div className="my-3 overflow-hidden rounded-md border border-dark-700 bg-dark-900">
+            <div className="flex items-center justify-between border-b border-dark-700 bg-dark-850 px-2.5 h-8">
                 {language && (
-                    <span className="text-[11px] font-medium text-dark-200 tracking-wide">
+                    <span className="text-[11px] font-medium text-dark-300">
                         {language.charAt(0).toUpperCase() + language.slice(1)}
                     </span>
                 )}
                 <button
                     type="button"
                     onClick={handleCopy}
-                    className="ml-auto flex items-center gap-1.5 rounded px-1.5 h-6 text-[11px] text-dark-200 transition-colors hover:bg-dark-700 hover:text-dark-50"
+                    className="ml-auto flex items-center gap-1.5 rounded px-1.5 h-6 text-[11px] text-dark-300 transition-colors hover:bg-dark-800 hover:text-dark-50"
                 >
                     {copied ? (
                         <CheckIcon className="size-3" weight="bold" />
@@ -45,10 +45,10 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
                 style={vscDarkPlus}
                 customStyle={{
                     margin: 0,
-                    padding: "6px 10px",
+                    padding: "8px 12px",
                     background: "transparent",
                     fontSize: "13px",
-                    lineHeight: "1.5"
+                    lineHeight: "1.6"
                 }}
                 codeTagProps={{
                     style: { fontFamily: '"IBM Plex Mono", monospace' }
