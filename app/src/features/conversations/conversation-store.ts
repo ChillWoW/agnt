@@ -48,17 +48,31 @@ function omitKey<V>(
     return rest;
 }
 
+function isAssistantMessageEmpty(message: Message): boolean {
+    if (message.role !== "assistant") return false;
+    if (message.content.length > 0) return false;
+    if ((message.tool_invocations?.length ?? 0) > 0) return false;
+    if ((message.reasoning?.length ?? 0) > 0) return false;
+    return true;
+}
+
 function finalizeStreamingMessages(messages: Message[]): Message[] {
     return messages.flatMap((message) => {
         if (!message.isStreaming) {
             return [message];
         }
 
-        if (message.role === "assistant" && message.content.length === 0) {
+        if (isAssistantMessageEmpty(message)) {
             return [];
         }
 
-        return [{ ...message, isStreaming: false }];
+        return [
+            {
+                ...message,
+                isStreaming: false,
+                isReasoning: false
+            }
+        ];
     });
 }
 
@@ -333,11 +347,17 @@ async function runStream(
                             return [message];
                         }
 
-                        if (message.content.length === 0) {
+                        if (isAssistantMessageEmpty(message)) {
                             return [];
                         }
 
-                        return [{ ...message, isStreaming: false }];
+                        return [
+                            {
+                                ...message,
+                                isStreaming: false,
+                                isReasoning: false
+                            }
+                        ];
                     });
 
                     return { ...prev, messages };
