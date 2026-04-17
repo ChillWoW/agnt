@@ -46,6 +46,7 @@ export function ThinkingBlock({
             successLabel="Thought"
             detail={detail || undefined}
             status={isReasoning ? "pending" : "success"}
+            autoOpen
             autoClose
         >
             {reasoning && (
