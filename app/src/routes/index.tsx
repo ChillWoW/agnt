@@ -59,7 +59,7 @@ function HomeRoute() {
             </div>
 
             <div className="shrink-0">
-                <div className="mx-auto w-full max-w-3xl px-4 py-4">
+                <div className="mx-auto w-full max-w-3xl px-4 pt-4 pb-2">
                     {workspaces.length > 0 && (
                         <div className="mb-1.5">
                             <Popover>
