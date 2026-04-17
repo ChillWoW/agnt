@@ -1,9 +1,4 @@
-import {
-    CaretUpDownIcon,
-    CheckIcon,
-    LightningIcon,
-    ShieldCheckIcon
-} from "@phosphor-icons/react";
+import { CaretUpDownIcon, CheckIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import {
     Popover,
@@ -11,6 +6,11 @@ import {
     PopoverTrigger,
     Button
 } from "@/components/ui";
+import {
+    HotkeyShortcut,
+    useHotkey,
+    useResolvedHotkeyCombo
+} from "@/features/hotkeys";
 import { cn } from "@/lib/cn";
 import { usePermissionMode, type PermissionMode } from "@/features/permissions";
 
@@ -19,29 +19,10 @@ interface PermissionModeSelectorProps {
     conversationId?: string | null;
 }
 
-const OPTIONS: Array<{
-    value: PermissionMode;
-    label: string;
-    description: string;
-}> = [
-    {
-        value: "ask",
-        label: "Ask permissions",
-        description: "Ask before running tools that need approval."
-    },
-    {
-        value: "bypass",
-        label: "Bypass permissions",
-        description: "Let the agent run every tool without asking."
-    }
+const OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+    { value: "ask", label: "Ask permissions" },
+    { value: "bypass", label: "Bypass permissions" }
 ];
-
-function modeIcon(mode: PermissionMode) {
-    if (mode === "bypass") {
-        return <LightningIcon className="size-3.5 shrink-0" weight="fill" />;
-    }
-    return <ShieldCheckIcon className="size-3.5 shrink-0" />;
-}
 
 function labelFor(mode: PermissionMode) {
     return OPTIONS.find((opt) => opt.value === mode)?.label ?? mode;
@@ -57,20 +38,27 @@ export function PermissionModeSelector({
         conversationId
     });
 
+    const cycleHotkey = useResolvedHotkeyCombo("permissions.mode.cycle");
+
+    useHotkey({
+        id: "permissions.mode.cycle",
+        label: "Cycle permission mode",
+        description: "Toggle between Ask and Bypass permission modes",
+        defaultCombo: "Ctrl+Shift+P",
+        handler: () => {
+            const next = mode === "ask" ? "bypass" : "ask";
+            void setPermissionMode(next);
+        }
+    });
+
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger className="w-auto">
                 <Button
                     variant="ghost"
                     size="sm"
-                    className={cn(
-                        "h-7 gap-2 hover:bg-dark-800",
-                        mode === "bypass"
-                            ? "text-amber-300 hover:text-amber-200"
-                            : "text-dark-200"
-                    )}
+                    className="h-7 gap-2 hover:bg-dark-800 text-dark-200"
                 >
-                    {modeIcon(mode)}
                     <span className="truncate">{labelFor(mode)}</span>
                     <CaretUpDownIcon className="size-3.5 shrink-0 text-dark-300" />
                 </Button>
@@ -82,6 +70,10 @@ export function PermissionModeSelector({
                 sideOffset={8}
                 className="w-64 p-1"
             >
+                <div className="mb-1 flex items-center justify-between px-2.5 py-1">
+                    <span className="text-xs text-dark-200">Permissions</span>
+                    <HotkeyShortcut combo={cycleHotkey} />
+                </div>
                 <div className="space-y-0.5">
                     {OPTIONS.map((option) => {
                         const isActive = mode === option.value;
@@ -94,31 +86,16 @@ export function PermissionModeSelector({
                                     setOpen(false);
                                 }}
                                 className={cn(
-                                    "flex w-full items-start justify-between gap-2 rounded-sm px-2.5 py-1.5 text-left transition-colors",
+                                    "flex w-full items-center justify-between gap-2 rounded-sm px-2.5 py-1.5 text-xs transition-colors",
                                     isActive
-                                        ? "bg-dark-800"
-                                        : "hover:bg-dark-800"
+                                        ? "bg-dark-800 text-dark-50"
+                                        : "text-dark-200 hover:bg-dark-800 hover:text-dark-50"
                                 )}
                             >
-                                <div className="flex min-w-0 flex-col gap-0.5">
-                                    <span
-                                        className={cn(
-                                            "flex items-center gap-1.5 text-xs font-medium",
-                                            isActive
-                                                ? "text-dark-50"
-                                                : "text-dark-100"
-                                        )}
-                                    >
-                                        {modeIcon(option.value)}
-                                        {option.label}
-                                    </span>
-                                    <span className="text-[11px] leading-snug text-dark-300">
-                                        {option.description}
-                                    </span>
-                                </div>
+                                {option.label}
                                 {isActive && (
                                     <CheckIcon
-                                        className="mt-0.5 size-3 shrink-0 text-dark-100"
+                                        className="size-3 shrink-0 text-dark-100"
                                         weight="bold"
                                     />
                                 )}

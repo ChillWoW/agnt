@@ -30,7 +30,7 @@ export function HotkeyShortcut({
             {tokens.map((token) => (
                 <kbd
                     key={`${combo}-${token}`}
-                    className="inline-flex min-w-5 items-center justify-center rounded-sm border border-dark-600 bg-dark-900 px-1.5 py-0.5 font-mono text-[10px] font-medium text-dark-100"
+                    className="inline-flex min-w-6 items-center justify-center rounded-sm border border-dark-600 bg-dark-800 px-1.5 py-0.5 font-mono text-[10px] font-medium text-dark-50"
                 >
                     {token}
                 </kbd>
