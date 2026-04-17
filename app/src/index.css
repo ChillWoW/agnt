@@ -1,4 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400..700;1,400..700&display=swap");
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@300.woff2") format("woff2"); font-weight: 300; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@900.woff2") format("woff2"); font-weight: 900; font-display: swap; }
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -55,7 +61,7 @@
 
 body {
     margin: 0;
-    font-family: "DM Sans", sans-serif;
+    font-family: "Phantom", sans-serif;
     height: 100%;
     background-color: var(--color-dark-950);
     -webkit-font-smoothing: antialiased;
