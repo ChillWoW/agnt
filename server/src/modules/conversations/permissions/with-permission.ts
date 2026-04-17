@@ -2,7 +2,7 @@ import { tool, type Tool } from "ai";
 import { logger } from "../../../lib/logger";
 import { getCategory } from "../../settings/settings.service";
 import type { ToolPermissionDecision } from "../../settings/settings.types";
-import { AGNT_TOOL_DEFS, type ToolDefinition } from "../tools";
+import { AGNT_TOOL_DEFS, createReadFileToolDef, type ToolDefinition } from "../tools";
 import {
     isSessionAllowed,
     rememberSessionAllow,
@@ -14,6 +14,7 @@ export type PermissionMode = "ask" | "bypass";
 export interface ConversationPermissionContext {
     conversationId: string;
     getMode: () => PermissionMode;
+    workspacePath?: string;
 }
 
 function resolveConfiguredDecision(
@@ -89,7 +90,14 @@ export function buildConversationTools(
 ): Record<string, Tool> {
     const tools: Record<string, Tool> = {};
 
-    for (const rawDef of AGNT_TOOL_DEFS) {
+    const defs = AGNT_TOOL_DEFS.map((rawDef) => {
+        if (rawDef.name === "read_file") {
+            return createReadFileToolDef(ctx.workspacePath) as ToolDefinition;
+        }
+        return rawDef;
+    });
+
+    for (const rawDef of defs) {
         const def = rawDef as ToolDefinition<object, unknown>;
 
         tools[def.name] = tool({

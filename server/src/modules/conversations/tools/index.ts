@@ -1,4 +1,4 @@
-import { readFileToolDef } from "./read-file";
+import { readFileToolDef, createReadFileToolDef } from "./read-file";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -12,5 +12,5 @@ export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
 
 export type AgntToolName = (typeof AGNT_TOOL_DEFS)[number]["name"];
 
-export { readFileToolDef };
+export { readFileToolDef, createReadFileToolDef };
 export type { ToolDefinition };

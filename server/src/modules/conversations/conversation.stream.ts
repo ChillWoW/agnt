@@ -1,6 +1,7 @@
 import { stepCountIs, streamText } from "ai";
 import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
+import { getWorkspace } from "../workspaces/workspaces.service";
 import { createCodexClient } from "./codex-client";
 import { buildStreamResponse, sseEvent, type SseStreamController } from "./conversation.sse";
 import { getEffectiveConversationState } from "../history/history.service";
@@ -467,8 +468,16 @@ async function runStreamTextIntoController({
             openaiOptions.reasoningEffort = reasoningEffort;
         }
 
+        let workspacePath: string | undefined;
+        try {
+            workspacePath = getWorkspace(workspaceId).path;
+        } catch {
+            // workspace may not exist; tools will reject relative paths
+        }
+
         const tools = buildConversationTools({
             conversationId,
+            workspacePath,
             getMode: () => {
                 // Re-resolve permission mode from effective conversation
                 // state on every tool invocation so toggling the selector
