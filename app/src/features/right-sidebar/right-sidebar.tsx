@@ -10,16 +10,18 @@ import {
     FolderOpenIcon
 } from "@phosphor-icons/react";
 import { GitTab, BrowserTab, TerminalsTab, FiletreeTab } from "./tabs";
+import { KeybindTooltip } from "@/components/ui/Tooltip";
+import type { HotkeyCombo } from "@/features/hotkeys/types";
 
 const MAIN_MIN_VISIBLE = 20;
 
 type Tab = "git" | "browser" | "terminal" | "filetree";
 
-const TABS: { id: Tab; label: string; Icon: React.ElementType }[] = [
-    { id: "git", label: "Git", Icon: GitBranchIcon },
-    { id: "filetree", label: "Files", Icon: FolderOpenIcon },
-    { id: "browser", label: "Browser", Icon: GlobeIcon },
-    { id: "terminal", label: "Terminals", Icon: TerminalIcon }
+const TABS: { id: Tab; label: string; Icon: React.ElementType; hotkey?: HotkeyCombo }[] = [
+    { id: "git", label: "Git", Icon: GitBranchIcon, hotkey: "Ctrl+Shift+G" },
+    { id: "filetree", label: "Files", Icon: FolderOpenIcon, hotkey: "Ctrl+G" },
+    { id: "browser", label: "Browser", Icon: GlobeIcon, hotkey: "Ctrl+Alt+B" },
+    { id: "terminal", label: "Terminals", Icon: TerminalIcon, hotkey: "Ctrl+T" }
 ];
 
 export function RightSidebar() {
@@ -35,6 +37,35 @@ export function RightSidebar() {
         defaultCombo: "Ctrl+Shift+B",
         handler: toggleSidebar
     });
+
+    useHotkey({
+        id: "layout.right-sidebar.git",
+        label: "Open Git tab",
+        defaultCombo: "Ctrl+Shift+G",
+        handler: () => setActiveTab("git")
+    });
+
+    useHotkey({
+        id: "layout.right-sidebar.filetree",
+        label: "Open Files tab",
+        defaultCombo: "Ctrl+G",
+        handler: () => setActiveTab("filetree")
+    });
+
+    useHotkey({
+        id: "layout.right-sidebar.browser",
+        label: "Open Browser tab",
+        defaultCombo: "Ctrl+Alt+B",
+        handler: () => setActiveTab("browser")
+    });
+
+    useHotkey({
+        id: "layout.right-sidebar.terminals",
+        label: "Open Terminals tab",
+        defaultCombo: "Ctrl+T",
+        handler: () => setActiveTab("terminal")
+    });
+
     const isDragging = useRef(false);
     const startX = useRef(0);
     const startWidth = useRef(0);
@@ -97,21 +128,27 @@ export function RightSidebar() {
                         className="flex h-full flex-col overflow-hidden"
                         style={{ width }}
                     >
-                        <div className="flex h-8 shrink-0 items-center border-b border-dark-700 px-2.5 gap-1">
-                            {TABS.map(({ id, label, Icon }) => (
-                                <button
+                        <div className="flex h-8 shrink-0 items-center border-b border-dark-700 px-2.5 gap-0.5">
+                            {TABS.map(({ id, label, Icon, hotkey }) => (
+                                <KeybindTooltip
                                     key={id}
-                                    onClick={() => setActiveTab(id)}
-                                    className={cn(
-                                        "flex items-center gap-1.5 px-2 h-full text-xs font-medium transition-colors border-b-2 -mb-px",
-                                        activeTab === id
-                                            ? "text-dark-50 border-dark-50"
-                                            : "text-dark-300 border-transparent hover:text-dark-100"
-                                    )}
+                                    content={label}
+                                    keybind={hotkey}
+                                    side="bottom"
+                                    sideOffset={6}
                                 >
-                                    <Icon className="size-3.5" />
-                                    {label}
-                                </button>
+                                    <button
+                                        onClick={() => setActiveTab(id)}
+                                        className={cn(
+                                            "flex items-center justify-center size-6 rounded transition-colors",
+                                            activeTab === id
+                                                ? "bg-dark-700 text-dark-50"
+                                                : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                                        )}
+                                    >
+                                        <Icon className="size-3.5" />
+                                    </button>
+                                </KeybindTooltip>
                             ))}
                         </div>
 
