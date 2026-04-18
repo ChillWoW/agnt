@@ -56,7 +56,7 @@ export function FileViewer({ path }: FileViewerProps) {
     const renderAsMarkdown = isMarkdownFile(file.name);
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {file.truncated && (
                 <div className="shrink-0 border-b border-dark-700 bg-dark-850 px-3 py-1 text-[11px] text-dark-300">
                     File truncated — showing first {formatBytes(file.size)} is
@@ -64,11 +64,11 @@ export function FileViewer({ path }: FileViewerProps) {
                 </div>
             )}
             {renderAsMarkdown ? (
-                <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-2">
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto px-3 py-2">
                     <MarkdownRenderer content={content} />
                 </div>
             ) : (
-                <div className="min-h-0 flex-1 overflow-auto">
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto">
                     <SyntaxHighlighter
                         language={getPrismLanguage(file.name)}
                         style={vscDarkPlus}
