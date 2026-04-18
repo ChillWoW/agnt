@@ -1,11 +1,5 @@
 import { z } from "zod";
 
-export const generalSettingsSchema = z.object({
-    launchAtStartup: z.boolean().default(false),
-    minimizeToTray: z.boolean().default(false),
-    confirmOnClose: z.boolean().default(true)
-});
-
 export const toolPermissionDecisionSchema = z.enum(["ask", "allow", "deny"]);
 
 export const toolPermissionsSettingsSchema = z.object({
@@ -13,30 +7,32 @@ export const toolPermissionsSettingsSchema = z.object({
 });
 
 export const settingsSchema = z.object({
-    general: generalSettingsSchema.default({
-        launchAtStartup: false,
-        minimizeToTray: false,
-        confirmOnClose: true
-    }),
+    hotkeys: z
+        .object({
+            bindings: z.record(z.string(), z.union([z.string(), z.null()])).default({})
+        })
+        .default({
+            bindings: {}
+        }),
     toolPermissions: toolPermissionsSettingsSchema.default({
         defaults: {}
     })
 });
 
-export type GeneralSettings = z.infer<typeof generalSettingsSchema>;
+export type HotkeySettings = z.infer<typeof settingsSchema.shape.hotkeys>;
 export type ToolPermissionDecision = z.infer<typeof toolPermissionDecisionSchema>;
 export type ToolPermissionsSettings = z.infer<typeof toolPermissionsSettingsSchema>;
 export type Settings = z.infer<typeof settingsSchema>;
 export type SettingsCategory = keyof Settings;
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-    "general",
+    "hotkeys",
     "toolPermissions"
 ] as const;
 
 export const DEFAULT_SETTINGS: Settings = settingsSchema.parse({});
 
 export const categorySchemas: Record<SettingsCategory, z.ZodType> = {
-    general: generalSettingsSchema,
+    hotkeys: settingsSchema.shape.hotkeys,
     toolPermissions: toolPermissionsSettingsSchema
 };

@@ -11,7 +11,7 @@ type SettingsState = {
 
 export const useSettingsStore = create<SettingsState>()((set) => ({
     isOpen: false,
-    activeCategory: "general",
+    activeCategory: "hotkeys",
     open: () => set({ isOpen: true }),
     close: () => set({ isOpen: false }),
     toggle: () => set((state) => ({ isOpen: !state.isOpen })),

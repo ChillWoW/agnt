@@ -86,6 +86,11 @@ From `server/`:
 - `app/src/features/server/*` polls `http://127.0.0.1:4727/health` every 3s.
 - `waitForServerConnection()` is a global gate used by `app/src/lib/api.ts` before HTTP requests.
 
+### Global settings
+- Global app settings are stored at `~/.agnt/settings.json`.
+- Supported settings categories are `hotkeys` and `toolPermissions`.
+- Legacy/unknown keys are stripped and rewritten on load so removed categories do not persist.
+
 ### Conversation storage (SQLite)
 - Each workspace has a SQLite database at `~/.agnt/workspaces/<workspaceId>/conversations.db`.
 - Tables: `conversations` (id, title, created_at, updated_at), `messages` (id, conversation_id, role, content, persisted reasoning fields `reasoning_content`/`reasoning_started_at`/`reasoning_ended_at`, token columns `input_tokens`/`output_tokens`/`reasoning_tokens`/`total_tokens`, `compacted` flag, `summary_of_until` for compacted summary rows), `attachments` (adds `estimated_tokens`), `state_entries` (latest workspace/conversation key-value state), `history_entries` (append-only workspace/conversation state history), and `tool_invocations` (id, message_id, tool_name, input_json, output_json, error, status, created_at) linked to assistant messages with cascade delete.
@@ -199,6 +204,7 @@ Keep this section compact to avoid context bloat:
 - One line per entry.
 - Keep only the latest 10 entries; collapse older history into a single summary line when needed.
 
+- 2026-04-18: Removed the unused `general` settings category and its three toggles from the app. Settings UI now opens on `Hotkeys`, server/global settings only support `hotkeys` and `toolPermissions`, and legacy keys are stripped from `~/.agnt/settings.json` on load.
 - 2026-04-04 to 2026-04-14: Initial repo contract, bun/bunx policy, hotkey system, and workspace conversations documented.
 - 2026-04-14: Added Codex OAuth + SSE streaming. Server: `server/src/lib/agnt-home.ts`, `server/src/modules/auth/` (PKCE OAuth, token storage at `~/.agnt/auth.json`, `/auth` routes), `server/src/modules/conversations/codex-client.ts` + `conversation.sse.ts` + `conversation.stream.ts` (AI SDK streamText via `chatgpt.com/backend-api/codex`), added `/stream` and `/reply` endpoints. Frontend: `app/src/features/auth/` (Zustand store, bootstrap, API client), `CodexSettings` in settings panel, SSE stream consumer in conversation store. Server deps added: `ai`, `@ai-sdk/openai`.
 - 2026-04-15: Wired conversation stop-generation end-to-end. Frontend `ChatInput` stop action now aborts the in-flight stream request via Zustand; server conversation streaming now forwards `request.signal` into AI SDK `streamText` and persists partial aborted assistant output.

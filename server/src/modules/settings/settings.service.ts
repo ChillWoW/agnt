@@ -25,6 +25,10 @@ export function loadSettings(): Settings {
         const result = settingsSchema.safeParse(json);
 
         if (result.success) {
+            if (JSON.stringify(result.data) !== JSON.stringify(json)) {
+                saveSettings(result.data);
+            }
+
             return result.data;
         }
 

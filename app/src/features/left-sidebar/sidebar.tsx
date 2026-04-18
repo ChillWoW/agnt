@@ -314,7 +314,7 @@ export function LeftSidebar() {
     });
 
     const closeSettingsPanel = () => {
-        onSettingsCategoryChange("general");
+        onSettingsCategoryChange("hotkeys");
         closeSettings();
     };
 

@@ -1,11 +1,9 @@
 import { type ElementType, useEffect } from "react";
 import {
-    GearIcon,
     KeyboardIcon,
     RobotIcon,
     ShieldCheckIcon
 } from "@phosphor-icons/react";
-import { GeneralSettings } from "./GeneralSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { CodexSettings } from "./CodexSettings";
 import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
@@ -19,12 +17,6 @@ export type SettingsCategory = {
 };
 
 export const settingsCategories: SettingsCategory[] = [
-    {
-        key: "general",
-        label: "General",
-        icon: GearIcon,
-        group: "Desktop"
-    },
     {
         key: "hotkeys",
         label: "Hotkeys",
@@ -62,7 +54,6 @@ export function SettingsPanel() {
     return (
         <div className="absolute inset-0 z-30 bg-dark-950">
             <div className="h-full overflow-y-auto">
-                {activeCategory === "general" && <GeneralSettings />}
                 {activeCategory === "hotkeys" && <HotkeySettings />}
                 {activeCategory === "codex" && <CodexSettings />}
                 {activeCategory === "toolPermissions" && (
