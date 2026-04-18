@@ -102,6 +102,7 @@ export function RightSidebar() {
     const startX = useRef(0);
     const startWidth = useRef(0);
     const maxWidth = useRef(0);
+    const innerRef = useRef<HTMLDivElement>(null);
 
     const onMouseDown = useCallback(
         (e: React.MouseEvent) => {
@@ -123,15 +124,25 @@ export function RightSidebar() {
         const onMouseMove = (e: MouseEvent) => {
             if (!isDragging.current) return;
             const delta = startX.current - e.clientX;
-            const next = Math.min(maxWidth.current, startWidth.current + delta);
-            setWidth(next);
+            const next = Math.max(
+                200,
+                Math.min(maxWidth.current, startWidth.current + delta)
+            );
+            if (containerRef.current) containerRef.current.style.width = `${next}px`;
+            if (innerRef.current) innerRef.current.style.width = `${next}px`;
         };
 
-        const onMouseUp = () => {
+        const onMouseUp = (e: MouseEvent) => {
             if (!isDragging.current) return;
             isDragging.current = false;
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
+            const delta = startX.current - e.clientX;
+            const next = Math.max(
+                200,
+                Math.min(maxWidth.current, startWidth.current + delta)
+            );
+            setWidth(next);
         };
 
         window.addEventListener("mousemove", onMouseMove);
@@ -161,6 +172,7 @@ export function RightSidebar() {
                     />
 
                     <div
+                        ref={innerRef}
                         className="flex h-full flex-col overflow-hidden"
                         style={{ width }}
                     >
