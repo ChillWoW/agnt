@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { useFiletreeStore } from "./filetree-store";
+import { useOpenedFilesStore } from "./opened-files-store";
 import { getFileIcon } from "./file-icon";
 import type { FiletreeEntry } from "./filetree-types";
 
@@ -26,13 +27,20 @@ export function TreeNode({ entry, depth }: TreeNodeProps) {
         isDir ? s.directories[entry.path] : undefined
     );
     const toggle = useFiletreeStore((s) => s.toggle);
+    const openFile = useOpenedFilesStore((s) => s.openFile);
+    const isActiveFile = useOpenedFilesStore(
+        (s) =>
+            !isDir &&
+            s.active.kind === "file" &&
+            s.active.path === entry.path
+    );
 
     const handleClick = () => {
         if (isDir) {
             toggle(entry.path);
             return;
         }
-        // TODO: open this file in the app (wiring comes with the click-to-open feature)
+        openFile(entry.path, entry.name);
     };
 
     const FolderGlyph = isExpanded ? FolderOpenIcon : FolderIcon;
@@ -51,7 +59,8 @@ export function TreeNode({ entry, depth }: TreeNodeProps) {
                 title={entry.path || entry.name}
                 className={cn(
                     "group relative flex w-full items-center gap-1.5 py-[3px] pr-2 text-left text-xs leading-4 text-dark-100 transition-colors",
-                    "hover:bg-dark-800"
+                    "hover:bg-dark-800",
+                    isActiveFile && "bg-dark-800 text-dark-50"
                 )}
                 style={{ paddingLeft }}
             >

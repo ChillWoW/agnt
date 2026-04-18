@@ -1,24 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useHotkey } from "@/features/hotkeys";
 import { useSettingsStore } from "@/components/settings";
 import { useRightSidebarStore } from "./right-sidebar-store";
+import { useWorkspaceStore } from "@/features/workspaces";
 import { cn } from "@/lib/cn";
 import {
     GitBranchIcon,
     GlobeIcon,
     TerminalIcon,
-    FolderOpenIcon
+    FolderOpenIcon,
+    XIcon
 } from "@phosphor-icons/react";
 import { GitTab, BrowserTab, TerminalsTab, FiletreeTab } from "./tabs";
 import { KeybindTooltip } from "@/components/ui/Tooltip";
 import type { HotkeyCombo } from "@/features/hotkeys/types";
+import {
+    FileViewer,
+    getFileIcon,
+    useOpenedFilesStore,
+    type SystemTabId
+} from "./filetree";
 
 const MAIN_MIN_VISIBLE = 20;
 
-type Tab = "git" | "browser" | "terminal" | "filetree";
-
 const TABS: {
-    id: Tab;
+    id: SystemTabId;
     label: string;
     Icon: React.ElementType;
     hotkey?: HotkeyCombo;
@@ -39,7 +45,23 @@ export function RightSidebar() {
         useRightSidebarStore();
     const { isOpen: settingsOpen } = useSettingsStore();
     const containerRef = useRef<HTMLDivElement>(null);
-    const [activeTab, setActiveTab] = useState<Tab>("git");
+
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const setOpenedFilesWorkspace = useOpenedFilesStore((s) => s.setWorkspace);
+    const active = useOpenedFilesStore((s) => s.active);
+    const setActive = useOpenedFilesStore((s) => s.setActive);
+    const order = useOpenedFilesStore((s) => s.order);
+    const files = useOpenedFilesStore((s) => s.files);
+    const closeFile = useOpenedFilesStore((s) => s.closeFile);
+
+    useEffect(() => {
+        setOpenedFilesWorkspace(activeWorkspaceId);
+    }, [activeWorkspaceId, setOpenedFilesWorkspace]);
+
+    const setSystemTab = useCallback(
+        (id: SystemTabId) => setActive({ kind: "system", id }),
+        [setActive]
+    );
 
     useHotkey({
         id: "layout.right-sidebar.toggle",
@@ -52,28 +74,28 @@ export function RightSidebar() {
         id: "layout.right-sidebar.git",
         label: "Open Git tab",
         defaultCombo: "Ctrl+Shift+G",
-        handler: () => setActiveTab("git")
+        handler: () => setSystemTab("git")
     });
 
     useHotkey({
         id: "layout.right-sidebar.filetree",
         label: "Open Files tab",
         defaultCombo: "Ctrl+G",
-        handler: () => setActiveTab("filetree")
+        handler: () => setSystemTab("filetree")
     });
 
     useHotkey({
         id: "layout.right-sidebar.browser",
         label: "Open Browser tab",
         defaultCombo: "Ctrl+Alt+B",
-        handler: () => setActiveTab("browser")
+        handler: () => setSystemTab("browser")
     });
 
     useHotkey({
         id: "layout.right-sidebar.terminals",
         label: "Open Terminals tab",
         defaultCombo: "Ctrl+T",
-        handler: () => setActiveTab("terminal")
+        handler: () => setSystemTab("terminal")
     });
 
     const isDragging = useRef(false);
@@ -121,6 +143,10 @@ export function RightSidebar() {
         };
     }, [setWidth]);
 
+    const hasOpenedFiles = order.length > 0;
+    const activeSystem = active.kind === "system" ? active.id : null;
+    const activeFilePath = active.kind === "file" ? active.path : null;
+
     return (
         <div
             ref={containerRef}
@@ -138,39 +164,139 @@ export function RightSidebar() {
                         className="flex h-full flex-col overflow-hidden"
                         style={{ width }}
                     >
-                        <div className="flex h-8 shrink-0 items-center border-b border-dark-700 px-2.5 gap-0.5">
-                            {TABS.map(({ id, label, Icon, hotkey }) => (
-                                <KeybindTooltip
-                                    key={id}
-                                    content={label}
-                                    keybind={hotkey}
-                                    side="bottom"
-                                    sideOffset={6}
-                                >
-                                    <button
-                                        onClick={() => setActiveTab(id)}
-                                        className={cn(
-                                            "flex items-center justify-center size-6 rounded transition-colors",
-                                            activeTab === id
-                                                ? "bg-dark-700 text-dark-50"
-                                                : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
-                                        )}
+                        <div className="flex h-8 shrink-0 items-center border-b border-dark-700 pl-2.5 pr-1 gap-0.5">
+                            <div className="flex shrink-0 items-center gap-0.5">
+                                {TABS.map(({ id, label, Icon, hotkey }) => (
+                                    <KeybindTooltip
+                                        key={id}
+                                        content={label}
+                                        keybind={hotkey}
+                                        side="bottom"
+                                        sideOffset={6}
                                     >
-                                        <Icon className="size-3.5" />
-                                    </button>
-                                </KeybindTooltip>
-                            ))}
+                                        <button
+                                            onClick={() => setSystemTab(id)}
+                                            className={cn(
+                                                "flex items-center justify-center size-6 rounded transition-colors",
+                                                activeSystem === id
+                                                    ? "bg-dark-800 text-dark-50"
+                                                    : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                                            )}
+                                        >
+                                            <Icon className="size-3.5" />
+                                        </button>
+                                    </KeybindTooltip>
+                                ))}
+                            </div>
+
+                            {hasOpenedFiles && (
+                                <>
+                                    <div
+                                        aria-hidden
+                                        className="mx-1 h-4 w-px shrink-0 bg-dark-700"
+                                    />
+                                    <div className="flex min-w-0 flex-1 items-center gap-0.5">
+                                        {order.map((path) => {
+                                            const file = files[path];
+                                            if (!file) return null;
+                                            return (
+                                                <FilePill
+                                                    key={path}
+                                                    path={path}
+                                                    name={file.name}
+                                                    isActive={
+                                                        activeFilePath === path
+                                                    }
+                                                    onSelect={() =>
+                                                        setActive({
+                                                            kind: "file",
+                                                            path
+                                                        })
+                                                    }
+                                                    onClose={() =>
+                                                        closeFile(path)
+                                                    }
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div className="flex flex-1 overflow-hidden">
-                            {activeTab === "git" && <GitTab />}
-                            {activeTab === "browser" && <BrowserTab />}
-                            {activeTab === "terminal" && <TerminalsTab />}
-                            {activeTab === "filetree" && <FiletreeTab />}
+                            {active.kind === "system" ? (
+                                <>
+                                    {active.id === "git" && <GitTab />}
+                                    {active.id === "browser" && <BrowserTab />}
+                                    {active.id === "terminal" && (
+                                        <TerminalsTab />
+                                    )}
+                                    {active.id === "filetree" && (
+                                        <FiletreeTab />
+                                    )}
+                                </>
+                            ) : (
+                                <FileViewer path={active.path} />
+                            )}
                         </div>
                     </div>
                 </>
             )}
+        </div>
+    );
+}
+
+interface FilePillProps {
+    path: string;
+    name: string;
+    isActive: boolean;
+    onSelect: () => void;
+    onClose: () => void;
+}
+
+function FilePill({ path, name, isActive, onSelect, onClose }: FilePillProps) {
+    const Icon = getFileIcon(name);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (e.button === 1) {
+            e.preventDefault();
+            onClose();
+        }
+    };
+
+    return (
+        <div
+            onMouseDown={handleMouseDown}
+            className={cn(
+                "group/pill relative flex h-6 min-w-[4rem] max-w-[16rem] shrink items-center rounded transition-colors",
+                isActive
+                    ? "bg-dark-800 text-dark-50"
+                    : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+            )}
+        >
+            <button
+                type="button"
+                onClick={onSelect}
+                title={path}
+                className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1.5 pr-1 text-left"
+            >
+                <Icon className="size-3.5 shrink-0 text-dark-200" />
+                <span className="truncate text-[11px] leading-none">
+                    {name}
+                </span>
+            </button>
+            <button
+                type="button"
+                onClick={onClose}
+                className={cn(
+                    "mr-0.5 flex size-4 shrink-0 items-center justify-center rounded text-dark-200 transition-opacity hover:bg-dark-600 hover:text-dark-50",
+                    "opacity-0 group-hover/pill:opacity-100 focus-visible:opacity-100",
+                    isActive && "opacity-60 hover:opacity-100"
+                )}
+            >
+                <XIcon className="size-2.5" weight="bold" />
+            </button>
         </div>
     );
 }

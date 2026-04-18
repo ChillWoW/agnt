@@ -14,3 +14,14 @@ export interface FiletreeDirectoryListing {
     path: string;
     entries: FiletreeEntry[];
 }
+
+export interface WorkspaceFileContent {
+    workspaceId: string;
+    path: string;
+    size: number;
+    bytesRead: number;
+    truncated: boolean;
+    binary: boolean;
+    content: string;
+    mtimeMs: number;
+}
