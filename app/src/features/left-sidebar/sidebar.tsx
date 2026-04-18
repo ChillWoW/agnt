@@ -138,7 +138,10 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 function WorkspaceSidebarList() {
     const { workspaces, activeWorkspaceId, setActive, remove } =
         useWorkspaceStore();
+    const { workspaceOrder, setWorkspaceOrder } = useLeftSidebarStore();
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+    const [draggedId, setDraggedId] = useState<string | null>(null);
+    const [dragOver, setDragOver] = useState<{ id: string; position: "before" | "after" } | null>(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -155,6 +158,15 @@ function WorkspaceSidebarList() {
         return null;
     }
 
+    const sortedWorkspaces = [...workspaces].sort((a, b) => {
+        const ai = workspaceOrder.indexOf(a.id);
+        const bi = workspaceOrder.indexOf(b.id);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+    });
+
     const toggleExpanded = (id: string) => {
         setExpandedIds((prev) => {
             const next = new Set(prev);
@@ -167,14 +179,66 @@ function WorkspaceSidebarList() {
         });
     };
 
+    const handleDragStart = (id: string) => {
+        setDraggedId(id);
+    };
+
+    const handleDragOver = (e: React.DragEvent, id: string) => {
+        e.preventDefault();
+        if (id === draggedId) return;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const position = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+        setDragOver({ id, position });
+    };
+
+    const handleDrop = (e: React.DragEvent, targetId: string) => {
+        e.preventDefault();
+        if (!draggedId || draggedId === targetId || !dragOver) {
+            setDraggedId(null);
+            setDragOver(null);
+            return;
+        }
+        const ids = sortedWorkspaces.map((w) => w.id);
+        const from = ids.indexOf(draggedId);
+        ids.splice(from, 1);
+        const to = ids.indexOf(targetId);
+        const insertAt = dragOver.position === "after" ? to + 1 : to;
+        ids.splice(insertAt, 0, draggedId);
+        setWorkspaceOrder(ids);
+        setDraggedId(null);
+        setDragOver(null);
+    };
+
+    const handleDragEnd = () => {
+        setDraggedId(null);
+        setDragOver(null);
+    };
+
     return (
         <div className="flex flex-col gap-1">
-            {workspaces.map((ws) => {
+            {sortedWorkspaces.map((ws) => {
                 const isActive = ws.id === activeWorkspaceId;
                 const isExpanded = expandedIds.has(ws.id);
+                const isDragging = draggedId === ws.id;
+                const isDropBefore = dragOver?.id === ws.id && dragOver.position === "before";
+                const isDropAfter = dragOver?.id === ws.id && dragOver.position === "after";
 
                 return (
-                    <div key={ws.id} className="flex flex-col">
+                    <div
+                        key={ws.id}
+                        className={cn(
+                            "flex flex-col transition-opacity",
+                            isDragging && "opacity-40"
+                        )}
+                        draggable
+                        onDragStart={() => handleDragStart(ws.id)}
+                        onDragOver={(e) => handleDragOver(e, ws.id)}
+                        onDrop={(e) => handleDrop(e, ws.id)}
+                        onDragEnd={handleDragEnd}
+                    >
+                        {isDropBefore && (
+                            <div className="h-0.5 rounded-full bg-dark-400 mx-1 mb-0.5" />
+                        )}
                         <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
                             <button
                                 onClick={() => toggleExpanded(ws.id)}
@@ -236,6 +300,9 @@ function WorkspaceSidebarList() {
                             <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
                                 <WorkspaceConversations workspaceId={ws.id} />
                             </div>
+                        )}
+                        {isDropAfter && (
+                            <div className="h-0.5 rounded-full bg-dark-400 mx-1 mt-0.5" />
                         )}
                     </div>
                 );
