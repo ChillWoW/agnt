@@ -1,15 +1,33 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkey } from "@/features/hotkeys";
 import { useSettingsStore } from "@/components/settings";
 import { useRightSidebarStore } from "./right-sidebar-store";
+import { cn } from "@/lib/cn";
+import {
+    GitBranchIcon,
+    GlobeIcon,
+    TerminalIcon,
+    FolderOpenIcon
+} from "@phosphor-icons/react";
+import { GitTab, BrowserTab, TerminalsTab, FiletreeTab } from "./tabs";
 
 const MAIN_MIN_VISIBLE = 20;
+
+type Tab = "git" | "browser" | "terminal" | "filetree";
+
+const TABS: { id: Tab; label: string; Icon: React.ElementType }[] = [
+    { id: "git", label: "Git", Icon: GitBranchIcon },
+    { id: "filetree", label: "Files", Icon: FolderOpenIcon },
+    { id: "browser", label: "Browser", Icon: GlobeIcon },
+    { id: "terminal", label: "Terminals", Icon: TerminalIcon }
+];
 
 export function RightSidebar() {
     const { isCollapsed, width, setWidth, toggleSidebar } =
         useRightSidebarStore();
     const { isOpen: settingsOpen } = useSettingsStore();
     const containerRef = useRef<HTMLDivElement>(null);
+    const [activeTab, setActiveTab] = useState<Tab>("git");
 
     useHotkey({
         id: "layout.right-sidebar.toggle",
@@ -79,8 +97,29 @@ export function RightSidebar() {
                         className="flex h-full flex-col overflow-hidden"
                         style={{ width }}
                     >
-                        <div className="flex flex-1 items-center justify-center text-dark-200 text-sm select-none">
-                            Right Panel
+                        <div className="flex h-8 shrink-0 items-center border-b border-dark-700 px-2.5 gap-1">
+                            {TABS.map(({ id, label, Icon }) => (
+                                <button
+                                    key={id}
+                                    onClick={() => setActiveTab(id)}
+                                    className={cn(
+                                        "flex items-center gap-1.5 px-2 h-full text-xs font-medium transition-colors border-b-2 -mb-px",
+                                        activeTab === id
+                                            ? "text-dark-50 border-dark-50"
+                                            : "text-dark-300 border-transparent hover:text-dark-100"
+                                    )}
+                                >
+                                    <Icon className="size-3.5" />
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex flex-1 overflow-hidden">
+                            {activeTab === "git" && <GitTab />}
+                            {activeTab === "browser" && <BrowserTab />}
+                            {activeTab === "terminal" && <TerminalsTab />}
+                            {activeTab === "filetree" && <FiletreeTab />}
                         </div>
                     </div>
                 </>
