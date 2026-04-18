@@ -1,10 +1,11 @@
-import { LinkIcon, PlugIcon, PlugsIcon } from "@phosphor-icons/react";
-import { cn } from "@/lib/cn";
+import {
+    PlugsIcon,
+    UserCircleIcon,
+    WarningCircleIcon
+} from "@phosphor-icons/react";
 import { useAuthStore } from "@/features/auth";
 import { Button } from "@/components/ui";
-import { SettingGroup } from "./SettingGroup";
 import { SettingHeader } from "./SettingHeader";
-import { SettingRow } from "./SettingRow";
 
 function formatDate(value: string | null) {
     if (!value) return "—";
@@ -13,9 +14,35 @@ function formatDate(value: string | null) {
     return date.toLocaleString();
 }
 
+function MetaItem({
+    label,
+    value,
+    mono
+}: {
+    label: string;
+    value: string;
+    mono?: boolean;
+}) {
+    return (
+        <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-medium text-dark-300">
+                {label}
+            </span>
+            <span className="text-xs text-dark-200">{value}</span>
+        </div>
+    );
+}
+
 export function CodexSettings() {
-    const { auth, isLoading, isConnecting, isDisconnecting, error, connect, disconnect } =
-        useAuthStore();
+    const {
+        auth,
+        isLoading,
+        isConnecting,
+        isDisconnecting,
+        error,
+        connect,
+        disconnect
+    } = useAuthStore();
 
     const isConnected = Boolean(auth?.connected);
     const isBusy = isLoading || isConnecting || isDisconnecting;
@@ -24,114 +51,97 @@ export function CodexSettings() {
         <div className="mx-auto w-full max-w-xl p-8">
             <SettingHeader
                 title="Codex"
-                description="Connect to your OpenAI Codex account to enable AI responses in conversations."
+                description="Connect your OpenAI Codex account to enable AI responses in conversations."
             />
 
-            <div className="flex flex-col gap-4">
-                <SettingGroup>
-                    <SettingRow
-                        icon={<PlugIcon size={18} weight="duotone" />}
-                        label="Connection status"
-                        description={
-                            isLoading
-                                ? "Checking connection..."
-                                : isConnected
-                                  ? "Authenticated and ready to use Codex"
-                                  : "Not connected — click Connect Codex to authenticate"
-                        }
-                    >
-                        <span
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs font-medium",
-                                isLoading
-                                    ? "text-amber-400"
-                                    : isConnected
-                                      ? "text-green-400"
-                                      : "text-dark-400"
-                            )}
-                        >
-                            <span
-                                className={cn(
-                                    "size-1.5 rounded-full",
-                                    isLoading
-                                        ? "animate-pulse bg-amber-400"
-                                        : isConnected
-                                          ? "bg-green-400"
-                                          : "bg-dark-500"
-                                )}
-                            />
-                            {isLoading
-                                ? "Loading"
-                                : isConnected
-                                  ? "Connected"
-                                  : "Disconnected"}
-                        </span>
-                    </SettingRow>
-
-                    {isConnected && (
-                        <>
-                            <SettingRow
-                                icon={<LinkIcon size={18} weight="duotone" />}
-                                label="Account ID"
-                            >
-                                <span className="font-mono text-xs text-dark-300">
-                                    {auth?.accountId ?? "—"}
-                                </span>
-                            </SettingRow>
-
-                            <SettingRow label="Email">
-                                <span className="text-xs text-dark-300">
-                                    {auth?.email ?? "—"}
-                                </span>
-                            </SettingRow>
-
-                            <SettingRow label="Token expires">
-                                <span className="text-xs text-dark-300">
-                                    {formatDate(auth?.expires ?? null)}
-                                </span>
-                            </SettingRow>
-
-                            <SettingRow label="Connected at">
-                                <span className="text-xs text-dark-300">
-                                    {formatDate(auth?.connectedAt ?? null)}
-                                </span>
-                            </SettingRow>
-                        </>
-                    )}
-                </SettingGroup>
-
-                <SettingGroup>
-                    <SettingRow
-                        icon={<PlugsIcon size={18} weight="duotone" />}
-                        label="Browser OAuth"
-                        description="Opens OpenAI in your browser and stores the Codex session locally at ~/.agnt/auth.json."
-                    >
-                        {isConnected ? (
+            <div className="flex flex-col gap-3">
+                {isConnected ? (
+                    <div className="rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
+                        <div className="flex items-start justify-between gap-4 p-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-dark-800 text-dark-300">
+                                    <UserCircleIcon
+                                        size={20}
+                                        weight="duotone"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                    <span className="text-[13px] font-medium text-dark-50">
+                                        {auth?.email ?? "Codex account"}
+                                    </span>
+                                    {auth?.accountId && (
+                                        <span className="text-[11px] text-dark-300">
+                                            {auth.accountId}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
                             <Button
                                 variant="danger"
                                 size="sm"
                                 disabled={isBusy}
                                 onClick={() => void disconnect()}
                             >
-                                {isDisconnecting ? "Disconnecting..." : "Disconnect"}
+                                {isDisconnecting
+                                    ? "Disconnecting..."
+                                    : "Disconnect"}
                             </Button>
-                        ) : (
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                disabled={isBusy}
-                                loading={isConnecting}
-                                onClick={() => void connect()}
-                            >
-                                {isConnecting ? "Connecting..." : "Connect Codex"}
-                            </Button>
-                        )}
-                    </SettingRow>
-                </SettingGroup>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-px border-t border-dark-700 bg-dark-700">
+                            <div className="bg-dark-900 px-4 py-3">
+                                <MetaItem
+                                    label="Token expires"
+                                    value={formatDate(auth?.expires ?? null)}
+                                />
+                            </div>
+                            <div className="bg-dark-900 px-4 py-3">
+                                <MetaItem
+                                    label="Connected at"
+                                    value={formatDate(
+                                        auth?.connectedAt ?? null
+                                    )}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center gap-4 rounded-md border border-dark-700 bg-dark-900 py-10">
+                        <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-400">
+                            <PlugsIcon size={20} weight="duotone" />
+                        </div>
+                        <div className="flex flex-col items-center gap-1 text-center">
+                            <span className="text-[13px] font-medium text-dark-100">
+                                Not connected
+                            </span>
+                            <span className="max-w-xs text-xs text-dark-400">
+                                Opens OpenAI in your browser and stores the
+                                session locally at{" "}
+                                <code className="text-dark-300">
+                                    ~/.agnt/auth.json
+                                </code>
+                            </span>
+                        </div>
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            disabled={isBusy}
+                            loading={isConnecting}
+                            onClick={() => void connect()}
+                        >
+                            {isConnecting ? "Connecting..." : "Connect Codex"}
+                        </Button>
+                    </div>
+                )}
 
                 {error && (
-                    <div className="rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                        {error}
+                    <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">
+                        <WarningCircleIcon
+                            size={14}
+                            weight="duotone"
+                            className="shrink-0 text-red-400"
+                        />
+                        <span className="text-xs text-red-300">{error}</span>
                     </div>
                 )}
             </div>
