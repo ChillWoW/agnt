@@ -18,6 +18,7 @@ import {
 import { Menu, Tooltip } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LeftSidebarButton } from "./left-sidebar-button";
+import { BinaryMatrix } from "./binary-matrix";
 import { settingsCategories } from "@/components/settings/SettingsPanel";
 import { useSettingsStore } from "@/components/settings";
 import { useWorkspaceStore } from "@/features/workspaces";
@@ -104,15 +105,13 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                                 className="size-3 shrink-0 text-dark-50 animate-pulse"
                                 weight="fill"
                             />
+                        ) : isStreaming ? (
+                            <BinaryMatrix />
                         ) : (
                             <MinusIcon
                                 className={cn(
                                     "size-3 shrink-0 transition-colors",
-                                    isUnread
-                                        ? "text-dark-50"
-                                        : isStreaming
-                                          ? "text-dark-100 animate-pulse"
-                                          : "text-dark-300"
+                                    isUnread ? "text-dark-50" : "text-dark-200"
                                 )}
                             />
                         )}
