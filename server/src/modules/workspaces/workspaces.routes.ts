@@ -5,6 +5,7 @@ import {
     removeWorkspace,
     setActiveWorkspace
 } from "./workspaces.service";
+import { resolveRepoInstructions } from "../conversations/repo-instructions";
 
 const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
     .get("/", () => {
@@ -28,6 +29,19 @@ const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to add workspace"
+            };
+        }
+    })
+    .get("/:id/repo-instructions", ({ params, set }) => {
+        try {
+            return resolveRepoInstructions(params.id);
+        } catch (error) {
+            set.status = 404;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to load repo instructions"
             };
         }
     })

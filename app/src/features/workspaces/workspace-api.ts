@@ -1,5 +1,9 @@
 import { api } from "@/lib/api";
-import type { Workspace, WorkspacesData } from "./workspace-types";
+import type {
+    Workspace,
+    WorkspaceRepoInstructions,
+    WorkspacesData
+} from "./workspace-types";
 
 export function fetchWorkspaces() {
     return api.get<WorkspacesData>("/workspaces");
@@ -17,4 +21,10 @@ export function setActiveWorkspace(id: string) {
     return api.patch<{ activeWorkspaceId: string }>("/workspaces/active", {
         body: { id }
     });
+}
+
+export function fetchRepoInstructions(workspaceId: string) {
+    return api.get<WorkspaceRepoInstructions>(
+        `/workspaces/${workspaceId}/repo-instructions`
+    );
 }

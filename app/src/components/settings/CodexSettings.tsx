@@ -16,12 +16,10 @@ function formatDate(value: string | null) {
 
 function MetaItem({
     label,
-    value,
-    mono
+    value
 }: {
     label: string;
     value: string;
-    mono?: boolean;
 }) {
     return (
         <div className="flex flex-col gap-0.5">

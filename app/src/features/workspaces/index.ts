@@ -1,2 +1,8 @@
 export { useWorkspaceStore, getActiveWorkspace } from "./workspace-store";
-export type { Workspace, WorkspacesData } from "./workspace-types";
+export { fetchRepoInstructions } from "./workspace-api";
+export type {
+    Workspace,
+    WorkspacesData,
+    RepoInstructionSource,
+    WorkspaceRepoInstructions
+} from "./workspace-types";

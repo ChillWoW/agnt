@@ -11,10 +11,8 @@ import {
     type AttachmentRow
 } from "../attachments/attachments.service";
 import { estimateAttachmentTokens } from "./context.attachments";
-import {
-    DEFAULT_MODEL,
-    SYSTEM_INSTRUCTIONS
-} from "./conversation.constants";
+import { DEFAULT_MODEL } from "./conversation.constants";
+import { buildConversationPrompt } from "./conversation.prompt";
 
 /** Threshold used by auto-compaction (85% of context window). */
 export const COMPACT_THRESHOLD = 0.85;
@@ -30,6 +28,7 @@ export interface ContextBreakdown {
     reasoning: number;
     toolOutputs: number;
     attachments: number;
+    repoInstructions: number;
     systemInstructions: number;
 }
 
@@ -242,12 +241,17 @@ export function computeContextSummary(
         }
     }
 
-    const systemInstructionsTokens = countTokens(SYSTEM_INSTRUCTIONS);
+    const prompt = buildConversationPrompt(workspaceId);
+    const systemInstructionsTokens = countTokens(
+        prompt.baseInstructions + prompt.workspaceBlock + prompt.warningBlock
+    );
+    const repoInstructionsTokens = countTokens(prompt.repoInstructions.promptBlock);
 
     const usedTokens =
         messagesTokens +
         toolOutputsTokens +
         attachmentsTokens +
+        repoInstructionsTokens +
         systemInstructionsTokens;
 
     const percent = contextWindow > 0 ? usedTokens / contextWindow : 0;
@@ -264,6 +268,7 @@ export function computeContextSummary(
             reasoning: reasoningTokens,
             toolOutputs: toolOutputsTokens,
             attachments: attachmentsTokens,
+            repoInstructions: repoInstructionsTokens,
             systemInstructions: systemInstructionsTokens
         },
         messageCount: activeRows.length,

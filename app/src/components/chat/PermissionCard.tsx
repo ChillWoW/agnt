@@ -67,16 +67,16 @@ export function PermissionCard({
     };
 
     return (
-        <div className="border-b border-dark-700 px-3 py-2.5">
-            <div className="flex items-center gap-1.5">
+        <div className="flex flex-col gap-3 px-2.5 pt-2.5 pb-0">
+            <div className="flex min-w-0 items-center gap-1.5">
                 <ShieldWarningIcon
                     className="size-3.5 shrink-0 text-dark-200"
                     weight="fill"
                 />
-                <span className="text-xs font-medium text-dark-100">
+                <span className="shrink-0 text-xs font-medium text-dark-100">
                     {formatToolLabel(request.toolName)}
                 </span>
-                <span className="text-xs text-dark-200">
+                <span className="shrink-0 text-xs text-dark-200">
                     wants permission to run
                 </span>
                 {summary && (
@@ -94,7 +94,7 @@ export function PermissionCard({
                 )}
             </div>
 
-            <div className="mt-2 flex items-center gap-1.5">
+            <div className="flex h-10 items-center justify-end gap-1.5">
                 <Button
                     variant="ghost"
                     size="sm"

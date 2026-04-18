@@ -28,8 +28,9 @@ import {
 } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
 
-import { DEFAULT_MODEL, SYSTEM_INSTRUCTIONS } from "./conversation.constants";
-export { DEFAULT_MODEL, SYSTEM_INSTRUCTIONS };
+import { DEFAULT_MODEL } from "./conversation.constants";
+import { buildConversationPrompt } from "./conversation.prompt";
+export { DEFAULT_MODEL };
 
 type UserTextPart = { type: "text"; text: string };
 type UserImagePart = { type: "image"; image: Uint8Array; mediaType: string };
@@ -527,6 +528,7 @@ async function runStreamTextIntoController({
 
     try {
         const codex = await createCodexClient();
+        const prompt = buildConversationPrompt(workspaceId);
 
         logger.log(
             "[stream] Starting streamText with model:",
@@ -542,7 +544,7 @@ async function runStreamTextIntoController({
         );
 
         const openaiOptions: Record<string, string | boolean | undefined> = {
-            instructions: SYSTEM_INSTRUCTIONS,
+            instructions: prompt.prompt,
             store: false,
             reasoningSummary: "detailed",
             serviceTier: fastMode ? "priority" : undefined
