@@ -17,11 +17,21 @@ const MAIN_MIN_VISIBLE = 20;
 
 type Tab = "git" | "browser" | "terminal" | "filetree";
 
-const TABS: { id: Tab; label: string; Icon: React.ElementType; hotkey?: HotkeyCombo }[] = [
+const TABS: {
+    id: Tab;
+    label: string;
+    Icon: React.ElementType;
+    hotkey?: HotkeyCombo;
+}[] = [
     { id: "git", label: "Git", Icon: GitBranchIcon, hotkey: "Ctrl+Shift+G" },
-    { id: "filetree", label: "Files", Icon: FolderOpenIcon, hotkey: "Ctrl+G" },
     { id: "browser", label: "Browser", Icon: GlobeIcon, hotkey: "Ctrl+Alt+B" },
-    { id: "terminal", label: "Terminals", Icon: TerminalIcon, hotkey: "Ctrl+T" }
+    {
+        id: "terminal",
+        label: "Terminals",
+        Icon: TerminalIcon,
+        hotkey: "Ctrl+T"
+    },
+    { id: "filetree", label: "Files", Icon: FolderOpenIcon, hotkey: "Ctrl+G" }
 ];
 
 export function RightSidebar() {
