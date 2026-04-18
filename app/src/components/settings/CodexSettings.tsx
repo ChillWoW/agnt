@@ -14,13 +14,7 @@ function formatDate(value: string | null) {
     return date.toLocaleString();
 }
 
-function MetaItem({
-    label,
-    value
-}: {
-    label: string;
-    value: string;
-}) {
+function MetaItem({ label, value }: { label: string; value: string }) {
     return (
         <div className="flex flex-col gap-0.5">
             <span className="text-[10px] font-medium text-dark-300">
@@ -104,31 +98,31 @@ export function CodexSettings() {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex flex-col items-center gap-4 rounded-md border border-dark-700 bg-dark-900 py-10">
-                        <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-400">
-                            <PlugsIcon size={20} weight="duotone" />
+                    <div className="rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
+                        <div className="flex items-center justify-between gap-4 p-4">
+                            <div className="flex items-center gap-3">
+                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-dark-800 text-dark-200">
+                                    <PlugsIcon
+                                        className="size-4.5"
+                                        weight="duotone"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                    <span className="text-[13px] font-medium text-dark-100">
+                                        Not connected
+                                    </span>
+                                </div>
+                            </div>
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                disabled={isBusy}
+                                loading={isConnecting}
+                                onClick={() => void connect()}
+                            >
+                                {isConnecting ? "Connecting..." : "Connect"}
+                            </Button>
                         </div>
-                        <div className="flex flex-col items-center gap-1 text-center">
-                            <span className="text-[13px] font-medium text-dark-100">
-                                Not connected
-                            </span>
-                            <span className="max-w-xs text-xs text-dark-400">
-                                Opens OpenAI in your browser and stores the
-                                session locally at{" "}
-                                <code className="text-dark-300">
-                                    ~/.agnt/auth.json
-                                </code>
-                            </span>
-                        </div>
-                        <Button
-                            variant="primary"
-                            size="sm"
-                            disabled={isBusy}
-                            loading={isConnecting}
-                            onClick={() => void connect()}
-                        >
-                            {isConnecting ? "Connecting..." : "Connect Codex"}
-                        </Button>
                     </div>
                 )}
 
