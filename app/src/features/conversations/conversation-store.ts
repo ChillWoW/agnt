@@ -10,6 +10,8 @@ import type {
 import * as conversationApi from "./conversation-api";
 import { usePermissionStore } from "@/features/permissions";
 import type { PermissionRequest } from "@/features/permissions";
+import { useQuestionStore } from "@/features/questions";
+import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
 import type { Attachment } from "@/features/attachments";
 import type {
     CompactedSseEvent,
@@ -463,9 +465,38 @@ async function runStream(
                 break;
             }
 
+            case "questions-required": {
+                const request: QuestionsRequest = {
+                    id: data.id as string,
+                    conversationId,
+                    messageId: data.messageId as string,
+                    questions: (data.questions ?? []) as QuestionSpec[],
+                    createdAt:
+                        (data.createdAt as string) ??
+                        new Date().toISOString()
+                };
+                useQuestionStore
+                    .getState()
+                    .setPending(conversationId, request);
+                break;
+            }
+
+            case "questions-resolved": {
+                const requestId = data.id as string | undefined;
+                if (requestId) {
+                    useQuestionStore
+                        .getState()
+                        .clearPendingById(conversationId, requestId);
+                } else {
+                    useQuestionStore.getState().clearPending(conversationId);
+                }
+                break;
+            }
+
             case "finish": {
                 outcome = "finished";
                 usePermissionStore.getState().clearPending(conversationId);
+                useQuestionStore.getState().clearPending(conversationId);
                 const usage = (data.usage ?? null) as UsageSseEvent | null;
                 const assistantMessageId = data.assistantMessageId as
                     | string
@@ -565,6 +596,7 @@ async function runStream(
             case "abort": {
                 outcome = "aborted";
                 usePermissionStore.getState().clearPending(conversationId);
+                useQuestionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => {
                     const lastStreamingAssistantIndex = [...prev.messages]
                         .map((message, index) => ({ message, index }))
@@ -614,6 +646,7 @@ async function runStream(
             case "error": {
                 outcome = "errored";
                 usePermissionStore.getState().clearPending(conversationId);
+                useQuestionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.filter(
@@ -731,6 +764,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             }));
 
             usePermissionStore.getState().clearPending(conversationId);
+            useQuestionStore.getState().clearPending(conversationId);
 
             applyConversationUpdate(conversationId, (prev) => ({
                 ...prev,
@@ -818,6 +852,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             if (!controller) return;
             controller.abort();
             usePermissionStore.getState().clearPending(targetId);
+            useQuestionStore.getState().clearPending(targetId);
             set((state) => ({
                 streamControllersById: omitKey(
                     state.streamControllersById,
@@ -984,6 +1019,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         ) => {
             get().streamControllersById[conversationId]?.abort();
             usePermissionStore.getState().clearPending(conversationId);
+            useQuestionStore.getState().clearPending(conversationId);
 
             await conversationApi.deleteConversation(
                 workspaceId,

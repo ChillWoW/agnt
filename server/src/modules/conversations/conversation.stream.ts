@@ -21,6 +21,7 @@ import {
     subscribeToPermissions,
     type PermissionMode
 } from "./permissions";
+import { abortQuestions, subscribeToQuestions } from "./questions";
 import { compactConversation } from "./compact.service";
 import {
     COMPACT_THRESHOLD,
@@ -543,6 +544,32 @@ async function runStreamTextIntoController({
         }
     );
 
+    const unsubscribeQuestions = subscribeToQuestions(
+        conversationId,
+        (event) => {
+            if (event.type === "requested") {
+                controller.enqueue(
+                    sseEvent("questions-required", {
+                        id: event.request.id,
+                        messageId: assistantMsgId,
+                        questions: event.request.questions,
+                        createdAt: event.request.createdAt
+                    })
+                );
+                return;
+            }
+
+            controller.enqueue(
+                sseEvent("questions-resolved", {
+                    id: event.requestId,
+                    messageId: assistantMsgId,
+                    answers: event.answers,
+                    cancelled: event.cancelled
+                })
+            );
+        }
+    );
+
     try {
         const codex = await createCodexClient();
         const prompt = buildConversationPrompt(workspaceId);
@@ -840,6 +867,7 @@ async function runStreamTextIntoController({
 
             if (part.type === "abort") {
                 abortPermissions(conversationId, "aborted");
+                abortQuestions(conversationId, "aborted");
                 markPendingToolInvocationsAsError(
                     db,
                     assistantMsgId,
@@ -911,6 +939,7 @@ async function runStreamTextIntoController({
                 assistantMsgId
             });
             abortPermissions(conversationId, "aborted");
+            abortQuestions(conversationId, "aborted");
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
             if (currentReasoningPart && !currentReasoningPart.endedAt) {
                 currentReasoningPart.endedAt = new Date().toISOString();
@@ -932,11 +961,13 @@ async function runStreamTextIntoController({
         logger.error("[stream] Stream error:", error);
 
         abortPermissions(conversationId, message);
+        abortQuestions(conversationId, message);
         markPendingToolInvocationsAsError(db, assistantMsgId, message);
         db.query("DELETE FROM messages WHERE id = ?").run(assistantMsgId);
         controller.enqueue(sseEvent("error", { message }));
     } finally {
         unsubscribePermissions();
+        unsubscribeQuestions();
     }
 }
 

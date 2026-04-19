@@ -13,6 +13,7 @@ import {
     Tooltip
 } from "@/components/ui";
 import { usePermissionStore } from "@/features/permissions";
+import { useQuestionStore } from "@/features/questions";
 import { usePendingAttachments } from "@/features/attachments";
 import { cn } from "@/lib/cn";
 import { AttachmentBar } from "./AttachmentBar";
@@ -20,6 +21,7 @@ import { ContextMeter } from "./ContextMeter";
 import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
+import { QuestionCard } from "./QuestionCard";
 import {
     isMentionPopupOpen,
     MentionEditor,
@@ -70,6 +72,12 @@ export function ChatInput({
     );
     const pendingPermission = pendingQueue?.[0];
     const pendingCount = pendingQueue?.length ?? 0;
+
+    const questionQueue = useQuestionStore((s) =>
+        conversationId ? s.pendingByConversationId[conversationId] : undefined
+    );
+    const pendingQuestions = questionQueue?.[0];
+    const questionCount = questionQueue?.length ?? 0;
 
     const hasPending = pending.length > 0;
     const hasText = !isEmpty && draftText.trim().length > 0;
@@ -192,7 +200,14 @@ export function ChatInput({
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
             >
-                {pendingPermission && workspaceId && conversationId ? (
+                {pendingQuestions && workspaceId && conversationId ? (
+                    <QuestionCard
+                        workspaceId={workspaceId}
+                        conversationId={conversationId}
+                        request={pendingQuestions}
+                        queueLength={questionCount}
+                    />
+                ) : pendingPermission && workspaceId && conversationId ? (
                     <PermissionCard
                         workspaceId={workspaceId}
                         conversationId={conversationId}

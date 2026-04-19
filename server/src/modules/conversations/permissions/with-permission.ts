@@ -9,8 +9,10 @@ import {
     AGNT_TOOL_DEFS,
     createGlobToolDef,
     createGrepToolDef,
+    createQuestionToolDef,
     createReadFileToolDef,
     createUseSkillToolDef,
+    isUngatedTool,
     type ToolDefinition
 } from "../tools";
 import type { Skill } from "../../skills/skills.service";
@@ -116,6 +118,10 @@ export function buildConversationTools(
                 return createUseSkillToolDef(
                     ctx.getSkills ?? (() => [])
                 ) as ToolDefinition;
+            case "question":
+                return createQuestionToolDef({
+                    conversationId: ctx.conversationId
+                }) as ToolDefinition;
             default:
                 return rawDef;
         }
@@ -123,11 +129,14 @@ export function buildConversationTools(
 
     for (const rawDef of defs) {
         const def = rawDef as ToolDefinition<object, unknown>;
+        const execute = isUngatedTool(def.name)
+            ? def.execute
+            : wrapExecute(def, ctx);
 
         tools[def.name] = tool({
             description: def.description,
             inputSchema: def.inputSchema,
-            execute: wrapExecute(def, ctx)
+            execute
         });
     }
 

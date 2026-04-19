@@ -7,6 +7,7 @@ import {
     NavigationArrowIcon,
     FolderOpenIcon,
     CaretRightIcon,
+    ChatTeardropDotsIcon,
     TrashIcon,
     PlusIcon,
     DotsThreeIcon,
@@ -24,6 +25,7 @@ import { useSettingsStore } from "@/components/settings";
 import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations";
 import { usePermissionStore } from "@/features/permissions";
+import { useQuestionStore } from "@/features/questions";
 import type { ElementType } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AccountButton } from "./account-button";
@@ -58,6 +60,9 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const pendingPermissions = usePermissionStore(
         (s) => s.pendingByConversationId
     );
+    const pendingQuestions = useQuestionStore(
+        (s) => s.pendingByConversationId
+    );
 
     useEffect(() => {
         void useConversationStore.getState().loadConversations(workspaceId);
@@ -70,6 +75,8 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                 const isStreaming = Boolean(streamingConversationIds[conv.id]);
                 const isPendingPermission =
                     (pendingPermissions[conv.id]?.length ?? 0) > 0;
+                const isPendingQuestion =
+                    (pendingQuestions[conv.id]?.length ?? 0) > 0;
                 const isActive = activeConversationId === conv.id;
 
                 return (
@@ -100,7 +107,12 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                                   : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                         )}
                     >
-                        {isPendingPermission ? (
+                        {isPendingQuestion ? (
+                            <ChatTeardropDotsIcon
+                                className="size-3 shrink-0 text-dark-50 animate-pulse"
+                                weight="fill"
+                            />
+                        ) : isPendingPermission ? (
                             <ShieldWarningIcon
                                 className="size-3 shrink-0 text-dark-50 animate-pulse"
                                 weight="fill"

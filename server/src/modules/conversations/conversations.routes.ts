@@ -16,6 +16,11 @@ import {
     resolvePermission,
     type PermissionDecision
 } from "./permissions";
+import {
+    cancelQuestions,
+    clearConversationQuestionState,
+    resolveQuestions
+} from "./questions";
 import type { MessageMention } from "./conversations.types";
 
 function isPermissionDecision(value: unknown): value is PermissionDecision {
@@ -123,6 +128,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     .delete("/:id/conversations/:conversationId", ({ params, set }) => {
         try {
             clearConversationPermissionState(params.conversationId);
+            clearConversationQuestionState(params.conversationId);
             deleteConversation(params.id, params.conversationId);
             return { success: true };
         } catch (error) {
@@ -267,6 +273,61 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             }
 
             const result = resolvePermission(params.requestId, decision);
+
+            if (!result.ok) {
+                set.status = 404;
+                return { error: result.error };
+            }
+
+            return { success: true };
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/questions/:requestId/respond",
+        ({ params, body, set }) => {
+            const { answers, cancelled } = (body ?? {}) as {
+                answers?: unknown;
+                cancelled?: unknown;
+            };
+
+            if (cancelled === true) {
+                const result = cancelQuestions(params.requestId);
+                if (!result.ok) {
+                    set.status = 404;
+                    return { error: result.error };
+                }
+                return { success: true };
+            }
+
+            if (!Array.isArray(answers)) {
+                set.status = 400;
+                return {
+                    error: "Missing or invalid 'answers' field. Expected string[][]."
+                };
+            }
+
+            const normalized: string[][] = [];
+            for (const group of answers) {
+                if (!Array.isArray(group)) {
+                    set.status = 400;
+                    return {
+                        error: "Each entry of 'answers' must be an array of strings."
+                    };
+                }
+                const inner: string[] = [];
+                for (const item of group) {
+                    if (typeof item !== "string") {
+                        set.status = 400;
+                        return {
+                            error: "Each entry of 'answers' must be an array of strings."
+                        };
+                    }
+                    inner.push(item);
+                }
+                normalized.push(inner);
+            }
+
+            const result = resolveQuestions(params.requestId, normalized);
 
             if (!result.ok) {
                 set.status = 404;

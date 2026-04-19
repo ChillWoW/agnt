@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
     BookOpenTextIcon,
     CaretRightIcon,
+    ChatTeardropDotsIcon,
     FileTextIcon,
     FilesIcon,
     MagnifyingGlassIcon,
@@ -557,6 +558,106 @@ function UseSkillBlock({ invocation }: { invocation: ToolInvocation }) {
     );
 }
 
+// ─── Question ─────────────────────────────────────────────────────────────────
+
+interface QuestionSpecShape {
+    question?: string;
+    header?: string;
+    options?: { label?: string; description?: string }[];
+    multiple?: boolean;
+}
+
+interface QuestionInputShape {
+    questions?: QuestionSpecShape[];
+}
+
+interface QuestionOutputShape {
+    answers?: string[][];
+}
+
+function formatQuestionDetail(
+    input: QuestionInputShape | undefined,
+    output: QuestionOutputShape | undefined
+): string | undefined {
+    const count = Array.isArray(input?.questions)
+        ? input.questions.length
+        : undefined;
+    const answered = Array.isArray(output?.answers)
+        ? output.answers.length
+        : undefined;
+
+    if (typeof count !== "number") return undefined;
+    const countLabel = `${count} ${count === 1 ? "question" : "questions"}`;
+    if (typeof answered === "number" && answered > 0) {
+        return `${countLabel} · answered`;
+    }
+    return countLabel;
+}
+
+function QuestionBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input = isRecord(invocation.input)
+        ? (invocation.input as QuestionInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as QuestionOutputShape)
+        : undefined;
+    const detail = formatQuestionDetail(input, output);
+    const questions = Array.isArray(input?.questions) ? input.questions : [];
+    const answers = Array.isArray(output?.answers) ? output.answers : [];
+
+    return (
+        <ToolBlock
+            icon={<ChatTeardropDotsIcon className="size-3.5" weight="fill" />}
+            pendingLabel="Waiting for your answer"
+            successLabel="Asked you"
+            errorLabel="Question cancelled"
+            deniedLabel="Question cancelled"
+            detail={detail}
+            error={invocation.error}
+            status={invocation.status}
+        >
+            {invocation.error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {invocation.error}
+                </p>
+            ) : questions.length > 0 ? (
+                <ul className="flex flex-col gap-1.5 text-[11px] text-dark-200">
+                    {questions.map((q, idx) => {
+                        const qAnswers = answers[idx] ?? [];
+                        const header = q.header ?? `Question ${idx + 1}`;
+                        return (
+                            <li key={idx} className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="inline-flex shrink-0 items-center rounded bg-dark-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-dark-200">
+                                        {header}
+                                    </span>
+                                    {q.question && (
+                                        <span className="truncate text-dark-200">
+                                            {q.question}
+                                        </span>
+                                    )}
+                                </div>
+                                {qAnswers.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 pl-1">
+                                        {qAnswers.map((a, aIdx) => (
+                                            <span
+                                                key={aIdx}
+                                                className="rounded bg-primary-100/15 px-1.5 py-0.5 text-[10px] text-primary-100 ring-1 ring-inset ring-primary-100/30"
+                                            >
+                                                {a}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
+            ) : null}
+        </ToolBlock>
+    );
+}
+
 function GenericToolBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
@@ -593,6 +694,8 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <GrepBlock invocation={invocation} />;
         case "use_skill":
             return <UseSkillBlock invocation={invocation} />;
+        case "question":
+            return <QuestionBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }
