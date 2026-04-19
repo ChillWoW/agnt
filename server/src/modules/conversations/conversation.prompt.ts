@@ -3,6 +3,11 @@ import {
     resolveRepoInstructions,
     type ResolvedRepoInstructions
 } from "./repo-instructions";
+import {
+    buildAvailableSkillsBlock,
+    discoverSkillsForPath,
+    type DiscoveredSkills
+} from "../skills/skills.service";
 
 export const BASE_SYSTEM_INSTRUCTIONS =
     "You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.\n\n" +
@@ -14,6 +19,8 @@ type ConversationPromptParts = {
     workspaceBlock: string;
     repoInstructions: ResolvedRepoInstructions;
     warningBlock: string;
+    skills: DiscoveredSkills;
+    skillsBlock: string;
     prompt: string;
 };
 
@@ -36,13 +43,16 @@ export function buildConversationPrompt(
 ): ConversationPromptParts {
     const workspace = getWorkspace(workspaceId);
     const repoInstructions = resolveRepoInstructions(workspaceId);
+    const skills = discoverSkillsForPath(workspace.path, workspaceId);
     const workspaceBlock = buildWorkspaceBlock(workspace.path);
     const warningBlock = buildWarningBlock(repoInstructions);
+    const skillsBlock = buildAvailableSkillsBlock(skills.skills);
     const prompt =
         BASE_SYSTEM_INSTRUCTIONS +
         workspaceBlock +
         repoInstructions.promptBlock +
-        warningBlock;
+        warningBlock +
+        skillsBlock;
 
     return {
         workspacePath: workspace.path,
@@ -50,6 +60,8 @@ export function buildConversationPrompt(
         workspaceBlock,
         repoInstructions,
         warningBlock,
+        skills,
+        skillsBlock,
         prompt
     };
 }

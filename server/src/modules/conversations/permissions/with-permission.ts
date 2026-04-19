@@ -7,8 +7,10 @@ import {
     createGlobToolDef,
     createGrepToolDef,
     createReadFileToolDef,
+    createUseSkillToolDef,
     type ToolDefinition
 } from "../tools";
+import type { Skill } from "../../skills/skills.service";
 import {
     isSessionAllowed,
     rememberSessionAllow,
@@ -21,6 +23,7 @@ export interface ConversationPermissionContext {
     conversationId: string;
     getMode: () => PermissionMode;
     workspacePath?: string;
+    getSkills?: () => Skill[];
 }
 
 function resolveConfiguredDecision(
@@ -106,6 +109,10 @@ export function buildConversationTools(
                 return createGlobToolDef(ctx.workspacePath) as ToolDefinition;
             case "grep":
                 return createGrepToolDef(ctx.workspacePath) as ToolDefinition;
+            case "use_skill":
+                return createUseSkillToolDef(
+                    ctx.getSkills ?? (() => [])
+                ) as ToolDefinition;
             default:
                 return rawDef;
         }

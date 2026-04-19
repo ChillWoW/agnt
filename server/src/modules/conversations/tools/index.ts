@@ -1,12 +1,14 @@
 import { readFileToolDef, createReadFileToolDef } from "./read-file";
 import { globToolDef, createGlobToolDef } from "./glob";
 import { grepToolDef, createGrepToolDef } from "./grep";
+import { useSkillToolDef, createUseSkillToolDef } from "./use-skill";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     readFileToolDef as ToolDefinition,
     globToolDef as ToolDefinition,
-    grepToolDef as ToolDefinition
+    grepToolDef as ToolDefinition,
+    useSkillToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -22,6 +24,8 @@ export {
     globToolDef,
     createGlobToolDef,
     grepToolDef,
-    createGrepToolDef
+    createGrepToolDef,
+    useSkillToolDef,
+    createUseSkillToolDef
 };
 export type { ToolDefinition };

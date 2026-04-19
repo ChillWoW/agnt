@@ -9,6 +9,7 @@ import { listDirectory } from "./filetree.service";
 import { readWorkspaceFile } from "./file-read.service";
 import { searchWorkspace } from "./search.service";
 import { resolveRepoInstructions } from "../conversations/repo-instructions";
+import { discoverSkills } from "../skills/skills.service";
 
 const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
     .get("/", () => {
@@ -87,6 +88,28 @@ const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to load repo instructions"
+            };
+        }
+    })
+    .get("/:id/skills", ({ params, set }) => {
+        try {
+            const discovered = discoverSkills(params.id);
+            return {
+                ...discovered,
+                skills: discovered.skills.map((skill) => ({
+                    name: skill.name,
+                    description: skill.description,
+                    directory: skill.directory,
+                    source: skill.source
+                }))
+            };
+        } catch (error) {
+            set.status = 404;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to discover skills"
             };
         }
     })

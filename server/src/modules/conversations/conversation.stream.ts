@@ -546,6 +546,7 @@ async function runStreamTextIntoController({
     try {
         const codex = await createCodexClient();
         const prompt = buildConversationPrompt(workspaceId);
+        const skills = prompt.skills.skills;
 
         logger.log(
             "[stream] Starting streamText with model:",
@@ -581,6 +582,7 @@ async function runStreamTextIntoController({
         const tools = buildConversationTools({
             conversationId,
             workspacePath,
+            getSkills: () => skills,
             getMode: () => {
                 // Re-resolve permission mode from effective conversation
                 // state on every tool invocation so toggling the selector

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
+    BookOpenTextIcon,
     CaretRightIcon,
     FileTextIcon,
     FilesIcon,
@@ -481,6 +482,109 @@ function GrepBlock({ invocation }: { invocation: ToolInvocation }) {
     );
 }
 
+// ─── Use skill ────────────────────────────────────────────────────────────────
+
+interface UseSkillInput {
+    name?: string;
+}
+
+interface UseSkillOutput {
+    ok?: boolean;
+    name?: string;
+    description?: string;
+    source?: "user" | "project";
+    files?: string[];
+    error?: string;
+    requested?: string;
+    available?: string[];
+}
+
+function formatSkillDetail(
+    input: UseSkillInput | undefined,
+    output: UseSkillOutput | undefined
+): string | undefined {
+    const name =
+        (typeof output?.name === "string" && output.name.length > 0
+            ? output.name
+            : undefined) ??
+        (typeof input?.name === "string" && input.name.length > 0
+            ? input.name
+            : undefined);
+
+    if (!name) return undefined;
+
+    if (output?.ok === false) {
+        return name;
+    }
+
+    const fileCount = Array.isArray(output?.files) ? output.files.length : 0;
+    return fileCount > 0
+        ? `${name} · ${fileCount} file${fileCount === 1 ? "" : "s"}`
+        : name;
+}
+
+function UseSkillBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input = isRecord(invocation.input)
+        ? (invocation.input as UseSkillInput)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as UseSkillOutput)
+        : undefined;
+    const detail = formatSkillDetail(input, output);
+    const notFound = output?.ok === false;
+    const skillDescription =
+        typeof output?.description === "string" && output.description.length > 0
+            ? output.description
+            : null;
+    const files = Array.isArray(output?.files) ? output.files : [];
+
+    // Treat a "skill not found" return as an error-shaped result so the block
+    // renders in the error style even though execute() didn't throw.
+    const status: ToolInvocationStatus = notFound ? "error" : invocation.status;
+    const error =
+        invocation.error ??
+        (notFound ? (output?.error ?? "Skill not found") : null);
+
+    return (
+        <ToolBlock
+            icon={<BookOpenTextIcon className="size-3.5" weight="bold" />}
+            pendingLabel="Loading skill"
+            successLabel="Loaded skill"
+            errorLabel="Skill failed"
+            deniedLabel="Skill denied"
+            detail={detail}
+            error={error}
+            status={status}
+        >
+            {error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {error}
+                </p>
+            ) : (
+                <div className="flex flex-col gap-1 text-[11px] text-dark-200">
+                    {skillDescription && (
+                        <p className="whitespace-pre-wrap leading-relaxed text-dark-200">
+                            {skillDescription}
+                        </p>
+                    )}
+                    {files.length > 0 && (
+                        <ul className="flex flex-col gap-0.5">
+                            {files.map((file, idx) => (
+                                <li
+                                    key={`${file}-${idx}`}
+                                    className="truncate text-dark-300"
+                                >
+                                    {file}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
+        </ToolBlock>
+    );
+}
+
 function GenericToolBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
@@ -515,6 +619,8 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <GlobBlock invocation={invocation} />;
         case "grep":
             return <GrepBlock invocation={invocation} />;
+        case "use_skill":
+            return <UseSkillBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }
