@@ -16,7 +16,11 @@ import { cn } from "@/lib/cn";
 export interface MentionListProps {
     query: string;
     workspaceId: string;
-    command: (attrs: { id: string; label: string; type: MentionEntry["type"] }) => void;
+    command: (attrs: {
+        id: string;
+        label: string;
+        type: MentionEntry["type"];
+    }) => void;
 }
 
 export interface MentionListHandle {
@@ -149,9 +153,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                 onKeyDown: ({ event }) => {
                     if (event.key === "ArrowDown") {
                         if (entries.length === 0) return false;
-                        setSelectedIndex(
-                            (prev) => (prev + 1) % entries.length
-                        );
+                        setSelectedIndex((prev) => (prev + 1) % entries.length);
                         return true;
                     }
                     if (event.key === "ArrowUp") {
@@ -180,7 +182,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
         );
 
         return (
-            <div className="w-72 max-h-64 overflow-y-auto rounded-md border border-dark-600 bg-dark-850 text-dark-50 shadow-lg outline-none p-1">
+            <div className="w-72 max-h-72 overflow-y-auto hide-scrollbar rounded-md border border-dark-600 bg-dark-850 text-dark-50 shadow-lg outline-none p-1">
                 {cursorPath && (
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-dark-300 truncate">
                         {cursorPath}
@@ -213,7 +215,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                                 }}
                                 onMouseEnter={() => setSelectedIndex(index)}
                                 className={cn(
-                                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors text-left",
+                                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-left",
                                     isSelected
                                         ? "bg-dark-800 text-dark-50"
                                         : "text-dark-100 hover:bg-dark-800 hover:text-dark-50"
