@@ -16,6 +16,7 @@ import {
     resolvePermission,
     type PermissionDecision
 } from "./permissions";
+import type { MessageMention } from "./conversations.types";
 
 function isPermissionDecision(value: unknown): value is PermissionDecision {
     return (
@@ -25,15 +26,36 @@ function isPermissionDecision(value: unknown): value is PermissionDecision {
     );
 }
 
+function sanitizeMentions(raw: unknown): MessageMention[] {
+    if (!Array.isArray(raw)) return [];
+    const out: MessageMention[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+        if (!item || typeof item !== "object") continue;
+        const candidate = item as { path?: unknown; type?: unknown };
+        const path =
+            typeof candidate.path === "string" ? candidate.path.trim() : "";
+        if (path.length === 0) continue;
+        const type =
+            candidate.type === "directory" ? "directory" : "file";
+        const key = `${type}:${path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ path, type });
+    }
+    return out;
+}
+
 const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     .get("/:id/conversations", ({ params }) => {
         return listConversations(params.id);
     })
     .post("/:id/conversations", async ({ params, body, set }) => {
         try {
-            const { message, attachmentIds } = body as {
+            const { message, attachmentIds, mentions } = body as {
                 message: string;
                 attachmentIds?: unknown;
+                mentions?: unknown;
             };
 
             if (!message || typeof message !== "string") {
@@ -47,7 +69,14 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                   ) as string[])
                 : [];
 
-            return createConversation(params.id, message, ids);
+            const parsedMentions = sanitizeMentions(mentions);
+
+            return createConversation(
+                params.id,
+                message,
+                ids,
+                parsedMentions
+            );
         } catch (error) {
             set.status = 400;
             return {
@@ -122,9 +151,10 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     })
     .post("/:id/conversations/:conversationId/stream", async ({ params, body, request, set }) => {
         try {
-            const { content, attachmentIds } = body as {
+            const { content, attachmentIds, mentions } = body as {
                 content: string;
                 attachmentIds?: unknown;
+                mentions?: unknown;
             };
 
             if (!content || typeof content !== "string") {
@@ -138,12 +168,15 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                   ) as string[])
                 : [];
 
+            const parsedMentions = sanitizeMentions(mentions);
+
             return streamConversationReply(
                 params.id,
                 params.conversationId,
                 content,
                 request.signal,
-                ids
+                ids,
+                parsedMentions
             );
         } catch (error) {
             set.status =

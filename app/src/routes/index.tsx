@@ -28,13 +28,18 @@ function HomeRoute() {
         useConversationStore.getState().clearActiveConversation();
     }, []);
 
-    const handleSend = async (message: string, attachmentIds: string[]) => {
+    const handleSend = async (
+        message: string,
+        attachmentIds: string[],
+        mentions: { path: string; type: "file" | "directory" }[]
+    ) => {
         if (!activeWorkspaceId) return;
 
         const conversation = await createConversation(
             activeWorkspaceId,
             message,
-            attachmentIds
+            attachmentIds,
+            mentions
         );
 
         void navigate({
@@ -88,8 +93,8 @@ function HomeRoute() {
                         </div>
                     )}
                     <ChatInput
-                        onSend={(msg, attachmentIds) =>
-                            void handleSend(msg, attachmentIds)
+                        onSend={(msg, attachmentIds, mentions) =>
+                            void handleSend(msg, attachmentIds, mentions)
                         }
                         workspaceId={activeWorkspaceId}
                         placeholder={

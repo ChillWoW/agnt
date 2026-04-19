@@ -8,6 +8,7 @@ import type {
     Conversation,
     ConversationWithMessages,
     Message,
+    MessageMention,
     MessageRole,
     ReasoningPart,
     ToolInvocation,
@@ -193,7 +194,8 @@ export function getConversation(workspaceId: string, conversationId: string): Co
 export function createConversation(
     workspaceId: string,
     firstMessage: string,
-    attachmentIds: string[] = []
+    attachmentIds: string[] = [],
+    _mentions: MessageMention[] = []
 ): ConversationWithMessages {
     const db = getWorkspaceDb(workspaceId);
 

@@ -7,6 +7,7 @@ import {
 } from "./workspaces.service";
 import { listDirectory } from "./filetree.service";
 import { readWorkspaceFile } from "./file-read.service";
+import { searchWorkspace } from "./search.service";
 import { resolveRepoInstructions } from "../conversations/repo-instructions";
 
 const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
@@ -45,6 +46,20 @@ const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to read directory"
+            };
+        }
+    })
+    .get("/:id/search", async ({ params, query, set }) => {
+        try {
+            const q = typeof query.q === "string" ? query.q : "";
+            return await searchWorkspace(params.id, q);
+        } catch (error) {
+            set.status = 404;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to search workspace"
             };
         }
     })

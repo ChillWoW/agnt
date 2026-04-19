@@ -88,10 +88,14 @@ export function useContextMeter({
         bumpContextRefresh(conversationId);
     }, [bumpContextRefresh, conversationId]);
 
-    const draftTokens = useMemo(
-        () => (draft.trim().length > 0 ? countTokens(draft) + 4 : 0),
-        [draft]
-    );
+    const draftTokens = useMemo(() => {
+        if (draft.trim().length === 0) return 0;
+        const base = countTokens(draft) + 4;
+        const mentionMatches = draft.match(/(?:^|[\s(\[{])@[A-Za-z0-9_./\\-]+\/?/g);
+        const mentionCount = mentionMatches?.length ?? 0;
+        const mentionOverhead = mentionCount > 0 ? mentionCount * 10 + 40 : 0;
+        return base + mentionOverhead;
+    }, [draft]);
 
     const pendingAttachmentTokens = useMemo(() => {
         if (!pendingAttachments || pendingAttachments.length === 0) return 0;

@@ -1,6 +1,11 @@
 import { api } from "@/lib/api";
 import type { Conversation, ConversationWithMessages, Message, MessageRole } from "./conversation-types";
 
+export interface MessageMention {
+    path: string;
+    type: "file" | "directory";
+}
+
 export function fetchConversations(workspaceId: string) {
     return api.get<Conversation[]>(`/workspaces/${workspaceId}/conversations`);
 }
@@ -14,11 +19,12 @@ export function fetchConversation(workspaceId: string, conversationId: string) {
 export function createConversation(
     workspaceId: string,
     message: string,
-    attachmentIds: string[] = []
+    attachmentIds: string[] = [],
+    mentions: MessageMention[] = []
 ) {
     return api.post<ConversationWithMessages>(
         `/workspaces/${workspaceId}/conversations`,
-        { body: { message, attachmentIds } }
+        { body: { message, attachmentIds, mentions } }
     );
 }
 
@@ -39,11 +45,16 @@ export function streamMessage(
     conversationId: string,
     content: string,
     signal?: AbortSignal,
-    attachmentIds: string[] = []
+    attachmentIds: string[] = [],
+    mentions: MessageMention[] = []
 ): Promise<Response> {
     return api.post<Response>(
         `/workspaces/${workspaceId}/conversations/${conversationId}/stream`,
-        { body: { content, attachmentIds }, parseAs: "response", signal }
+        {
+            body: { content, attachmentIds, mentions },
+            parseAs: "response",
+            signal
+        }
     );
 }
 

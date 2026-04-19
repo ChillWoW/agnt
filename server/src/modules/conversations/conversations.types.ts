@@ -64,6 +64,16 @@ export const messageSchema = z.object({
     summary_of_until: z.string().nullable().optional()
 });
 
+export const messageMentionTypeSchema = z.enum(["file", "directory"]);
+
+export const messageMentionSchema = z.object({
+    path: z.string(),
+    type: messageMentionTypeSchema
+});
+
+export type MessageMentionType = z.infer<typeof messageMentionTypeSchema>;
+export type MessageMention = z.infer<typeof messageMentionSchema>;
+
 export const conversationSchema = z.object({
     id: z.string().uuid(),
     title: z.string(),

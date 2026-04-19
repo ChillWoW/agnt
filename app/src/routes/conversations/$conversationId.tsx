@@ -36,13 +36,18 @@ function ConversationRoute() {
         }
     }, [activeWorkspaceId, conversationId, loadConversation]);
 
-    const handleSend = (content: string, attachmentIds: string[]) => {
+    const handleSend = (
+        content: string,
+        attachmentIds: string[],
+        mentions: { path: string; type: "file" | "directory" }[]
+    ) => {
         if (!activeWorkspaceId || !conversation) return;
         void sendMessage(
             activeWorkspaceId,
             conversation.id,
             content,
-            attachmentIds
+            attachmentIds,
+            mentions
         );
     };
 

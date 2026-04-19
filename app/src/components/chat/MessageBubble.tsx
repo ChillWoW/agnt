@@ -11,6 +11,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 import { MessageAttachments } from "./MessageAttachments";
+import { MessageText } from "./MessageText";
 
 interface MessageBubbleProps {
     message: Message;
@@ -208,17 +209,19 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 {showStreamingDots ? (
                     <StreamingDots />
                 ) : hasContent ? (
-                    <div
-                        className={cn(
-                            isUser &&
-                                "[&_p]:text-dark-50 [&_code]:bg-dark-800 [&_pre]:bg-transparent"
-                        )}
-                    >
-                        <MarkdownRenderer
+                    isUser ? (
+                        <MessageText
                             content={message.content}
-                            isStreaming={message.isStreaming}
+                            className="py-1 text-dark-50"
                         />
-                    </div>
+                    ) : (
+                        <div>
+                            <MarkdownRenderer
+                                content={message.content}
+                                isStreaming={message.isStreaming}
+                            />
+                        </div>
+                    )
                 ) : null}
             </div>
         </div>

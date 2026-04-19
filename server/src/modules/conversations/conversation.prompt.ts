@@ -5,7 +5,8 @@ import {
 } from "./repo-instructions";
 
 export const BASE_SYSTEM_INSTRUCTIONS =
-    "You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.";
+    "You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.\n\n" +
+    "When the user references paths with an `@` prefix (e.g. `@src/foo.ts` for a file or `@src/bar/` for a folder), treat those as explicit pointers the user wants you to inspect. Use your `read_file`, `glob`, and `grep` tools to examine them before answering. Never fabricate their contents.";
 
 type ConversationPromptParts = {
     workspacePath: string;

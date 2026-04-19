@@ -42,13 +42,15 @@ interface ConversationStoreState {
     createConversation: (
         workspaceId: string,
         message: string,
-        attachmentIds?: string[]
+        attachmentIds?: string[],
+        mentions?: conversationApi.MessageMention[]
     ) => Promise<ConversationWithMessages>;
     sendMessage: (
         workspaceId: string,
         conversationId: string,
         content: string,
-        attachmentIds?: string[]
+        attachmentIds?: string[],
+        mentions?: conversationApi.MessageMention[]
     ) => Promise<void>;
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     deleteConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -915,12 +917,14 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         createConversation: async (
             workspaceId: string,
             message: string,
-            attachmentIds: string[] = []
+            attachmentIds: string[] = [],
+            mentions: conversationApi.MessageMention[] = []
         ) => {
             const conversation = await conversationApi.createConversation(
                 workspaceId,
                 message,
-                attachmentIds
+                attachmentIds,
+                mentions
             );
 
             set((state) => {
@@ -946,7 +950,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             workspaceId: string,
             conversationId: string,
             content: string,
-            attachmentIds: string[] = []
+            attachmentIds: string[] = [],
+            mentions: conversationApi.MessageMention[] = []
         ) => {
             await runConversationStream(conversationId, (signal) =>
                 conversationApi.streamMessage(
@@ -954,7 +959,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     conversationId,
                     content,
                     signal,
-                    attachmentIds
+                    attachmentIds,
+                    mentions
                 )
             );
         },

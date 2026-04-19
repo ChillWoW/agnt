@@ -34,6 +34,12 @@ import {
 } from "./conversation.constants";
 import { buildConversationPrompt } from "./conversation.prompt";
 import { generateConversationTitleIfNeeded } from "./conversation-title";
+import {
+    buildMentionsInstructionBlock,
+    estimateMentionsBlockTokens,
+    parseMentionsFromContent
+} from "./mentions";
+import type { MessageMention } from "./conversations.types";
 export { DEFAULT_MODEL };
 
 type UserTextPart = { type: "text"; text: string };
@@ -302,8 +308,15 @@ function buildModelMessages(
 
         const hasAttachments = (attachmentsByMessage.get(msg.id)?.length ?? 0) > 0;
 
+        const mentions = parseMentionsFromContent(msg.content);
+        const mentionBlock = buildMentionsInstructionBlock(mentions);
+        const userText =
+            mentionBlock.length > 0
+                ? `${mentionBlock}\n\n${msg.content}`
+                : msg.content;
+
         if (!hasAttachments) {
-            result.push({ role: "user", content: msg.content });
+            result.push({ role: "user", content: userText });
             continue;
         }
 
@@ -329,8 +342,8 @@ function buildModelMessages(
         }
 
         const textSegments: string[] = [];
-        if (msg.content.length > 0) {
-            textSegments.push(msg.content);
+        if (userText.length > 0) {
+            textSegments.push(userText);
         }
         for (const block of textBlocks) {
             textSegments.push(block);
@@ -346,7 +359,7 @@ function buildModelMessages(
         if (binaryParts.length === 0) {
             result.push({
                 role: "user",
-                content: combinedText.length > 0 ? combinedText : msg.content
+                content: combinedText.length > 0 ? combinedText : userText
             });
             continue;
         }
@@ -1055,13 +1068,15 @@ export async function streamConversationReply(
     conversationId: string,
     userContent: string,
     abortSignal?: AbortSignal,
-    attachmentIds: string[] = []
+    attachmentIds: string[] = [],
+    mentions: MessageMention[] = []
 ): Promise<Response> {
     logger.log("[stream] streamConversationReply start", {
         workspaceId,
         conversationId,
         userContentLength: userContent.length,
-        attachmentCount: attachmentIds.length
+        attachmentCount: attachmentIds.length,
+        mentionCount: mentions.length
     });
 
     const db = getWorkspaceDb(workspaceId);
@@ -1100,10 +1115,15 @@ export async function streamConversationReply(
                       )
                       .get(...attachmentIds) as { total: number }
                 : { total: 0 };
+        const effectiveMentions =
+            mentions.length > 0
+                ? mentions
+                : parseMentionsFromContent(userContent);
         const projected =
             currentContext.usedTokens +
             countTokens(userContent) +
-            attachmentTokens.total;
+            attachmentTokens.total +
+            estimateMentionsBlockTokens(effectiveMentions);
         if (
             currentContext.contextWindow > 0 &&
             projected / currentContext.contextWindow > COMPACT_THRESHOLD

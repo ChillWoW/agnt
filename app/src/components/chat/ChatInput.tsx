@@ -4,15 +4,7 @@ import {
     PlusIcon,
     StopIcon
 } from "@phosphor-icons/react";
-import {
-    useRef,
-    useState,
-    type ClipboardEvent,
-    type DragEvent,
-    type FormEvent,
-    type KeyboardEvent
-} from "react";
-import TextareaAutosize from "react-textarea-autosize";
+import { useCallback, useRef, useState, type DragEvent, type FormEvent } from "react";
 import {
     Button,
     Popover,
@@ -28,9 +20,18 @@ import { ContextMeter } from "./ContextMeter";
 import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
+import {
+    MentionEditor,
+    type MentionEditorHandle,
+    type SerializedMention
+} from "./editor";
 
 interface ChatInputProps {
-    onSend?: (value: string, attachmentIds: string[]) => void;
+    onSend?: (
+        value: string,
+        attachmentIds: string[],
+        mentions: SerializedMention[]
+    ) => void;
     onStop?: () => void;
     isStreaming?: boolean;
     placeholder?: string;
@@ -46,11 +47,13 @@ export function ChatInput({
     workspaceId,
     conversationId
 }: ChatInputProps) {
-    const [value, setValue] = useState("");
+    const [draftText, setDraftText] = useState("");
+    const [isEmpty, setIsEmpty] = useState(true);
     const [dragActive, setDragActive] = useState(false);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const dragCounterRef = useRef(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const editorRef = useRef<MentionEditorHandle>(null);
 
     const {
         pending,
@@ -67,35 +70,58 @@ export function ChatInput({
     const pendingPermission = pendingQueue?.[0];
     const pendingCount = pendingQueue?.length ?? 0;
 
-    const trimmedValue = value.trim();
-
     const hasPending = pending.length > 0;
+    const hasText = !isEmpty && draftText.trim().length > 0;
     const canSend =
         !!workspaceId &&
         !isUploading &&
-        (trimmedValue.length > 0 || pending.some((p) => p.status === "ready"));
+        (hasText || pending.some((p) => p.status === "ready"));
 
-    const handleSend = (event?: FormEvent<HTMLFormElement>) => {
-        event?.preventDefault();
+    const handleSend = useCallback(
+        (event?: FormEvent<HTMLFormElement>) => {
+            event?.preventDefault();
 
-        if (!canSend) return;
+            if (!canSend) return;
 
-        const attachmentIds = takeReadyIds();
-        const content = trimmedValue;
+            const serialized = editorRef.current?.serialize() ?? {
+                text: "",
+                mentions: []
+            };
+            const content = serialized.text.trim();
+            const mentions = serialized.mentions;
 
-        setValue("");
-        clearPending();
-        onSend?.(content, attachmentIds);
-    };
+            const attachmentIds = takeReadyIds();
 
-    const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-        if (event.key !== "Enter" || event.shiftKey) {
-            return;
-        }
+            editorRef.current?.clear();
+            setDraftText("");
+            setIsEmpty(true);
+            clearPending();
+            onSend?.(content, attachmentIds, mentions);
+        },
+        [canSend, clearPending, onSend, takeReadyIds]
+    );
 
-        event.preventDefault();
+    const handleEditorChange = useCallback(
+        (serialized: { text: string; mentions: SerializedMention[] }) => {
+            setDraftText(serialized.text);
+            setIsEmpty(editorRef.current?.isEmpty() ?? serialized.text.length === 0);
+        },
+        []
+    );
+
+    const handleEditorSubmit = useCallback(() => {
         handleSend();
-    };
+    }, [handleSend]);
+
+    const handlePasteFiles = useCallback(
+        (files: FileList) => {
+            if (!workspaceId) return;
+            if (files.length > 0) {
+                addFiles(files);
+            }
+        },
+        [addFiles, workspaceId]
+    );
 
     const handleFilePickerChange = (
         event: React.ChangeEvent<HTMLInputElement>
@@ -148,15 +174,6 @@ export function ChatInput({
         }
     };
 
-    const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-        if (!workspaceId) return;
-        const files = event.clipboardData?.files;
-        if (files && files.length > 0) {
-            event.preventDefault();
-            addFiles(files);
-        }
-    };
-
     return (
         <div className="flex flex-col gap-1.5">
             <div
@@ -190,17 +207,13 @@ export function ChatInput({
                             onSubmit={handleSend}
                         >
                             <div className="px-2.5 pt-1.5">
-                                <TextareaAutosize
-                                    value={value}
-                                    onChange={(event) =>
-                                        setValue(event.target.value)
-                                    }
-                                    onKeyDown={handleKeyDown}
-                                    onPaste={handlePaste}
-                                    minRows={1}
-                                    maxRows={8}
+                                <MentionEditor
+                                    ref={editorRef}
+                                    workspaceId={workspaceId ?? null}
                                     placeholder={placeholder}
-                                    className="w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-dark-50 placeholder:text-dark-300"
+                                    onSubmit={handleEditorSubmit}
+                                    onChange={handleEditorChange}
+                                    onPasteFiles={handlePasteFiles}
                                 />
                             </div>
 
@@ -304,7 +317,7 @@ export function ChatInput({
                 <ContextMeter
                     workspaceId={workspaceId}
                     conversationId={conversationId}
-                    draft={value}
+                    draft={draftText}
                     pendingAttachments={pending}
                 />
             </div>

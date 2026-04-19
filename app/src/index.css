@@ -148,3 +148,56 @@ body,
     );
     color: var(--color-dark-50);
 }
+
+.mention-editor-content.ProseMirror {
+    min-height: 1.5rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.mention-editor-content.ProseMirror p {
+    margin: 0;
+}
+
+.mention-editor-content.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: var(--color-dark-300);
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+.mention-chip {
+    display: inline;
+    padding: 0 4px;
+    margin: 0 1px;
+    border-radius: 4px;
+    background-color: var(--color-dark-700);
+    color: var(--color-dark-50);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    border: 1px solid var(--color-dark-600);
+    white-space: nowrap;
+}
+
+.mention-chip[data-type="directory"] {
+    background-color: color-mix(
+        in srgb,
+        var(--color-dark-600) 60%,
+        transparent
+    );
+}
+
+.message-mention-chip {
+    display: inline;
+    padding: 0 4px;
+    margin: 0 1px;
+    border-radius: 4px;
+    background-color: var(--color-dark-800);
+    color: var(--color-dark-50);
+    border: 1px solid var(--color-dark-600);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+}
