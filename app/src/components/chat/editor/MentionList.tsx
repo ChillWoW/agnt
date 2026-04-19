@@ -3,6 +3,7 @@ import {
     useEffect,
     useImperativeHandle,
     useMemo,
+    useRef,
     useState
 } from "react";
 import { FileIcon, FolderIcon } from "@phosphor-icons/react";
@@ -54,6 +55,11 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
         const [loading, setLoading] = useState(false);
         const [error, setError] = useState<string | null>(null);
         const [selectedIndex, setSelectedIndex] = useState(0);
+        const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+        useEffect(() => {
+            itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
+        }, [selectedIndex]);
 
         const debouncedQuery = useDebounced(query, 120);
 
@@ -208,6 +214,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                         return (
                             <button
                                 key={`${entry.type}:${entry.path}`}
+                                ref={(el) => { itemRefs.current[index] = el; }}
                                 type="button"
                                 onMouseDown={(event) => {
                                     event.preventDefault();
