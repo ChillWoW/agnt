@@ -87,10 +87,9 @@ export function TodosCard({ workspaceId, conversationId }: TodosCardProps) {
     }, [todos]);
 
     const allDone = counts.total > 0 && counts.completed === counts.total;
-    // Auto-collapse default when everything is complete; user toggle overrides.
-    const collapsed = userCollapsed ?? allDone;
+    const collapsed = userCollapsed ?? false;
 
-    if (!todos || todos.length === 0) return null;
+    if (!todos || todos.length === 0 || allDone) return null;
 
     const activeTodo = todos.find((t) => t.status === "in_progress");
 
@@ -133,13 +132,20 @@ export function TodosCard({ workspaceId, conversationId }: TodosCardProps) {
                 />
             </button>
 
-            {!collapsed && (
-                <ul className="max-h-60 overflow-y-auto border-t border-dark-700 px-2.5 py-2">
-                    {todos.map((todo) => (
-                        <TodoRow key={todo.id} todo={todo} />
-                    ))}
-                </ul>
-            )}
+            <div
+                className={cn(
+                    "grid transition-[grid-template-rows] duration-300 ease-in-out",
+                    collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+                )}
+            >
+                <div className="min-h-0 overflow-hidden">
+                    <ul className="max-h-60 overflow-y-auto border-t border-dark-700 px-2.5 py-2">
+                        {todos.map((todo) => (
+                            <TodoRow key={todo.id} todo={todo} />
+                        ))}
+                    </ul>
+                </div>
+            </div>
         </div>
     );
 }
