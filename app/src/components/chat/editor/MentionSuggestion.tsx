@@ -25,8 +25,37 @@ export const MENTION_PLUGIN_KEY = new PluginKey<MentionSuggestionState>(
     "mention-suggestion"
 );
 
+// Module-level flag tracking whether any mention popup is currently rendered.
+// Using this alongside the plugin-state check because the plugin state can
+// momentarily disagree with what the user sees on screen (e.g. between the
+// plugin dispatching an exit transaction and React tearing the popup down),
+// and we must NEVER submit the form while the popup is visible.
+let popupOpenCount = 0;
+
+function setPopupOpen(open: boolean) {
+    if (open) popupOpenCount += 1;
+    else popupOpenCount = Math.max(0, popupOpenCount - 1);
+}
+
 export function isMentionPopupActive(state: EditorState): boolean {
+    if (isMentionPopupOpen()) return true;
     return MENTION_PLUGIN_KEY.getState(state)?.active === true;
+}
+
+/**
+ * Can be called without an EditorState — uses the module-level flag plus a
+ * DOM query as a last-resort gate for callers outside the editor (e.g. form
+ * submit handlers) that need to know whether the user is mid-selection.
+ */
+export function isMentionPopupOpen(): boolean {
+    if (popupOpenCount > 0) return true;
+    if (
+        typeof document !== "undefined" &&
+        document.querySelector("[data-mention-popup]")
+    ) {
+        return true;
+    }
+    return false;
 }
 
 export function createMentionSuggestion(
@@ -94,7 +123,9 @@ export function createMentionSuggestion(
                     const workspaceId = getWorkspaceId();
                     if (!workspaceId) return;
 
+                    setPopupOpen(true);
                     container = document.createElement("div");
+                    container.setAttribute("data-mention-popup", "");
                     container.style.position = "fixed";
                     container.style.zIndex = "60";
                     container.style.left = "0px";
@@ -142,6 +173,7 @@ export function createMentionSuggestion(
                     );
                 },
                 onExit: () => {
+                    setPopupOpen(false);
                     window.removeEventListener(
                         "resize",
                         handleViewportChange

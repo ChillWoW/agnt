@@ -21,6 +21,7 @@ import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
 import {
+    isMentionPopupOpen,
     MentionEditor,
     type MentionEditorHandle,
     type SerializedMention
@@ -82,6 +83,9 @@ export function ChatInput({
             event?.preventDefault();
 
             if (!canSend) return;
+            // The user is mid-mention-selection — swallow the submit so Enter
+            // picks the highlighted entry instead of sending the message.
+            if (isMentionPopupOpen()) return;
 
             const serialized = editorRef.current?.serialize() ?? {
                 text: "",

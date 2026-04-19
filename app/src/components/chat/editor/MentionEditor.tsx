@@ -16,7 +16,8 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { MentionExtension, serializeMentionLabel } from "./MentionExtension";
 import {
     createMentionSuggestion,
-    isMentionPopupActive
+    isMentionPopupActive,
+    isMentionPopupOpen
 } from "./MentionSuggestion";
 import type { MentionEntryType } from "@/features/workspaces";
 
@@ -189,13 +190,22 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                     // mention suggestion plugin while its popup is open.
                     // Otherwise Enter would submit the form instead of
                     // selecting the highlighted entry.
+                    const popupActive =
+                        isMentionPopupOpen() ||
+                        isMentionPopupActive(view.state);
+
                     if (
+                        popupActive &&
                         (event.key === "Enter" ||
                             event.key === "Tab" ||
                             event.key === "ArrowUp" ||
-                            event.key === "ArrowDown") &&
-                        isMentionPopupActive(view.state)
+                            event.key === "ArrowDown")
                     ) {
+                        // Stop the form's native implicit-submit path AND
+                        // block our own submit handler — then let the
+                        // suggestion plugin process the key.
+                        event.preventDefault();
+                        event.stopPropagation();
                         return false;
                     }
 
