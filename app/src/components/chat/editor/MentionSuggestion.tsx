@@ -45,7 +45,6 @@ export function createMentionSuggestion(
             let container: HTMLDivElement | null = null;
             let root: Root | null = null;
             let lastProps: SuggestionProps | null = null;
-            let resizeObserver: ResizeObserver | null = null;
             const listRef = createRef<MentionListHandle>();
 
             const positionContainer = () => {
@@ -53,40 +52,20 @@ export function createMentionSuggestion(
                 const rect = lastProps.clientRect?.();
                 if (!rect) return;
 
-                const height = container.offsetHeight;
                 const width = container.offsetWidth;
-                if (height === 0) return; // wait for ResizeObserver callback
-
-                const viewportHeight = window.innerHeight;
                 const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
 
-                const spaceBelow = viewportHeight - rect.bottom;
-                const spaceAbove = rect.top;
-
-                // Prefer above when there's not enough room below, which is
-                // effectively always the case for a bottom-anchored chat
-                // input.
-                const placeAbove =
-                    spaceBelow < height + ANCHOR_GAP + VIEWPORT_PADDING &&
-                    spaceAbove > spaceBelow;
-
-                const top = placeAbove
-                    ? Math.max(
-                          VIEWPORT_PADDING,
-                          rect.top - height - ANCHOR_GAP
-                      )
-                    : Math.min(
-                          viewportHeight - height - VIEWPORT_PADDING,
-                          rect.bottom + ANCHOR_GAP
-                      );
-
+                // Anchor from the bottom so the popover grows upward without
+                // needing to know its own height first.
+                const bottom = viewportHeight - rect.top + ANCHOR_GAP;
                 const left = Math.min(
                     Math.max(VIEWPORT_PADDING, rect.left),
                     viewportWidth - width - VIEWPORT_PADDING
                 );
 
+                container.style.bottom = `${bottom}px`;
                 container.style.left = `${left}px`;
-                container.style.top = `${top}px`;
                 if (container.style.visibility === "hidden") {
                     container.style.visibility = "visible";
                 }
@@ -119,21 +98,10 @@ export function createMentionSuggestion(
                     container.style.position = "fixed";
                     container.style.zIndex = "60";
                     container.style.left = "0px";
-                    container.style.top = "0px";
-                    // Hide until ResizeObserver fires so the popup doesn't
-                    // flash in the wrong spot before it has a measured height.
+                    container.style.bottom = "0px";
                     container.style.visibility = "hidden";
                     document.body.appendChild(container);
                     root = createRoot(container);
-
-                    // Repositions after every React commit that actually
-                    // changes the popup's box size. This is the only reliable
-                    // way to learn the height — rAF fires before React
-                    // commits so offsetHeight is still 0.
-                    resizeObserver = new ResizeObserver(() => {
-                        positionContainer();
-                    });
-                    resizeObserver.observe(container);
 
                     window.addEventListener("resize", handleViewportChange);
                     window.addEventListener(
@@ -143,11 +111,11 @@ export function createMentionSuggestion(
                     );
 
                     renderList(props);
+                    // rAF lets React commit before we measure offsetWidth for left.
+                    requestAnimationFrame(() => positionContainer());
                 },
                 onUpdate: (props) => {
                     renderList(props);
-                    // ResizeObserver will fire if size changes; also reposition
-                    // immediately so the popup tracks the caret while typing.
                     positionContainer();
                 },
                 onKeyDown: (props) => {
@@ -174,8 +142,6 @@ export function createMentionSuggestion(
                     );
                 },
                 onExit: () => {
-                    resizeObserver?.disconnect();
-                    resizeObserver = null;
                     window.removeEventListener(
                         "resize",
                         handleViewportChange
