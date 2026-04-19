@@ -1,7 +1,10 @@
 import { tool, type Tool } from "ai";
 import { logger } from "../../../lib/logger";
 import { getCategory } from "../../settings/settings.service";
-import type { ToolPermissionDecision } from "../../settings/settings.types";
+import {
+    getDefaultToolPermissionDecision,
+    type ToolPermissionDecision
+} from "../../settings/settings.types";
 import {
     AGNT_TOOL_DEFS,
     createGlobToolDef,
@@ -38,7 +41,7 @@ function resolveConfiguredDecision(
     } catch (error) {
         logger.error("[permissions] failed to load settings", error);
     }
-    return "ask";
+    return getDefaultToolPermissionDecision(toolName);
 }
 
 function wrapExecute<TInput extends object, TOutput>(

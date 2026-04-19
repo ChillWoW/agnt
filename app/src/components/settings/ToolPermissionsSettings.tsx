@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { useSettings } from "@/features/settings";
 import { fetchTools, type ToolCatalogEntry } from "@/features/permissions";
-import type { ToolPermissionDecision } from "@/typings/settings";
+import {
+    getDefaultToolPermissionDecision,
+    type ToolPermissionDecision
+} from "@/typings/settings";
 import { SettingHeader } from "./SettingHeader";
 import { cn } from "@/lib/cn";
 
@@ -139,7 +142,8 @@ export function ToolPermissionsSettings() {
                     {!isLoading &&
                         tools.map((tool) => {
                             const current: ToolPermissionDecision =
-                                defaults[tool.name] ?? "ask";
+                                defaults[tool.name] ??
+                                getDefaultToolPermissionDecision(tool.name);
 
                             return (
                                 <div

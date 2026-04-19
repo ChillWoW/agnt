@@ -4,6 +4,7 @@ import { getHomePath } from "../../lib/homedir";
 import {
     settingsSchema,
     DEFAULT_SETTINGS,
+    getDefaultToolPermissionSettings,
     type Settings,
     type SettingsCategory
 } from "./settings.types";
@@ -18,6 +19,24 @@ function ensureDir(): void {
     }
 }
 
+function normalizeSettings(settings: Settings): Settings {
+    return {
+        ...settings,
+        hotkeys: {
+            bindings: {
+                ...DEFAULT_SETTINGS.hotkeys.bindings,
+                ...settings.hotkeys.bindings
+            }
+        },
+        toolPermissions: {
+            defaults: {
+                ...getDefaultToolPermissionSettings().defaults,
+                ...settings.toolPermissions.defaults
+            }
+        }
+    };
+}
+
 export function loadSettings(): Settings {
     try {
         const raw = readFileSync(SETTINGS_PATH, "utf8");
@@ -25,14 +44,16 @@ export function loadSettings(): Settings {
         const result = settingsSchema.safeParse(json);
 
         if (result.success) {
-            if (JSON.stringify(result.data) !== JSON.stringify(json)) {
-                saveSettings(result.data);
+            const normalized = normalizeSettings(result.data);
+
+            if (JSON.stringify(normalized) !== JSON.stringify(json)) {
+                saveSettings(normalized);
             }
 
-            return result.data;
+            return normalized;
         }
 
-        const patched = settingsSchema.parse(json);
+        const patched = normalizeSettings(settingsSchema.parse(json));
         saveSettings(patched);
         return patched;
     } catch {
