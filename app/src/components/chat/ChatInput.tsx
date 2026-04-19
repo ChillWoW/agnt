@@ -22,6 +22,7 @@ import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
 import { QuestionCard } from "./QuestionCard";
+import { TodosCard } from "./TodosCard";
 import {
     isMentionPopupOpen,
     MentionEditor,
@@ -216,6 +217,12 @@ export function ChatInput({
                     />
                 ) : (
                     <>
+                        {workspaceId && conversationId && (
+                            <TodosCard
+                                workspaceId={workspaceId}
+                                conversationId={conversationId}
+                            />
+                        )}
                         <AttachmentBar
                             attachments={pending}
                             onRemove={removePending}

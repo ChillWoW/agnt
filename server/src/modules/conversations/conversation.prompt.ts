@@ -8,6 +8,7 @@ import {
     discoverSkillsForPath,
     type DiscoveredSkills
 } from "../skills/skills.service";
+import { buildTodosPromptBlock, listTodos, type Todo } from "./todos";
 
 export const BASE_SYSTEM_INSTRUCTIONS =
     "You are Agnt, a helpful AI assistant. Help the user with their questions and tasks. Be concise and clear.\n\n" +
@@ -21,6 +22,8 @@ type ConversationPromptParts = {
     warningBlock: string;
     skills: DiscoveredSkills;
     skillsBlock: string;
+    todos: Todo[];
+    todosBlock: string;
     prompt: string;
 };
 
@@ -39,7 +42,8 @@ function buildWarningBlock(repoInstructions: ResolvedRepoInstructions): string {
 }
 
 export function buildConversationPrompt(
-    workspaceId: string
+    workspaceId: string,
+    conversationId?: string
 ): ConversationPromptParts {
     const workspace = getWorkspace(workspaceId);
     const repoInstructions = resolveRepoInstructions(workspaceId);
@@ -47,12 +51,17 @@ export function buildConversationPrompt(
     const workspaceBlock = buildWorkspaceBlock(workspace.path);
     const warningBlock = buildWarningBlock(repoInstructions);
     const skillsBlock = buildAvailableSkillsBlock(skills.skills);
+    const todos = conversationId
+        ? listTodos(workspaceId, conversationId)
+        : [];
+    const todosBlock = buildTodosPromptBlock(todos);
     const prompt =
         BASE_SYSTEM_INSTRUCTIONS +
         workspaceBlock +
         repoInstructions.promptBlock +
         warningBlock +
-        skillsBlock;
+        skillsBlock +
+        todosBlock;
 
     return {
         workspacePath: workspace.path,
@@ -62,6 +71,8 @@ export function buildConversationPrompt(
         warningBlock,
         skills,
         skillsBlock,
+        todos,
+        todosBlock,
         prompt
     };
 }

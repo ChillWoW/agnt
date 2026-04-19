@@ -5,6 +5,7 @@ export interface ContextBreakdown {
     attachments: number;
     repoInstructions: number;
     systemInstructions: number;
+    todos: number;
 }
 
 export interface ContextSummary {

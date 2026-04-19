@@ -30,6 +30,7 @@ export interface ContextBreakdown {
     attachments: number;
     repoInstructions: number;
     systemInstructions: number;
+    todos: number;
 }
 
 export interface ContextSummary {
@@ -241,18 +242,20 @@ export function computeContextSummary(
         }
     }
 
-    const prompt = buildConversationPrompt(workspaceId);
+    const prompt = buildConversationPrompt(workspaceId, conversationId);
     const systemInstructionsTokens = countTokens(
         prompt.baseInstructions + prompt.workspaceBlock + prompt.warningBlock
     );
     const repoInstructionsTokens = countTokens(prompt.repoInstructions.promptBlock);
+    const todosTokens = countTokens(prompt.todosBlock);
 
     const usedTokens =
         messagesTokens +
         toolOutputsTokens +
         attachmentsTokens +
         repoInstructionsTokens +
-        systemInstructionsTokens;
+        systemInstructionsTokens +
+        todosTokens;
 
     const percent = contextWindow > 0 ? usedTokens / contextWindow : 0;
 
@@ -269,7 +272,8 @@ export function computeContextSummary(
             toolOutputs: toolOutputsTokens,
             attachments: attachmentsTokens,
             repoInstructions: repoInstructionsTokens,
-            systemInstructions: systemInstructionsTokens
+            systemInstructions: systemInstructionsTokens,
+            todos: todosTokens
         },
         messageCount: activeRows.length,
         compactedMessageCount: compactedRows.length,

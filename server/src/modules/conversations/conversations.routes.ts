@@ -21,6 +21,7 @@ import {
     clearConversationQuestionState,
     resolveQuestions
 } from "./questions";
+import { listTodos } from "./todos";
 import type { MessageMention } from "./conversations.types";
 
 function isPermissionDecision(value: unknown): value is PermissionDecision {
@@ -213,6 +214,22 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
+    .get(
+        "/:id/conversations/:conversationId/todos",
+        ({ params, set }) => {
+            try {
+                return { todos: listTodos(params.id, params.conversationId) };
+            } catch (error) {
+                set.status = 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to list todos"
+                };
+            }
+        }
+    )
     .get(
         "/:id/conversations/:conversationId/context",
         ({ params, set }) => {

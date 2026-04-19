@@ -12,6 +12,8 @@ import { usePermissionStore } from "@/features/permissions";
 import type { PermissionRequest } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
 import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
+import { useTodoStore } from "@/features/todos";
+import type { Todo } from "@/features/todos";
 import type { Attachment } from "@/features/attachments";
 import type {
     CompactedSseEvent,
@@ -478,6 +480,14 @@ async function runStream(
                 useQuestionStore
                     .getState()
                     .setPending(conversationId, request);
+                break;
+            }
+
+            case "todos-updated": {
+                const todos = Array.isArray(data.todos)
+                    ? (data.todos as Todo[])
+                    : [];
+                useTodoStore.getState().setTodos(conversationId, todos);
                 break;
             }
 
@@ -1020,6 +1030,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             get().streamControllersById[conversationId]?.abort();
             usePermissionStore.getState().clearPending(conversationId);
             useQuestionStore.getState().clearPending(conversationId);
+            useTodoStore.getState().clearTodos(conversationId);
 
             await conversationApi.deleteConversation(
                 workspaceId,

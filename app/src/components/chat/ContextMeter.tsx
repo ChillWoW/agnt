@@ -258,7 +258,7 @@ function ContextMeterBody({
                     label="System"
                     value={summary.breakdown.systemInstructions}
                 />
-                {draftTokens > 0 && (
+{draftTokens > 0 && (
                     <Row label="Draft" value={draftTokens} accent />
                 )}
                 {pendingAttachmentTokens > 0 && (

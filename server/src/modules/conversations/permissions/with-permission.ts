@@ -11,6 +11,7 @@ import {
     createGrepToolDef,
     createQuestionToolDef,
     createReadFileToolDef,
+    createTodoWriteToolDef,
     createUseSkillToolDef,
     isUngatedTool,
     type ToolDefinition
@@ -26,6 +27,7 @@ export type PermissionMode = "ask" | "bypass";
 
 export interface ConversationPermissionContext {
     conversationId: string;
+    workspaceId: string;
     getMode: () => PermissionMode;
     workspacePath?: string;
     getSkills?: () => Skill[];
@@ -120,6 +122,11 @@ export function buildConversationTools(
                 ) as ToolDefinition;
             case "question":
                 return createQuestionToolDef({
+                    conversationId: ctx.conversationId
+                }) as ToolDefinition;
+            case "todo_write":
+                return createTodoWriteToolDef({
+                    workspaceId: ctx.workspaceId,
                     conversationId: ctx.conversationId
                 }) as ToolDefinition;
             default:

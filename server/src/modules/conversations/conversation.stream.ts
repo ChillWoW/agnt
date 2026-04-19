@@ -22,6 +22,7 @@ import {
     type PermissionMode
 } from "./permissions";
 import { abortQuestions, subscribeToQuestions } from "./questions";
+import { subscribeToTodos } from "./todos";
 import { compactConversation } from "./compact.service";
 import {
     COMPACT_THRESHOLD,
@@ -544,6 +545,15 @@ async function runStreamTextIntoController({
         }
     );
 
+    const unsubscribeTodos = subscribeToTodos(conversationId, (event) => {
+        controller.enqueue(
+            sseEvent("todos-updated", {
+                conversation_id: event.conversationId,
+                todos: event.todos
+            })
+        );
+    });
+
     const unsubscribeQuestions = subscribeToQuestions(
         conversationId,
         (event) => {
@@ -572,7 +582,7 @@ async function runStreamTextIntoController({
 
     try {
         const codex = await createCodexClient();
-        const prompt = buildConversationPrompt(workspaceId);
+        const prompt = buildConversationPrompt(workspaceId, conversationId);
         const skills = prompt.skills.skills;
 
         logger.log(
@@ -608,6 +618,7 @@ async function runStreamTextIntoController({
 
         const tools = buildConversationTools({
             conversationId,
+            workspaceId,
             workspacePath,
             getSkills: () => skills,
             getMode: () => {
@@ -968,6 +979,7 @@ async function runStreamTextIntoController({
     } finally {
         unsubscribePermissions();
         unsubscribeQuestions();
+        unsubscribeTodos();
     }
 }
 

@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS message_reasoning_parts (
     message_seq INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS todos (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+    sort_index INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     conversation_id TEXT,
@@ -93,6 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_invocations_message ON tool_invocations(mess
 CREATE INDEX IF NOT EXISTS idx_reasoning_parts_message ON message_reasoning_parts(message_id, sort_index);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(conversation_id, message_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_todos_conversation ON todos(conversation_id, sort_index);
 `;
 
 interface TableInfoRow {
@@ -150,6 +161,19 @@ function runMigrations(db: Database): void {
 
     addColumnIfMissing(db, "tool_invocations", "message_seq", "INTEGER");
     addColumnIfMissing(db, "message_reasoning_parts", "message_seq", "INTEGER");
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS todos (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+            sort_index INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_todos_conversation ON todos(conversation_id, sort_index);
+    `);
 
     backfillLegacyReasoningParts(db);
 }

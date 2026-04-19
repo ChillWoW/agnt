@@ -3,6 +3,7 @@ import { globToolDef, createGlobToolDef } from "./glob";
 import { grepToolDef, createGrepToolDef } from "./grep";
 import { useSkillToolDef, createUseSkillToolDef } from "./use-skill";
 import { questionToolDef, createQuestionToolDef } from "./question";
+import { todoWriteToolDef, createTodoWriteToolDef } from "./todo-write";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -10,7 +11,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     globToolDef as ToolDefinition,
     grepToolDef as ToolDefinition,
     useSkillToolDef as ToolDefinition,
-    questionToolDef as ToolDefinition
+    questionToolDef as ToolDefinition,
+    todoWriteToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -25,7 +27,7 @@ export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
  * caching. Use sparingly — this is for tools that ARE themselves the user
  * interaction (e.g. `question`), not for tools that happen to be safe.
  */
-export const UNGATED_TOOL_NAMES = new Set<string>(["question"]);
+export const UNGATED_TOOL_NAMES = new Set<string>(["question", "todo_write"]);
 
 export function isUngatedTool(toolName: string): boolean {
     return UNGATED_TOOL_NAMES.has(toolName);
@@ -43,6 +45,8 @@ export {
     useSkillToolDef,
     createUseSkillToolDef,
     questionToolDef,
-    createQuestionToolDef
+    createQuestionToolDef,
+    todoWriteToolDef,
+    createTodoWriteToolDef
 };
 export type { ToolDefinition };
