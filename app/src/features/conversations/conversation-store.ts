@@ -179,7 +179,8 @@ async function runStream(
         updater: (prev: ConversationWithMessages) => ConversationWithMessages
     ) => void,
     onCompacted: (event: CompactedSseEvent) => void,
-    onUsage: () => void
+    onUsage: () => void,
+    onConversationTitle: (title: string, updatedAt: string | null) => void
 ): Promise<StreamOutcome> {
     let outcome: StreamOutcome = "aborted";
 
@@ -503,6 +504,18 @@ async function runStream(
                 break;
             }
 
+            case "conversation-title": {
+                const title = data.title;
+                if (typeof title === "string" && title.length > 0) {
+                    const updatedAt =
+                        typeof data.updated_at === "string"
+                            ? (data.updated_at as string)
+                            : null;
+                    onConversationTitle(title, updatedAt);
+                }
+                break;
+            }
+
             case "compacted": {
                 const evt = data as unknown as CompactedSseEvent;
                 const summarizedSet = new Set(evt.summarizedMessageIds);
@@ -659,6 +672,47 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                 },
                 () => {
                     get().bumpContextRefresh(conversationId);
+                },
+                (title, updatedAt) => {
+                    applyConversationUpdate(conversationId, (prev) => ({
+                        ...prev,
+                        title,
+                        updated_at: updatedAt ?? prev.updated_at
+                    }));
+                    set((state) => {
+                        const entries = Object.entries(
+                            state.conversationsByWorkspace
+                        );
+                        let changed = false;
+                        const nextByWorkspace: Record<string, Conversation[]> =
+                            {};
+                        for (const [workspaceId, conversations] of entries) {
+                            let workspaceChanged = false;
+                            const nextConversations = conversations.map(
+                                (conversation) => {
+                                    if (conversation.id !== conversationId) {
+                                        return conversation;
+                                    }
+                                    workspaceChanged = true;
+                                    return {
+                                        ...conversation,
+                                        title,
+                                        updated_at:
+                                            updatedAt ??
+                                            conversation.updated_at
+                                    };
+                                }
+                            );
+                            nextByWorkspace[workspaceId] = workspaceChanged
+                                ? nextConversations
+                                : conversations;
+                            if (workspaceChanged) {
+                                changed = true;
+                            }
+                        }
+                        if (!changed) return {};
+                        return { conversationsByWorkspace: nextByWorkspace };
+                    });
                 }
             );
         } catch (error) {

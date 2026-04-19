@@ -3,6 +3,7 @@ import {
     linkAttachmentsToMessage,
     listAttachmentsForMessages
 } from "../attachments/attachments.service";
+import { DEFAULT_CONVERSATION_TITLE } from "./conversation.constants";
 import type {
     Conversation,
     ConversationWithMessages,
@@ -203,7 +204,7 @@ export function createConversation(
     const tx = db.transaction(() => {
         db.query(
             "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
-        ).run(conversationId, "New conversation", now, now);
+        ).run(conversationId, DEFAULT_CONVERSATION_TITLE, now, now);
 
         db.query(
             "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -224,7 +225,7 @@ export function createConversation(
 
     return {
         id: conversationId,
-        title: "New conversation",
+        title: DEFAULT_CONVERSATION_TITLE,
         created_at: now,
         updated_at: now,
         messages: [

@@ -28,8 +28,12 @@ import {
 } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
 
-import { DEFAULT_MODEL } from "./conversation.constants";
+import {
+    DEFAULT_CONVERSATION_TITLE,
+    DEFAULT_MODEL
+} from "./conversation.constants";
 import { buildConversationPrompt } from "./conversation.prompt";
+import { generateConversationTitleIfNeeded } from "./conversation-title";
 export { DEFAULT_MODEL };
 
 type UserTextPart = { type: "text"; text: string };
@@ -921,6 +925,57 @@ async function runStreamTextIntoController({
     }
 }
 
+function conversationHasPlaceholderTitle(
+    workspaceId: string,
+    conversationId: string
+): boolean {
+    try {
+        const db = getWorkspaceDb(workspaceId);
+        const row = db
+            .query("SELECT title FROM conversations WHERE id = ?")
+            .get(conversationId) as { title: string } | null;
+        return row?.title === DEFAULT_CONVERSATION_TITLE;
+    } catch {
+        return false;
+    }
+}
+
+function startTitleGenerationForController({
+    workspaceId,
+    conversationId,
+    controller
+}: {
+    workspaceId: string;
+    conversationId: string;
+    controller: SseStreamController;
+}): void {
+    if (!conversationHasPlaceholderTitle(workspaceId, conversationId)) {
+        return;
+    }
+
+    void generateConversationTitleIfNeeded({
+        workspaceId,
+        conversationId,
+        onTitle: (updated) => {
+            try {
+                controller.enqueue(
+                    sseEvent("conversation-title", {
+                        conversation_id: updated.id,
+                        title: updated.title,
+                        updated_at: updated.updated_at
+                    })
+                );
+            } catch (error) {
+                logger.error(
+                    "[stream] Failed to enqueue conversation-title event",
+                    { workspaceId, conversationId },
+                    error
+                );
+            }
+        }
+    });
+}
+
 /**
  * Generate a reply to the existing conversation without adding a new user message.
  * Used after conversation creation where the first user message is already persisted.
@@ -969,6 +1024,12 @@ export async function streamReplyToLastMessage(
     );
 
     return buildStreamResponse(async (controller) => {
+        startTitleGenerationForController({
+            workspaceId,
+            conversationId,
+            controller
+        });
+
         controller.enqueue(
             sseEvent("assistant-start", {
                 id: assistantMsgId,
@@ -1137,6 +1198,12 @@ export async function streamConversationReply(
     logger.log("[stream] Created assistant placeholder:", assistantMsgId);
 
     return buildStreamResponse(async (controller) => {
+        startTitleGenerationForController({
+            workspaceId,
+            conversationId,
+            controller
+        });
+
         if (compactionEvent) {
             controller.enqueue(
                 sseEvent("compacted", {

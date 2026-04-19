@@ -141,7 +141,10 @@ function WorkspaceSidebarList() {
     const { workspaceOrder, setWorkspaceOrder } = useLeftSidebarStore();
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [draggedId, setDraggedId] = useState<string | null>(null);
-    const [dragOver, setDragOver] = useState<{ id: string; position: "before" | "after" } | null>(null);
+    const [dragOver, setDragOver] = useState<{
+        id: string;
+        position: "before" | "after";
+    } | null>(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -187,7 +190,8 @@ function WorkspaceSidebarList() {
         e.preventDefault();
         if (id === draggedId) return;
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const position = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+        const position =
+            e.clientY < rect.top + rect.height / 2 ? "before" : "after";
         setDragOver({ id, position });
     };
 
@@ -220,8 +224,10 @@ function WorkspaceSidebarList() {
                 const isActive = ws.id === activeWorkspaceId;
                 const isExpanded = expandedIds.has(ws.id);
                 const isDragging = draggedId === ws.id;
-                const isDropBefore = dragOver?.id === ws.id && dragOver.position === "before";
-                const isDropAfter = dragOver?.id === ws.id && dragOver.position === "after";
+                const isDropBefore =
+                    dragOver?.id === ws.id && dragOver.position === "before";
+                const isDropAfter =
+                    dragOver?.id === ws.id && dragOver.position === "after";
 
                 return (
                     <div
@@ -398,7 +404,7 @@ export function LeftSidebar() {
             <div
                 className={cn(
                     "flex flex-col shrink-0 h-full transition-[width] duration-100 overflow-hidden",
-                    isCollapsed ? "w-0" : "w-64"
+                    isCollapsed ? "w-0" : "w-72"
                 )}
             >
                 <div className="flex h-full flex-col">
