@@ -115,20 +115,26 @@ export function ToolBlock({
                     hasDropdown && !isPending && setExpanded((v) => !v)
                 }
                 className={cn(
-                    "flex items-center gap-1.5 text-xs transition-colors",
+                    "flex items-center gap-1 text-xs transition-colors",
                     hasDropdown && !isPending
                         ? "cursor-pointer text-dark-200 hover:text-dark-200"
                         : "cursor-default text-dark-200"
                 )}
             >
-                <span className="size-3.5 shrink-0 text-dark-200">{icon}</span>
-                <span
-                    className={cn(
-                        isPending ? "wave-text" : "text-dark-200 font-medium"
-                    )}
-                >
-                    {label}
-                </span>
+                <div className="flex items-center gap-1.5">
+                    <span className="size-3.5 shrink-0 text-dark-200">
+                        {icon}
+                    </span>
+                    <span
+                        className={cn(
+                            isPending
+                                ? "wave-text"
+                                : "text-dark-200 font-medium"
+                        )}
+                    >
+                        {label}
+                    </span>
+                </div>
                 {detail && (
                     <span className="min-w-0 truncate text-dark-200">
                         {detail}
@@ -517,10 +523,7 @@ function formatSkillDetail(
         return name;
     }
 
-    const fileCount = Array.isArray(output?.files) ? output.files.length : 0;
-    return fileCount > 0
-        ? `${name} · ${fileCount} file${fileCount === 1 ? "" : "s"}`
-        : name;
+    return name;
 }
 
 function UseSkillBlock({ invocation }: { invocation: ToolInvocation }) {
@@ -532,11 +535,6 @@ function UseSkillBlock({ invocation }: { invocation: ToolInvocation }) {
         : undefined;
     const detail = formatSkillDetail(input, output);
     const notFound = output?.ok === false;
-    const skillDescription =
-        typeof output?.description === "string" && output.description.length > 0
-            ? output.description
-            : null;
-    const files = Array.isArray(output?.files) ? output.files : [];
 
     // Treat a "skill not found" return as an error-shaped result so the block
     // renders in the error style even though execute() didn't throw.
@@ -555,33 +553,7 @@ function UseSkillBlock({ invocation }: { invocation: ToolInvocation }) {
             detail={detail}
             error={error}
             status={status}
-        >
-            {error ? (
-                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
-                    {error}
-                </p>
-            ) : (
-                <div className="flex flex-col gap-1 text-[11px] text-dark-200">
-                    {skillDescription && (
-                        <p className="whitespace-pre-wrap leading-relaxed text-dark-200">
-                            {skillDescription}
-                        </p>
-                    )}
-                    {files.length > 0 && (
-                        <ul className="flex flex-col gap-0.5">
-                            {files.map((file, idx) => (
-                                <li
-                                    key={`${file}-${idx}`}
-                                    className="truncate text-dark-300"
-                                >
-                                    {file}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-            )}
-        </ToolBlock>
+        />
     );
 }
 
