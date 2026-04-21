@@ -3,7 +3,11 @@ import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { getWorkspace } from "../workspaces/workspaces.service";
 import { createCodexClient } from "./codex-client";
-import { buildStreamResponse, sseEvent, type SseStreamController } from "./conversation.sse";
+import {
+    buildStreamResponse,
+    sseEvent,
+    type SseStreamController
+} from "./conversation.sse";
 import { getEffectiveConversationState } from "../history/history.service";
 import type { Message, ToolInvocationStatus } from "./conversations.types";
 import type { ReasoningEffort } from "../models/models.types";
@@ -24,10 +28,7 @@ import {
 import { abortQuestions, subscribeToQuestions } from "./questions";
 import { subscribeToTodos } from "./todos";
 import { compactConversation } from "./compact.service";
-import {
-    COMPACT_THRESHOLD,
-    computeContextSummary
-} from "./context.service";
+import { COMPACT_THRESHOLD, computeContextSummary } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
 
 import {
@@ -90,9 +91,8 @@ function finalizeAbortedAssistantMessage(
             reasoningParts.find((part) => part.text.length > 0)?.startedAt ??
             null;
         const lastEndedAt =
-            [...reasoningParts]
-                .reverse()
-                .find((part) => part.endedAt)?.endedAt ?? null;
+            [...reasoningParts].reverse().find((part) => part.endedAt)
+                ?.endedAt ?? null;
 
         db.query(
             "UPDATE messages SET content = ?, reasoning_content = ?, reasoning_started_at = ?, reasoning_ended_at = ? WHERE id = ?"
@@ -187,9 +187,7 @@ function looksLikeUtf8Text(bytes: Uint8Array): boolean {
 
 function decodeAsText(bytes: Uint8Array): string {
     const truncated = bytes.byteLength > MAX_INLINE_TEXT_BYTES;
-    const slice = truncated
-        ? bytes.subarray(0, MAX_INLINE_TEXT_BYTES)
-        : bytes;
+    const slice = truncated ? bytes.subarray(0, MAX_INLINE_TEXT_BYTES) : bytes;
 
     try {
         const text = new TextDecoder("utf-8").decode(slice);
@@ -308,7 +306,8 @@ function buildModelMessages(
 
         if (msg.role !== "user") continue;
 
-        const hasAttachments = (attachmentsByMessage.get(msg.id)?.length ?? 0) > 0;
+        const hasAttachments =
+            (attachmentsByMessage.get(msg.id)?.length ?? 0) > 0;
 
         const mentions = parseMentionsFromContent(msg.content);
         const mentionBlock = buildMentionsInstructionBlock(mentions);
@@ -402,7 +401,10 @@ function resolveConversationModelSettings(
     fastMode: boolean;
     permissionMode: PermissionMode;
 } {
-    const state = getEffectiveConversationState(workspaceId, conversationId).merged;
+    const state = getEffectiveConversationState(
+        workspaceId,
+        conversationId
+    ).merged;
     const configuredModel =
         typeof state.activeModel === "string"
             ? state.activeModel
@@ -415,15 +417,18 @@ function resolveConversationModelSettings(
         trimmedModel && trimmedModel.length > 0 ? trimmedModel : DEFAULT_MODEL;
     const model = getModelById(modelName);
 
-    const rawEffort = Object.prototype.hasOwnProperty.call(state, "reasoningEffort")
+    const rawEffort = Object.prototype.hasOwnProperty.call(
+        state,
+        "reasoningEffort"
+    )
         ? state.reasoningEffort
-        : state.effort ?? state.reasoning ?? null;
+        : (state.effort ?? state.reasoning ?? null);
     const reasoningEffort =
         isReasoningEffort(rawEffort) &&
         model?.supportsReasoningEffort === true &&
         model.allowedEfforts.includes(rawEffort)
             ? rawEffort
-            : model?.defaultEffort ?? null;
+            : (model?.defaultEffort ?? null);
 
     const permissionMode = isPermissionMode(state.permissionMode)
         ? state.permissionMode
@@ -646,7 +651,7 @@ async function runStreamTextIntoController({
             model: codex.responses(modelName),
             messages: modelMessages,
             tools,
-            stopWhen: stepCountIs(5),
+            stopWhen: stepCountIs(Infinity),
             abortSignal,
             providerOptions: {
                 openai: openaiOptions
@@ -968,7 +973,8 @@ async function runStreamTextIntoController({
             return;
         }
 
-        const message = error instanceof Error ? error.message : "Stream failed";
+        const message =
+            error instanceof Error ? error.message : "Stream failed";
 
         logger.error("[stream] Stream error:", error);
 
@@ -1153,13 +1159,13 @@ export async function streamConversationReply(
         );
         const attachmentTokens =
             attachmentIds.length > 0
-                ? db
+                ? (db
                       .query(
                           `SELECT COALESCE(SUM(estimated_tokens), 0) AS total FROM attachments WHERE id IN (${attachmentIds
                               .map(() => "?")
                               .join(",")})`
                       )
-                      .get(...attachmentIds) as { total: number }
+                      .get(...attachmentIds) as { total: number })
                 : { total: 0 };
         const effectiveMentions =
             mentions.length > 0
