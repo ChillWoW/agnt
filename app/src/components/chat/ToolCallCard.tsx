@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import {
+    ArrowSquareOutIcon,
     BookOpenTextIcon,
     CaretRightIcon,
     ChatTeardropDotsIcon,
+    DownloadSimpleIcon,
     FileTextIcon,
     FilesIcon,
+    GlobeHemisphereWestIcon,
     ImageIcon,
     ListChecksIcon,
     MagnifyingGlassIcon,
@@ -974,6 +977,391 @@ function ImageGenBlock({ invocation }: { invocation: ToolInvocation }) {
     );
 }
 
+// ─── Web search ───────────────────────────────────────────────────────────────
+
+interface WebSearchInputShape {
+    query?: string;
+    maxResults?: number;
+    categories?: string;
+    language?: string;
+    timeRange?: "day" | "month" | "year";
+    safesearch?: 0 | 1 | 2;
+}
+
+interface WebSearchResultShape {
+    title?: string;
+    url?: string;
+    content?: string;
+    engine?: string | null;
+    score?: number | null;
+}
+
+interface WebSearchOutputShape {
+    ok?: boolean;
+    query?: string;
+    results?: WebSearchResultShape[];
+    count?: number;
+    truncated?: boolean;
+    totalAvailable?: number;
+    error?: string;
+}
+
+function hostnameOf(url: string): string {
+    try {
+        return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+        return url;
+    }
+}
+
+function faviconUrl(url: string): string | null {
+    try {
+        const host = new URL(url).hostname;
+        if (!host) return null;
+        return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`;
+    } catch {
+        return null;
+    }
+}
+
+function formatWebSearchDetail(
+    input: WebSearchInputShape | undefined,
+    output: WebSearchOutputShape | undefined
+): string | undefined {
+    const query =
+        (typeof output?.query === "string" && output.query.length > 0
+            ? output.query
+            : undefined) ??
+        (typeof input?.query === "string" && input.query.length > 0
+            ? input.query
+            : undefined);
+    const count =
+        typeof output?.count === "number"
+            ? output.count
+            : Array.isArray(output?.results)
+              ? output.results.length
+              : undefined;
+
+    if (!query) return undefined;
+    const trimmedQuery = truncate(query.trim(), 48);
+    if (typeof count === "number") {
+        const suffix = output?.truncated ? "+" : "";
+        return `${trimmedQuery} · ${count}${suffix} result${count === 1 ? "" : "s"}`;
+    }
+    return trimmedQuery;
+}
+
+function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input = isRecord(invocation.input)
+        ? (invocation.input as WebSearchInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as WebSearchOutputShape)
+        : undefined;
+
+    const toolFailed = output?.ok === false;
+    const status: ToolInvocationStatus = toolFailed
+        ? "error"
+        : invocation.status;
+    const error =
+        invocation.error ??
+        (toolFailed ? (output?.error ?? "Web search failed") : null);
+
+    const results = Array.isArray(output?.results) ? output.results : [];
+
+    return (
+        <ToolBlock
+            icon={<GlobeHemisphereWestIcon className="size-3.5" weight="bold" />}
+            pendingLabel="Searching the web"
+            successLabel="Searched the web"
+            errorLabel="Web search failed"
+            deniedLabel="Web search denied"
+            detail={formatWebSearchDetail(input, output)}
+            error={error}
+            status={status}
+        >
+            {error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {error}
+                </p>
+            ) : results.length > 0 ? (
+                <ul className="flex flex-col gap-1.5 py-1">
+                    {results.map((r, idx) => {
+                        const url = typeof r.url === "string" ? r.url : "";
+                        if (url.length === 0) return null;
+                        const title =
+                            typeof r.title === "string" && r.title.length > 0
+                                ? r.title
+                                : url;
+                        const snippet =
+                            typeof r.content === "string"
+                                ? r.content.replace(/\s+/g, " ").trim()
+                                : "";
+                        const host = hostnameOf(url);
+                        const favicon = faviconUrl(url);
+                        const engine =
+                            typeof r.engine === "string" && r.engine.length > 0
+                                ? r.engine
+                                : null;
+                        return (
+                            <li
+                                key={`${url}-${idx}`}
+                                className="group rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5 transition-colors hover:border-dark-500 hover:bg-dark-900/80"
+                            >
+                                <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="flex min-w-0 flex-col gap-0.5"
+                                >
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-dark-800">
+                                            {favicon ? (
+                                                <img
+                                                    src={favicon}
+                                                    alt=""
+                                                    width={14}
+                                                    height={14}
+                                                    loading="lazy"
+                                                    className="size-[14px] object-contain"
+                                                    onError={(e) => {
+                                                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                                                    }}
+                                                />
+                                            ) : (
+                                                <GlobeHemisphereWestIcon className="size-3 text-dark-300" />
+                                            )}
+                                        </span>
+                                        <span className="min-w-0 truncate text-[11px] font-medium text-dark-100 group-hover:text-dark-50">
+                                            {title}
+                                        </span>
+                                        <ArrowSquareOutIcon className="size-3 shrink-0 text-dark-400 opacity-0 transition-opacity group-hover:opacity-100" />
+                                    </div>
+                                    <div className="flex min-w-0 items-center gap-1 pl-[22px] text-[10px] text-dark-300">
+                                        <span className="truncate">{host}</span>
+                                        {engine && (
+                                            <>
+                                                <span className="text-dark-500">·</span>
+                                                <span className="shrink-0 truncate">
+                                                    {engine}
+                                                </span>
+                                            </>
+                                        )}
+                                    </div>
+                                    {snippet.length > 0 && (
+                                        <p className="pl-[22px] text-[11px] leading-snug text-dark-200 line-clamp-2">
+                                            {snippet}
+                                        </p>
+                                    )}
+                                </a>
+                            </li>
+                        );
+                    })}
+                    {output?.truncated &&
+                        typeof output.totalAvailable === "number" && (
+                            <li className="pl-[22px] text-[10px] italic text-dark-400">
+                                … {output.totalAvailable - results.length} more
+                                results truncated
+                            </li>
+                        )}
+                </ul>
+            ) : output?.ok === true ? (
+                <p className="py-1 text-[11px] text-dark-300 italic">
+                    No results returned.
+                </p>
+            ) : null}
+        </ToolBlock>
+    );
+}
+
+// ─── Web fetch ────────────────────────────────────────────────────────────────
+
+interface WebFetchInputShape {
+    url?: string;
+    maxChars?: number;
+}
+
+interface WebFetchOutputShape {
+    ok?: boolean;
+    url?: string;
+    finalUrl?: string;
+    title?: string | null;
+    description?: string | null;
+    markdown?: string;
+    charCount?: number;
+    truncated?: boolean;
+    statusCode?: number | null;
+    error?: string;
+}
+
+function formatCharCount(n: number): string {
+    if (n >= 1000) {
+        const k = n / 1000;
+        return `${k >= 10 ? Math.round(k) : k.toFixed(1).replace(/\.0$/, "")}k chars`;
+    }
+    return `${n} chars`;
+}
+
+function formatWebFetchDetail(
+    input: WebFetchInputShape | undefined,
+    output: WebFetchOutputShape | undefined
+): string | undefined {
+    const url =
+        (typeof output?.finalUrl === "string" && output.finalUrl.length > 0
+            ? output.finalUrl
+            : undefined) ??
+        (typeof output?.url === "string" && output.url.length > 0
+            ? output.url
+            : undefined) ??
+        (typeof input?.url === "string" && input.url.length > 0
+            ? input.url
+            : undefined);
+
+    if (!url) return undefined;
+    const host = hostnameOf(url);
+    if (typeof output?.charCount === "number" && output.charCount > 0) {
+        return `${host} · ${formatCharCount(output.charCount)}`;
+    }
+    return host;
+}
+
+const WEB_FETCH_PREVIEW_CHARS = 1200;
+
+function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input = isRecord(invocation.input)
+        ? (invocation.input as WebFetchInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as WebFetchOutputShape)
+        : undefined;
+
+    const toolFailed = output?.ok === false;
+    const status: ToolInvocationStatus = toolFailed
+        ? "error"
+        : invocation.status;
+    const error =
+        invocation.error ??
+        (toolFailed ? (output?.error ?? "Web fetch failed") : null);
+
+    const detail = formatWebFetchDetail(input, output);
+
+    const effectiveUrl =
+        (typeof output?.finalUrl === "string" && output.finalUrl) ||
+        (typeof output?.url === "string" && output.url) ||
+        (typeof input?.url === "string" && input.url) ||
+        "";
+    const host = effectiveUrl ? hostnameOf(effectiveUrl) : "";
+    const favicon = effectiveUrl ? faviconUrl(effectiveUrl) : null;
+    const title =
+        typeof output?.title === "string" && output.title.length > 0
+            ? output.title
+            : null;
+    const description =
+        typeof output?.description === "string" && output.description.length > 0
+            ? output.description
+            : null;
+    const markdown =
+        typeof output?.markdown === "string" ? output.markdown : "";
+    const preview =
+        markdown.length > WEB_FETCH_PREVIEW_CHARS
+            ? markdown.slice(0, WEB_FETCH_PREVIEW_CHARS)
+            : markdown;
+    const previewHasMore = markdown.length > preview.length;
+    const totalChars =
+        typeof output?.charCount === "number" ? output.charCount : markdown.length;
+    const remaining = Math.max(0, totalChars - preview.length);
+
+    return (
+        <ToolBlock
+            icon={<DownloadSimpleIcon className="size-3.5" weight="bold" />}
+            pendingLabel="Fetching page"
+            successLabel="Fetched page"
+            errorLabel="Web fetch failed"
+            deniedLabel="Web fetch denied"
+            detail={detail}
+            error={error}
+            status={status}
+        >
+            {error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {error}
+                </p>
+            ) : output?.ok === true ? (
+                <div className="flex flex-col gap-1.5 py-1">
+                    {effectiveUrl && (
+                        <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
+                            <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-dark-800">
+                                {favicon ? (
+                                    <img
+                                        src={favicon}
+                                        alt=""
+                                        width={14}
+                                        height={14}
+                                        loading="lazy"
+                                        className="size-[14px] object-contain"
+                                        onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                                        }}
+                                    />
+                                ) : (
+                                    <GlobeHemisphereWestIcon className="size-3 text-dark-300" />
+                                )}
+                            </span>
+                            <div className="flex min-w-0 flex-1 flex-col">
+                                {title && (
+                                    <span className="truncate text-[11px] font-medium text-dark-100">
+                                        {title}
+                                    </span>
+                                )}
+                                <a
+                                    href={effectiveUrl}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="flex min-w-0 items-center gap-1 text-[10px] text-dark-300 hover:text-dark-100"
+                                >
+                                    <span className="truncate">{host}</span>
+                                    <ArrowSquareOutIcon className="size-3 shrink-0" />
+                                </a>
+                                {description && (
+                                    <span className="truncate text-[10px] text-dark-300">
+                                        {description}
+                                    </span>
+                                )}
+                            </div>
+                            {typeof output?.statusCode === "number" && (
+                                <span className="shrink-0 rounded bg-dark-800 px-1.5 py-0.5 text-[10px] font-medium text-dark-200">
+                                    {output.statusCode}
+                                </span>
+                            )}
+                        </div>
+                    )}
+                    {preview.length > 0 ? (
+                        <div className="max-h-48 overflow-y-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5">
+                            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-dark-200">
+                                {preview}
+                                {previewHasMore && "…"}
+                            </pre>
+                            {(previewHasMore || output?.truncated) && (
+                                <p className="mt-1 text-[10px] italic text-dark-400">
+                                    {previewHasMore
+                                        ? `… ${remaining} more chars in preview`
+                                        : ""}
+                                    {output?.truncated &&
+                                        " (response also truncated at maxChars)"}
+                                </p>
+                            )}
+                        </div>
+                    ) : (
+                        <p className="px-1 text-[11px] italic text-dark-400">
+                            Empty page — no markdown was extracted.
+                        </p>
+                    )}
+                </div>
+            ) : null}
+        </ToolBlock>
+    );
+}
+
 function GenericToolBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
@@ -1016,6 +1404,10 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <TodoWriteBlock invocation={invocation} />;
         case "image_gen":
             return <ImageGenBlock invocation={invocation} />;
+        case "web_search":
+            return <WebSearchBlock invocation={invocation} />;
+        case "web_fetch":
+            return <WebFetchBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }

@@ -5,6 +5,8 @@ import { useSkillToolDef, createUseSkillToolDef } from "./use-skill";
 import { questionToolDef, createQuestionToolDef } from "./question";
 import { todoWriteToolDef, createTodoWriteToolDef } from "./todo-write";
 import { imageGenToolDef, createImageGenToolDef } from "./image-gen";
+import { webSearchToolDef, createWebSearchToolDef } from "./web-search";
+import { webFetchToolDef, createWebFetchToolDef } from "./web-fetch";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -14,7 +16,9 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     useSkillToolDef as ToolDefinition,
     questionToolDef as ToolDefinition,
     todoWriteToolDef as ToolDefinition,
-    imageGenToolDef as ToolDefinition
+    imageGenToolDef as ToolDefinition,
+    webSearchToolDef as ToolDefinition,
+    webFetchToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -51,6 +55,10 @@ export {
     todoWriteToolDef,
     createTodoWriteToolDef,
     imageGenToolDef,
-    createImageGenToolDef
+    createImageGenToolDef,
+    webSearchToolDef,
+    createWebSearchToolDef,
+    webFetchToolDef,
+    createWebFetchToolDef
 };
 export type { ToolDefinition };
