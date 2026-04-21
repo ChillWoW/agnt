@@ -149,10 +149,30 @@ export function buildConversationTools(
             ? def.execute
             : wrapExecute(def, ctx);
 
+        const customToModelOutput = def.toModelOutput;
+        const toModelOutputAdapter = customToModelOutput
+            ? async ({
+                  input,
+                  output
+              }: {
+                  input: unknown;
+                  output: unknown;
+              }) => {
+                  const result = await customToModelOutput({
+                      input: input as object,
+                      output
+                  });
+                  return result;
+              }
+            : undefined;
+
         tools[def.name] = tool({
             description: def.description,
             inputSchema: def.inputSchema,
-            execute
+            execute,
+            ...(toModelOutputAdapter
+                ? { toModelOutput: toModelOutputAdapter as never }
+                : {})
         });
     }
 

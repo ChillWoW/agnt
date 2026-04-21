@@ -166,11 +166,20 @@ export function ToolBlock({
 
 interface ReadFileInput {
     path?: string;
+    offset?: number;
+    limit?: number;
 }
 
 interface ReadFileOutput {
+    kind?: "text" | "image" | "pdf";
     path?: string;
     content?: string;
+    size?: number;
+    lineCount?: number;
+    startLine?: number;
+    endLine?: number;
+    truncated?: boolean;
+    mediaType?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -219,17 +228,26 @@ function countContentLines(content: string): number {
     return newlineCount + (endsWithNewline ? 0 : 1);
 }
 
-function formatLineRange(content?: string): string | null {
-    if (typeof content !== "string") {
+function formatLineRange(
+    output: ReadFileOutput | undefined
+): string | null {
+    if (!output) return null;
+
+    if (
+        typeof output.startLine === "number" &&
+        typeof output.endLine === "number" &&
+        output.endLine >= output.startLine &&
+        output.startLine > 0
+    ) {
+        return `L${output.startLine}-${output.endLine}`;
+    }
+
+    if (typeof output.content !== "string") {
         return null;
     }
 
-    const lineCount = countContentLines(content);
-
-    if (lineCount <= 0) {
-        return null;
-    }
-
+    const lineCount = countContentLines(output.content);
+    if (lineCount <= 0) return null;
     return `L1-${lineCount}`;
 }
 
@@ -259,12 +277,23 @@ function formatReadPath(
 
 function formatReadDetail(
     rawPath: string | undefined,
-    resolvedPath: string | undefined,
-    content: string | undefined,
+    output: ReadFileOutput | undefined,
     workspacePath?: string | null
 ): string | undefined {
-    const pathLabel = formatReadPath(rawPath, resolvedPath, workspacePath);
-    const lineRange = formatLineRange(content);
+    const pathLabel = formatReadPath(rawPath, output?.path, workspacePath);
+
+    if (output?.kind === "image") {
+        const kindLabel = output.mediaType
+            ? output.mediaType.replace(/^image\//, "")
+            : "image";
+        return pathLabel ? `${pathLabel} · ${kindLabel}` : kindLabel;
+    }
+
+    if (output?.kind === "pdf") {
+        return pathLabel ? `${pathLabel} · pdf` : "pdf";
+    }
+
+    const lineRange = formatLineRange(output);
 
     if (pathLabel && lineRange) {
         return `${pathLabel} ${lineRange}`;
@@ -289,12 +318,7 @@ function ReadFileBlock({ invocation }: { invocation: ToolInvocation }) {
     const output = isRecord(invocation.output)
         ? (invocation.output as ReadFileOutput)
         : undefined;
-    const detail = formatReadDetail(
-        inputPath,
-        output?.path,
-        output?.content,
-        workspacePath
-    );
+    const detail = formatReadDetail(inputPath, output, workspacePath);
 
     return (
         <ToolBlock
