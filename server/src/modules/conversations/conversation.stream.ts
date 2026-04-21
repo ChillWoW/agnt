@@ -603,15 +603,32 @@ async function runStreamTextIntoController({
             permissionMode
         );
 
+        // Caching strategy mirrors the real Codex CLI
+        // (see codex-rs/core/src/client.rs build_responses_request):
+        // - `instructions` is kept bit-identical across turns for the same
+        //   conversation (volatile content like the current todos list is
+        //   injected as a trailing input item instead, see below).
+        // - `prompt_cache_key` is the conversation id so every turn lands on
+        //   the same cache node.
+        // - `prompt_cache_retention` is intentionally NOT sent: the ChatGPT
+        //   backend (chatgpt.com/backend-api/codex/responses) returns 400
+        //   "Unsupported parameter: prompt_cache_retention" — that option
+        //   only exists on the direct OpenAI Platform API. The Codex CLI
+        //   itself doesn't set it either; retention is handled server-side.
+        // - `store: false` matches the ChatGPT-auth backend; the AI SDK
+        //   automatically adds `include: ["reasoning.encrypted_content"]` in
+        //   that case for reasoning models so multi-step tool loops keep
+        //   reasoning context within a turn.
         const openaiOptions: Record<string, string | boolean | undefined> = {
             instructions: prompt.prompt,
             store: false,
-            reasoningSummary: "detailed",
+            promptCacheKey: conversationId,
             serviceTier: fastMode ? "priority" : undefined
         };
 
         if (reasoningEffort && reasoningEffort !== "none") {
             openaiOptions.reasoningEffort = reasoningEffort;
+            openaiOptions.reasoningSummary = "detailed";
         }
 
         let workspacePath: string | undefined;
@@ -647,9 +664,27 @@ async function runStreamTextIntoController({
             }
         });
 
+        // Inject the current todos as a trailing system message instead of
+        // folding them into `instructions`. The Codex CLI uses the same
+        // pattern (settings-update + env-context messages appended at the
+        // end of `input`) so the cached prefix of the conversation stays
+        // identical from one turn to the next; the todos list can change
+        // every turn without busting the cache of the big system prompt,
+        // repo instructions, skills catalog, and earlier chat history.
+        const modelMessagesWithTodos =
+            prompt.todosBlock.length > 0
+                ? [
+                      ...modelMessages,
+                      {
+                          role: "system" as const,
+                          content: prompt.todosBlock
+                      }
+                  ]
+                : modelMessages;
+
         const result = streamText({
             model: codex.responses(modelName),
-            messages: modelMessages,
+            messages: modelMessagesWithTodos,
             tools,
             stopWhen: stepCountIs(Infinity),
             abortSignal,

@@ -55,13 +55,18 @@ export function buildConversationPrompt(
         ? listTodos(workspaceId, conversationId)
         : [];
     const todosBlock = buildTodosPromptBlock(todos);
+    // `prompt` is what goes into the Responses API `instructions` field. It
+    // is intentionally stable across turns so the OpenAI prompt cache (keyed
+    // on conversationId via `prompt_cache_key`) keeps hitting. The volatile
+    // todos block is exposed on the returned object so callers can inject
+    // it elsewhere (currently as a trailing system input item in
+    // conversation.stream.ts) without perturbing the cached prefix.
     const prompt =
         BASE_SYSTEM_INSTRUCTIONS +
         workspaceBlock +
         repoInstructions.promptBlock +
         warningBlock +
-        skillsBlock +
-        todosBlock;
+        skillsBlock;
 
     return {
         workspacePath: workspace.path,
