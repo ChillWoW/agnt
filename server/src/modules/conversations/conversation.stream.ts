@@ -621,6 +621,7 @@ async function runStreamTextIntoController({
             workspaceId,
             workspacePath,
             getSkills: () => skills,
+            getAssistantMessageId: () => assistantMsgId,
             getMode: () => {
                 // Re-resolve permission mode from effective conversation
                 // state on every tool invocation so toggling the selector

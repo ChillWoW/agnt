@@ -9,6 +9,7 @@ import {
     AGNT_TOOL_DEFS,
     createGlobToolDef,
     createGrepToolDef,
+    createImageGenToolDef,
     createQuestionToolDef,
     createReadFileToolDef,
     createTodoWriteToolDef,
@@ -31,6 +32,7 @@ export interface ConversationPermissionContext {
     getMode: () => PermissionMode;
     workspacePath?: string;
     getSkills?: () => Skill[];
+    getAssistantMessageId?: () => string;
 }
 
 function resolveConfiguredDecision(
@@ -128,6 +130,13 @@ export function buildConversationTools(
                 return createTodoWriteToolDef({
                     workspaceId: ctx.workspaceId,
                     conversationId: ctx.conversationId
+                }) as ToolDefinition;
+            case "image_gen":
+                return createImageGenToolDef({
+                    workspaceId: ctx.workspaceId,
+                    conversationId: ctx.conversationId,
+                    getAssistantMessageId:
+                        ctx.getAssistantMessageId ?? (() => "")
                 }) as ToolDefinition;
             default:
                 return rawDef;

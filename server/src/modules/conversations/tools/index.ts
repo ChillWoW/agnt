@@ -4,6 +4,7 @@ import { grepToolDef, createGrepToolDef } from "./grep";
 import { useSkillToolDef, createUseSkillToolDef } from "./use-skill";
 import { questionToolDef, createQuestionToolDef } from "./question";
 import { todoWriteToolDef, createTodoWriteToolDef } from "./todo-write";
+import { imageGenToolDef, createImageGenToolDef } from "./image-gen";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -12,7 +13,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     grepToolDef as ToolDefinition,
     useSkillToolDef as ToolDefinition,
     questionToolDef as ToolDefinition,
-    todoWriteToolDef as ToolDefinition
+    todoWriteToolDef as ToolDefinition,
+    imageGenToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -47,6 +49,8 @@ export {
     questionToolDef,
     createQuestionToolDef,
     todoWriteToolDef,
-    createTodoWriteToolDef
+    createTodoWriteToolDef,
+    imageGenToolDef,
+    createImageGenToolDef
 };
 export type { ToolDefinition };
