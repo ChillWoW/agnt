@@ -1,4 +1,11 @@
-import { stepCountIs, streamText } from "ai";
+import {
+    stepCountIs,
+    streamText,
+    type ToolCallPart as SdkToolCallPart,
+    type ToolResultPart as SdkToolResultPart
+} from "ai";
+
+type SdkToolResultOutput = SdkToolResultPart["output"];
 import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { getWorkspace } from "../workspaces/workspaces.service";
@@ -9,7 +16,11 @@ import {
     type SseStreamController
 } from "./conversation.sse";
 import { getEffectiveConversationState } from "../history/history.service";
-import type { Message, ToolInvocationStatus } from "./conversations.types";
+import type {
+    Message,
+    ToolInvocation,
+    ToolInvocationStatus
+} from "./conversations.types";
 import type { ReasoningEffort } from "../models/models.types";
 import { getModelById } from "../models/models.service";
 import {
@@ -55,10 +66,14 @@ type UserFilePart = {
 };
 type UserContentPart = UserTextPart | UserImagePart | UserFilePart;
 
+type AssistantTextPart = { type: "text"; text: string };
+type AssistantContentPart = AssistantTextPart | SdkToolCallPart;
+
 type ModelMessage =
     | { role: "system"; content: string }
     | { role: "user"; content: string | UserContentPart[] }
-    | { role: "assistant"; content: string };
+    | { role: "assistant"; content: string | AssistantContentPart[] }
+    | { role: "tool"; content: SdkToolResultPart[] };
 
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === "AbortError";
@@ -267,6 +282,142 @@ function encodeAttachmentForModel(
     return { kind: "unsupported" };
 }
 
+interface ToolInvocationRow {
+    id: string;
+    message_id: string;
+    tool_name: string;
+    input_json: string;
+    output_json: string | null;
+    error: string | null;
+    status: ToolInvocationStatus;
+    created_at: string;
+    message_seq: number | null;
+}
+
+function parseJsonOrRaw(value: string | null): unknown {
+    if (value === null) return null;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+}
+
+function loadToolInvocationsByMessage(
+    workspaceId: string,
+    messageIds: string[]
+): Map<string, ToolInvocation[]> {
+    const byMessage = new Map<string, ToolInvocation[]>();
+    if (messageIds.length === 0) return byMessage;
+
+    const db = getWorkspaceDb(workspaceId);
+    const placeholders = messageIds.map(() => "?").join(",");
+    const rows = db
+        .query(
+            `SELECT id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq
+             FROM tool_invocations
+             WHERE message_id IN (${placeholders})
+             ORDER BY message_seq ASC, created_at ASC`
+        )
+        .all(...messageIds) as ToolInvocationRow[];
+
+    for (const row of rows) {
+        const list = byMessage.get(row.message_id) ?? [];
+        list.push({
+            id: row.id,
+            message_id: row.message_id,
+            tool_name: row.tool_name,
+            input: parseJsonOrRaw(row.input_json),
+            output: parseJsonOrRaw(row.output_json),
+            error: row.error,
+            status: row.status,
+            created_at: row.created_at,
+            message_seq: row.message_seq ?? null
+        });
+        byMessage.set(row.message_id, list);
+    }
+    return byMessage;
+}
+
+function toolResultOutputFromInvocation(
+    invocation: ToolInvocation
+): SdkToolResultOutput {
+    if (invocation.status === "error") {
+        const errorText =
+            invocation.error ??
+            "Tool call failed without a recorded error message.";
+        return { type: "error-text", value: errorText };
+    }
+
+    if (invocation.status === "pending") {
+        // The prior stream ended before this tool produced a result. Surface
+        // that as an error so the model understands the call was interrupted
+        // rather than silently missing output.
+        return {
+            type: "error-text",
+            value: "Tool call was interrupted before producing a result."
+        };
+    }
+
+    const output = invocation.output;
+    if (output === null || output === undefined) {
+        return { type: "text", value: "" };
+    }
+    if (typeof output === "string") {
+        return { type: "text", value: output };
+    }
+    // output was originally produced by JSON.stringify and read back via
+    // JSON.parse, so it's a pure JSON value. Cast to satisfy the SDK's
+    // strict JSONValue constraint without re-validating every key.
+    return { type: "json", value: output as SdkToolResultOutput extends { type: "json"; value: infer V } ? V : never };
+}
+
+function buildAssistantMessagesForTurn(
+    text: string,
+    invocations: ToolInvocation[]
+): ModelMessage[] {
+    if (invocations.length === 0) {
+        return text.length > 0
+            ? [{ role: "assistant", content: text }]
+            : [];
+    }
+
+    // The DB stores every tool call and the final text under a single
+    // assistant message. The OpenAI Responses API (and the AI SDK) expect
+    // the replayed conversation to look like:
+    //   assistant -> [tool-call...]    // the model decided to call tools
+    //   tool      -> [tool-result...]  // the tools' outputs
+    //   assistant -> final text        // the model's final reply (optional)
+    // We collapse potentially multiple tool-calling rounds into one
+    // assistant+tool pair because the per-round granularity is not stored.
+    // This still gives the model full evidence of every tool call and its
+    // output so it doesn't "forget" work it did on a previous turn.
+    const toolCallParts: SdkToolCallPart[] = invocations.map((inv) => ({
+        type: "tool-call",
+        toolCallId: inv.id,
+        toolName: inv.tool_name,
+        input: inv.input ?? {}
+    }));
+
+    const toolResultParts: SdkToolResultPart[] = invocations.map((inv) => ({
+        type: "tool-result",
+        toolCallId: inv.id,
+        toolName: inv.tool_name,
+        output: toolResultOutputFromInvocation(inv)
+    }));
+
+    const messages: ModelMessage[] = [
+        { role: "assistant", content: toolCallParts },
+        { role: "tool", content: toolResultParts }
+    ];
+
+    if (text.length > 0) {
+        messages.push({ role: "assistant", content: text });
+    }
+
+    return messages;
+}
+
 function buildModelMessages(
     workspaceId: string,
     messages: Message[]
@@ -290,9 +441,25 @@ function buildModelMessages(
         attachmentsByMessage.set(att.message_id, list);
     }
 
+    const assistantMessageIds = messages
+        .filter((m) => m.role === "assistant")
+        .map((m) => m.id);
+
+    const invocationsByMessage = loadToolInvocationsByMessage(
+        workspaceId,
+        assistantMessageIds
+    );
+
     for (const msg of messages) {
         if (msg.role === "assistant") {
-            result.push({ role: "assistant", content: msg.content });
+            const invocations = invocationsByMessage.get(msg.id) ?? [];
+            const assistantMessages = buildAssistantMessagesForTurn(
+                msg.content,
+                invocations
+            );
+            for (const produced of assistantMessages) {
+                result.push(produced);
+            }
             continue;
         }
 
