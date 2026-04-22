@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import Anser from "anser";
 import {
     ArrowSquareOutIcon,
     BookOpenTextIcon,
@@ -425,15 +426,15 @@ function GlobBlock({ invocation }: { invocation: ToolInvocation }) {
                     {invocation.error}
                 </p>
             ) : matches.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-[11px] text-dark-200">
+                <ul className="flex flex-col text-[11px] text-dark-200">
                     {matches.map((match, idx) => (
                         <li key={`${match}-${idx}`} className="truncate">
                             {match}
                         </li>
                     ))}
                     {output?.truncated && (
-                        <li className="text-dark-300 italic">
-                            … more results truncated
+                        <li className="text-dark-300">
+                            ... more results truncated
                         </li>
                     )}
                 </ul>
@@ -543,20 +544,20 @@ function GrepBlock({ invocation }: { invocation: ToolInvocation }) {
                     {invocation.error}
                 </p>
             ) : mode === "files_with_matches" && files.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-[11px] text-dark-200">
+                <ul className="flex flex-col text-[11px] text-dark-200">
                     {files.map((file, idx) => (
                         <li key={`${file}-${idx}`} className="truncate">
                             {file}
                         </li>
                     ))}
                     {output?.truncated && (
-                        <li className="text-dark-300 italic">
-                            … more files truncated
+                        <li className="text-dark-300">
+                            ... more files truncated
                         </li>
                     )}
                 </ul>
             ) : mode === "count" && counts.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-[11px] text-dark-200">
+                <ul className="flex flex-col text-[11px] text-dark-200">
                     {counts.map((row, idx) => (
                         <li
                             key={`${row.file ?? ""}-${idx}`}
@@ -569,13 +570,13 @@ function GrepBlock({ invocation }: { invocation: ToolInvocation }) {
                         </li>
                     ))}
                     {output?.truncated && (
-                        <li className="text-dark-300 italic">
-                            … more files truncated
+                        <li className="text-dark-300">
+                            ... more files truncated
                         </li>
                     )}
                 </ul>
             ) : matches.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-[11px] text-dark-200">
+                <ul className="flex flex-col text-[11px] text-dark-200">
                     {matches.map((match, idx) => (
                         <li
                             key={`${match.file ?? ""}-${match.line ?? 0}-${idx}`}
@@ -605,8 +606,8 @@ function GrepBlock({ invocation }: { invocation: ToolInvocation }) {
                         </li>
                     ))}
                     {output?.truncated && (
-                        <li className="text-dark-300 italic">
-                            … more matches truncated
+                        <li className="text-dark-300">
+                            ... more matches truncated
                         </li>
                     )}
                 </ul>
@@ -734,53 +735,14 @@ function QuestionBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
             icon={<ChatTeardropDotsIcon className="size-3.5" weight="fill" />}
-            pendingLabel="Waiting for your answer"
-            successLabel="Asked you"
+            pendingLabel="Waiting for user input"
+            successLabel="User input received"
             errorLabel="Question cancelled"
             deniedLabel="Question cancelled"
             detail={detail}
             error={invocation.error}
             status={invocation.status}
-        >
-            {invocation.error ? (
-                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
-                    {invocation.error}
-                </p>
-            ) : questions.length > 0 ? (
-                <ul className="flex flex-col gap-1.5 text-[11px] text-dark-200">
-                    {questions.map((q, idx) => {
-                        const qAnswers = answers[idx] ?? [];
-                        const header = q.header ?? `Question ${idx + 1}`;
-                        return (
-                            <li key={idx} className="flex flex-col gap-0.5">
-                                <div className="flex items-center gap-1.5">
-                                    <span className="inline-flex shrink-0 items-center rounded bg-dark-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-dark-200">
-                                        {header}
-                                    </span>
-                                    {q.question && (
-                                        <span className="truncate text-dark-200">
-                                            {q.question}
-                                        </span>
-                                    )}
-                                </div>
-                                {qAnswers.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 pl-1">
-                                        {qAnswers.map((a, aIdx) => (
-                                            <span
-                                                key={aIdx}
-                                                className="rounded bg-primary-100/15 px-1.5 py-0.5 text-[10px] text-primary-100 ring-1 ring-inset ring-primary-100/30"
-                                            >
-                                                {a}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                            </li>
-                        );
-                    })}
-                </ul>
-            ) : null}
-        </ToolBlock>
+        />
     );
 }
 
@@ -850,7 +812,7 @@ function TodoWriteBlock({ invocation }: { invocation: ToolInvocation }) {
                     {invocation.error}
                 </p>
             ) : todos.length > 0 ? (
-                <ul className="flex flex-col gap-0.5 text-[11px] text-dark-200">
+                <ul className="flex flex-col text-[11px] text-dark-200">
                     {todos.map((t, idx) => {
                         const status = t?.status ?? "pending";
                         const isDone =
@@ -1131,7 +1093,7 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                         return (
                             <li
                                 key={`${url}-${idx}`}
-                                className="group rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5 transition-colors hover:border-dark-500 hover:bg-dark-900/80"
+                                className="group rounded-md border border-dark-700 bg-dark-900 px-2.5 py-1.5 transition-colors hover:border-dark-600 hover:bg-dark-850"
                             >
                                 <a
                                     href={url}
@@ -1140,7 +1102,7 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                                     className="flex min-w-0 flex-col gap-0.5"
                                 >
                                     <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-dark-800">
+                                        <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden">
                                             {favicon ? (
                                                 <img
                                                     src={favicon}
@@ -1163,13 +1125,13 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                                         <span className="min-w-0 truncate text-[11px] font-medium text-dark-100 group-hover:text-dark-50">
                                             {title}
                                         </span>
-                                        <ArrowSquareOutIcon className="size-3 shrink-0 text-dark-400 opacity-0 transition-opacity group-hover:opacity-100" />
+                                        <ArrowSquareOutIcon className="size-3 shrink-0 text-dark-200 opacity-0 transition-opacity group-hover:opacity-100" />
                                     </div>
                                     <div className="flex min-w-0 items-center gap-1 pl-[22px] text-[10px] text-dark-300">
                                         <span className="truncate">{host}</span>
                                         {engine && (
                                             <>
-                                                <span className="text-dark-500">
+                                                <span className="text-dark-300">
                                                     ·
                                                 </span>
                                                 <span className="shrink-0 truncate">
@@ -1189,7 +1151,7 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                     })}
                     {output?.truncated &&
                         typeof output.totalAvailable === "number" && (
-                            <li className="pl-[22px] text-[10px] italic text-dark-400">
+                            <li className="pl-[22px] text-[10px] text-dark-300">
                                 … {output.totalAvailable - results.length} more
                                 results truncated
                             </li>
@@ -1321,8 +1283,8 @@ function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
             ) : output?.ok === true ? (
                 <div className="flex flex-col gap-1.5 py-1">
                     {effectiveUrl && (
-                        <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
-                            <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-dark-800">
+                        <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-dark-700 bg-dark-900 px-2.5 py-1.5">
+                            <span className="inline-flex size-[14px] shrink-0 items-center justify-center overflow-hidden">
                                 {favicon ? (
                                     <img
                                         src={favicon}
@@ -1370,7 +1332,7 @@ function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
                         </div>
                     )}
                     {preview.length > 0 ? (
-                        <div className="max-h-48 overflow-y-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5">
+                        <div className="max-h-48 overflow-y-auto rounded-md border border-dark-700 bg-dark-900 px-2.5 py-1.5">
                             <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-dark-200">
                                 {preview}
                                 {previewHasMore && "…"}
@@ -2057,7 +2019,9 @@ function ApplyPatchBlock({ invocation }: { invocation: ToolInvocation }) {
     // Prefer server-returned changes (authoritative full-file diffs). Fall
     // back to client-parsed preview (best-effort hunk view) while streaming
     // or if the tool errored before we had final results.
-    const serverChanges = Array.isArray(output?.changes) ? output!.changes! : [];
+    const serverChanges = Array.isArray(output?.changes)
+        ? output!.changes!
+        : [];
     const previewFiles =
         serverChanges.length === 0 && patchSource.length > 0
             ? parsePatchForPreview(patchSource)
@@ -2146,11 +2110,8 @@ function ApplyPatchBlock({ invocation }: { invocation: ToolInvocation }) {
                 <div className="flex flex-col gap-1.5">
                     {previewFiles.map((f, idx) => {
                         const displayPath =
-                            formatReadPath(
-                                f.path,
-                                f.path,
-                                workspacePath
-                            ) ?? f.path;
+                            formatReadPath(f.path, f.path, workspacePath) ??
+                            f.path;
                         const newDisplayPath = f.newPath
                             ? (formatReadPath(
                                   f.newPath,
@@ -2247,18 +2208,70 @@ function chunksFromPersistedOutput(
     return [{ stream: "stdout", chunk: body }];
 }
 
+/**
+ * Render a string containing ANSI escape sequences (colors, styles, cursor
+ * moves) as styled React nodes. Uses `anser` for parsing — we don't want to
+ * hand-roll this because ANSI has a long tail of edge cases (256-colour,
+ * truecolor, SGR combinations, OSC/DEC sequences, etc).
+ */
+function ansiToNodes(text: string, keyPrefix: string): React.ReactNode[] {
+    if (!text) return [];
+    const parts = Anser.ansiToJson(text, {
+        use_classes: false,
+        json: true,
+        remove_empty: true
+    });
+
+    return parts.map((part, idx) => {
+        const style: React.CSSProperties = {};
+        if (part.fg) style.color = `rgb(${part.fg})`;
+        if (part.bg) style.backgroundColor = `rgb(${part.bg})`;
+
+        const decos = Array.isArray(part.decorations)
+            ? part.decorations
+            : typeof part.decoration === "string"
+              ? [part.decoration]
+              : [];
+        const decorations: string[] = [];
+        if (decos.includes("bold")) style.fontWeight = 600;
+        if (decos.includes("dim")) style.opacity = 0.7;
+        if (decos.includes("italic")) style.fontStyle = "italic";
+        if (decos.includes("underline")) decorations.push("underline");
+        if (decos.includes("strikethrough")) decorations.push("line-through");
+        if (decorations.length > 0) {
+            style.textDecoration = decorations.join(" ");
+        }
+        if (decos.includes("reverse")) {
+            const fg = style.color;
+            style.color = style.backgroundColor ?? "inherit";
+            style.backgroundColor = fg ?? "inherit";
+        }
+        if (decos.includes("hidden")) style.visibility = "hidden";
+
+        return (
+            <span key={`${keyPrefix}-${idx}`} style={style}>
+                {part.content}
+            </span>
+        );
+    });
+}
+
 interface TerminalPaneProps {
     chunks: readonly ShellStreamChunk[];
     isStreaming: boolean;
     truncated?: boolean;
     emptyLabel?: string;
+    command?: string;
+    workingDirectory?: string;
 }
 
 function TerminalPane({
     chunks,
     isStreaming,
     truncated,
-    emptyLabel
+    emptyLabel,
+    command,
+    workingDirectory
 }: TerminalPaneProps) {
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const pinnedToBottomRef = useRef(true);
@@ -2282,46 +2295,86 @@ function TerminalPane({
         el.scrollTop = el.scrollHeight;
     }, [chunks, isStreaming]);
 
-    if (chunks.length === 0 && !isStreaming) {
+    const rendered = useMemo(() => {
+        return chunks.map((part, idx) => {
+            const isStderr = part.stream === "stderr";
+            const nodes = ansiToNodes(part.chunk, `c${idx}`);
+            if (!isStderr) {
+                return <span key={idx}>{nodes}</span>;
+            }
+            return (
+                <span key={idx} className="text-red-300">
+                    {nodes}
+                </span>
+            );
+        });
+    }, [chunks]);
+
+    const hasOutput = chunks.length > 0;
+    const hasCommand = typeof command === "string" && command.length > 0;
+    const showEmpty = !hasOutput && !isStreaming && !hasCommand;
+
+    if (showEmpty) {
         return (
-            <div className="rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5 font-mono text-[11px] italic text-dark-400">
+            <div className="rounded-md border border-dark-700 bg-dark-900 px-2.5 py-1.5 font-mono text-[11px] text-dark-200">
                 {emptyLabel ?? "(no output)"}
             </div>
         );
     }
 
     return (
-        <div
-            ref={scrollRef}
-            className="max-h-56 overflow-y-auto rounded-md border border-dark-700 bg-dark-950/80 px-2 py-1.5 font-mono text-[11px] leading-[1.45] text-dark-100"
-        >
+        <div className="overflow-hidden rounded-md border border-dark-700 bg-dark-900 font-mono text-[11px] leading-[1.5] text-dark-100">
+            {(hasCommand || workingDirectory) && (
+                <div className="flex flex-col gap-0.5 border-b border-dark-700 px-2.5 pt-1.5 pb-1.5">
+                    {hasCommand && (
+                        <div className="flex min-w-0 items-baseline gap-1.5">
+                            <span
+                                aria-hidden
+                                className="shrink-0 select-none text-dark-300"
+                            >
+                                $
+                            </span>
+                            <span className="min-w-0 break-all text-dark-50">
+                                {command}
+                            </span>
+                        </div>
+                    )}
+                    {workingDirectory && (
+                        <div className="flex min-w-0 font-sans text-[11px] text-dark-300">
+                            <span className="min-w-0 truncate">
+                                {workingDirectory}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
             {truncated && (
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-amber-200/80">
+                <div className="border-b border-dark-700 px-2.5 py-1 text-[11px] text-amber-200/80">
                     in-memory buffer truncated — see log_path for full output
                 </div>
             )}
-            <pre className="whitespace-pre-wrap break-words">
-                {chunks.map((part, idx) => (
-                    <span
-                        key={idx}
-                        className={
-                            part.stream === "stderr"
-                                ? "text-red-300"
-                                : "text-dark-100"
-                        }
-                    >
-                        {part.chunk}
+            <div
+                ref={scrollRef}
+                className="max-h-56 overflow-y-auto px-2.5 py-1.5"
+            >
+                {!hasOutput && !isStreaming ? (
+                    <span className="text-dark-200">
+                        {emptyLabel ?? "(no output)"}
                     </span>
-                ))}
-                {isStreaming && (
-                    <span
-                        aria-hidden
-                        className="ml-0.5 inline-block w-[7px] animate-pulse bg-dark-200"
-                    >
-                        &#x2007;
-                    </span>
+                ) : (
+                    <pre className="whitespace-pre-wrap break-words">
+                        {rendered}
+                        {isStreaming && (
+                            <span
+                                aria-hidden
+                                className="ml-0.5 inline-block w-[7px] animate-pulse bg-dark-200 align-baseline"
+                            >
+                                &#x2007;
+                            </span>
+                        )}
+                    </pre>
                 )}
-            </pre>
+            </div>
         </div>
     );
 }
@@ -2403,8 +2456,7 @@ function ShellBlock({ invocation }: { invocation: ToolInvocation }) {
         if (dur) detailBits.push(dur);
     }
     if (isBackgrounded) {
-        const tid =
-            streamState?.task_id ?? output?.task_id ?? invocation.id;
+        const tid = streamState?.task_id ?? output?.task_id ?? invocation.id;
         if (tid) detailBits.push(`task ${tid.slice(0, 8)}`);
     }
     const detail = detailBits.join(" · ");
@@ -2423,32 +2475,12 @@ function ShellBlock({ invocation }: { invocation: ToolInvocation }) {
             autoClose
         >
             <div className="flex flex-col gap-1.5 py-1">
-                {command && (
-                    <div className="flex flex-col gap-0.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
-                                $
-                            </span>
-                            <span className="min-w-0 truncate font-mono text-[11px] text-dark-100">
-                                {command}
-                            </span>
-                        </div>
-                        {workingDirectory && (
-                            <div className="flex items-center gap-1.5">
-                                <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
-                                    cwd
-                                </span>
-                                <span className="min-w-0 truncate font-mono text-[10px] text-dark-300">
-                                    {workingDirectory}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                )}
                 <TerminalPane
                     chunks={hydratedChunks}
                     isStreaming={isPending}
                     truncated={truncated}
+                    command={command || undefined}
+                    workingDirectory={workingDirectory}
                     emptyLabel={
                         isBackgrounded
                             ? "Backgrounded — poll with await_shell for more output."
@@ -2472,12 +2504,7 @@ interface AwaitShellInputShape {
 }
 
 interface AwaitShellOutputShape {
-    status?:
-        | "completed"
-        | "backgrounded"
-        | "killed"
-        | "sleep"
-        | "not_found";
+    status?: "completed" | "backgrounded" | "killed" | "sleep" | "not_found";
     task_id?: string | null;
     new_output?: string;
     partial_output?: string;
@@ -2516,10 +2543,7 @@ function AwaitShellBlock({ invocation }: { invocation: ToolInvocation }) {
               : [];
 
     const taskId =
-        input.task_id ??
-        output?.task_id ??
-        streamState?.task_id ??
-        undefined;
+        input.task_id ?? output?.task_id ?? streamState?.task_id ?? undefined;
     const isSleep =
         output?.status === "sleep" ||
         (invocation.status !== "pending" && !taskId);
@@ -2578,20 +2602,15 @@ function AwaitShellBlock({ invocation }: { invocation: ToolInvocation }) {
             autoClose
         >
             <div className="flex flex-col gap-1.5 py-1">
-                {input.pattern && (
-                    <div className="flex items-center gap-1.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
-                        <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
-                            pattern
-                        </span>
-                        <span className="min-w-0 truncate font-mono text-[11px] text-dark-100">
-                            /{input.pattern}/m
-                        </span>
-                    </div>
-                )}
                 {hasBody && !isSleep && (
                     <TerminalPane
                         chunks={hydratedChunks}
                         isStreaming={isPending}
+                        command={
+                            input.pattern
+                                ? `await /${input.pattern}/m`
+                                : undefined
+                        }
                         emptyLabel="(no new output since attach)"
                     />
                 )}
