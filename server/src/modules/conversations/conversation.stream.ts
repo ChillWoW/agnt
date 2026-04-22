@@ -641,6 +641,18 @@ async function runStreamTextIntoController({
     let currentReasoningPart: StreamReasoningPart | null = null;
     let nextMessageSeq = 0;
 
+    // Tracks tool calls that started streaming their input but haven't yet
+    // produced a finalized `tool-call` event. We pre-allocate an invocation
+    // id + message seq at `tool-input-start` so the client can render a
+    // pending card immediately and the eventual `tool-call` event lands on
+    // the same row instead of creating a duplicate. Keyed by the SDK's
+    // tool call id (`part.id` for input-* events, `part.toolCallId` for
+    // `tool-call`).
+    const pendingToolCallIds = new Map<
+        string,
+        { invocationId: string; messageSeq: number; createdAt: string }
+    >();
+
     function allocateMessageSeq(): number {
         const seq = nextMessageSeq;
         nextMessageSeq += 1;
@@ -990,12 +1002,66 @@ async function runStreamTextIntoController({
                 continue;
             }
 
-            if (part.type === "tool-call") {
+            if (part.type === "tool-input-start") {
                 const invocationId = crypto.randomUUID();
                 const createdAt = new Date().toISOString();
+                const messageSeq = allocateMessageSeq();
+                pendingToolCallIds.set(part.id, {
+                    invocationId,
+                    messageSeq,
+                    createdAt
+                });
+                controller.enqueue(
+                    sseEvent("tool-input-start", {
+                        id: invocationId,
+                        messageId: assistantMsgId,
+                        toolCallId: part.id,
+                        toolName: part.toolName,
+                        status: "pending" as ToolInvocationStatus,
+                        createdAt,
+                        messageSeq
+                    })
+                );
+                continue;
+            }
+
+            if (part.type === "tool-input-delta") {
+                const pending = pendingToolCallIds.get(part.id);
+                controller.enqueue(
+                    sseEvent("tool-input-delta", {
+                        id: pending?.invocationId,
+                        messageId: assistantMsgId,
+                        toolCallId: part.id,
+                        delta: part.delta
+                    })
+                );
+                continue;
+            }
+
+            if (part.type === "tool-input-end") {
+                const pending = pendingToolCallIds.get(part.id);
+                controller.enqueue(
+                    sseEvent("tool-input-end", {
+                        id: pending?.invocationId,
+                        messageId: assistantMsgId,
+                        toolCallId: part.id
+                    })
+                );
+                continue;
+            }
+
+            if (part.type === "tool-call") {
+                const pending = pendingToolCallIds.get(part.toolCallId);
+                const invocationId =
+                    pending?.invocationId ?? crypto.randomUUID();
+                const createdAt =
+                    pending?.createdAt ?? new Date().toISOString();
+                const messageSeq =
+                    pending?.messageSeq ?? allocateMessageSeq();
+                if (pending) pendingToolCallIds.delete(part.toolCallId);
+
                 const inputJson = safeStringify(part.input);
                 const status: ToolInvocationStatus = "pending";
-                const messageSeq = allocateMessageSeq();
 
                 db.query(
                     "INSERT INTO tool_invocations (id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)"

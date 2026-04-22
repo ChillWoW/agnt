@@ -14,6 +14,18 @@ export interface ToolInvocation {
     status: ToolInvocationStatus;
     created_at: string;
     message_seq?: number | null;
+    /**
+     * Raw partial JSON fragment the model has streamed so far for this tool
+     * call's input. Populated incrementally by `tool-input-delta` SSE events
+     * and cleared once the finalized `tool-call` event arrives (or the call
+     * finishes otherwise). Never persisted — only lives on streaming rows.
+     */
+    partial_input_text?: string;
+    /**
+     * True while the model is still streaming the tool's input JSON. Flips
+     * to false on `tool-input-end` or once the finalized input is known.
+     */
+    input_streaming?: boolean;
 }
 
 export interface ReasoningPart {

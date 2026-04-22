@@ -371,6 +371,102 @@ async function runStream(
                 break;
             }
 
+            case "tool-input-start": {
+                const invocation: ToolInvocation = {
+                    id: data.id as string,
+                    message_id: data.messageId as string,
+                    tool_name: data.toolName as string,
+                    input: null,
+                    output: null,
+                    error: null,
+                    status: (data.status as ToolInvocationStatus) ?? "pending",
+                    created_at:
+                        (data.createdAt as string) ??
+                        new Date().toISOString(),
+                    message_seq:
+                        typeof data.messageSeq === "number"
+                            ? (data.messageSeq as number)
+                            : null,
+                    partial_input_text: "",
+                    input_streaming: true
+                };
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== invocation.message_id) return m;
+                        const existing = m.tool_invocations ?? [];
+                        if (existing.some((inv) => inv.id === invocation.id)) {
+                            return m;
+                        }
+                        return {
+                            ...m,
+                            tool_invocations: [...existing, invocation]
+                        };
+                    })
+                }));
+                break;
+            }
+
+            case "tool-input-delta": {
+                const messageId = data.messageId as string;
+                const invocationId = data.id as string | undefined;
+                const toolCallId = data.toolCallId as string | undefined;
+                const delta = data.delta as string;
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.tool_invocations ?? [];
+                        let matched = false;
+                        const tool_invocations = existing.map((inv) => {
+                            if (matched) return inv;
+                            const hit =
+                                (invocationId && inv.id === invocationId) ||
+                                (!invocationId &&
+                                    toolCallId &&
+                                    inv.id === toolCallId);
+                            if (!hit) return inv;
+                            matched = true;
+                            return {
+                                ...inv,
+                                partial_input_text:
+                                    (inv.partial_input_text ?? "") + delta,
+                                input_streaming: true
+                            };
+                        });
+                        return matched
+                            ? { ...m, tool_invocations }
+                            : m;
+                    })
+                }));
+                break;
+            }
+
+            case "tool-input-end": {
+                const messageId = data.messageId as string;
+                const invocationId = data.id as string | undefined;
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.tool_invocations ?? [];
+                        let mutated = false;
+                        const tool_invocations = existing.map((inv) => {
+                            if (invocationId && inv.id !== invocationId) {
+                                return inv;
+                            }
+                            if (!inv.input_streaming) return inv;
+                            mutated = true;
+                            return { ...inv, input_streaming: false };
+                        });
+                        return mutated
+                            ? { ...m, tool_invocations }
+                            : m;
+                    })
+                }));
+                break;
+            }
+
             case "tool-call": {
                 const invocation: ToolInvocation = {
                     id: data.id as string,
@@ -393,10 +489,30 @@ async function runStream(
                     messages: prev.messages.map((m) => {
                         if (m.id !== invocation.message_id) return m;
                         const existing = m.tool_invocations ?? [];
-                        return {
-                            ...m,
-                            tool_invocations: [...existing, invocation]
-                        };
+                        const existingIdx = existing.findIndex(
+                            (inv) => inv.id === invocation.id
+                        );
+                        if (existingIdx === -1) {
+                            return {
+                                ...m,
+                                tool_invocations: [...existing, invocation]
+                            };
+                        }
+                        const tool_invocations = existing.map((inv, idx) =>
+                            idx === existingIdx
+                                ? {
+                                      ...inv,
+                                      tool_name: invocation.tool_name,
+                                      input: invocation.input,
+                                      status: invocation.status,
+                                      created_at: invocation.created_at,
+                                      message_seq: invocation.message_seq,
+                                      input_streaming: false,
+                                      partial_input_text: undefined
+                                  }
+                                : inv
+                        );
+                        return { ...m, tool_invocations };
                     })
                 }));
                 break;

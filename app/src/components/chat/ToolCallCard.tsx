@@ -11,6 +11,8 @@ import {
     ImageIcon,
     ListChecksIcon,
     MagnifyingGlassIcon,
+    NotePencilIcon,
+    PencilLineIcon,
     WrenchIcon
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
@@ -231,9 +233,7 @@ function countContentLines(content: string): number {
     return newlineCount + (endsWithNewline ? 0 : 1);
 }
 
-function formatLineRange(
-    output: ReadFileOutput | undefined
-): string | null {
+function formatLineRange(output: ReadFileOutput | undefined): string | null {
     if (!output) return null;
 
     if (
@@ -917,14 +917,18 @@ function ImageGenBlock({ invocation }: { invocation: ToolInvocation }) {
         ? "error"
         : invocation.status;
     const error =
-        invocation.error ?? (toolFailed ? (output?.error ?? "Image generation failed") : null);
+        invocation.error ??
+        (toolFailed ? (output?.error ?? "Image generation failed") : null);
 
     const imageUrl =
         output?.ok === true &&
         typeof output.attachmentId === "string" &&
         output.attachmentId.length > 0 &&
         activeWorkspaceId
-            ? resolveAttachmentContentUrl(activeWorkspaceId, output.attachmentId)
+            ? resolveAttachmentContentUrl(
+                  activeWorkspaceId,
+                  output.attachmentId
+              )
             : null;
 
     const revised =
@@ -967,7 +971,9 @@ function ImageGenBlock({ invocation }: { invocation: ToolInvocation }) {
                     </a>
                     {revised && (
                         <p className="max-w-xl text-[11px] leading-snug text-dark-300">
-                            <span className="text-dark-200">Revised prompt:</span>{" "}
+                            <span className="text-dark-200">
+                                Revised prompt:
+                            </span>{" "}
                             {revised}
                         </p>
                     )}
@@ -1071,7 +1077,9 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
 
     return (
         <ToolBlock
-            icon={<GlobeHemisphereWestIcon className="size-3.5" weight="bold" />}
+            icon={
+                <GlobeHemisphereWestIcon className="size-3.5" weight="bold" />
+            }
             pendingLabel="Searching the web"
             successLabel="Searched the web"
             errorLabel="Web search failed"
@@ -1125,7 +1133,10 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                                                     loading="lazy"
                                                     className="size-[14px] object-contain"
                                                     onError={(e) => {
-                                                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                                                        (
+                                                            e.currentTarget as HTMLImageElement
+                                                        ).style.visibility =
+                                                            "hidden";
                                                     }}
                                                 />
                                             ) : (
@@ -1141,7 +1152,9 @@ function WebSearchBlock({ invocation }: { invocation: ToolInvocation }) {
                                         <span className="truncate">{host}</span>
                                         {engine && (
                                             <>
-                                                <span className="text-dark-500">·</span>
+                                                <span className="text-dark-500">
+                                                    ·
+                                                </span>
                                                 <span className="shrink-0 truncate">
                                                     {engine}
                                                 </span>
@@ -1268,7 +1281,9 @@ function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
             : markdown;
     const previewHasMore = markdown.length > preview.length;
     const totalChars =
-        typeof output?.charCount === "number" ? output.charCount : markdown.length;
+        typeof output?.charCount === "number"
+            ? output.charCount
+            : markdown.length;
     const remaining = Math.max(0, totalChars - preview.length);
 
     return (
@@ -1300,7 +1315,9 @@ function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
                                         loading="lazy"
                                         className="size-[14px] object-contain"
                                         onError={(e) => {
-                                            (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                                            (
+                                                e.currentTarget as HTMLImageElement
+                                            ).style.visibility = "hidden";
                                         }}
                                     />
                                 ) : (
@@ -1362,6 +1379,465 @@ function WebFetchBlock({ invocation }: { invocation: ToolInvocation }) {
     );
 }
 
+// ─── Partial JSON extraction (for streaming tool inputs) ──────────────────────
+
+interface PartialString {
+    value: string;
+    complete: boolean;
+}
+
+/**
+ * Walks a partial JSON object (as streamed by `tool-input-delta` chunks) and
+ * returns top-level string-valued fields. Tolerates unterminated strings and
+ * truncated input — an unfinished string returns `{ complete: false }` with
+ * whatever text was streamed so far. Only the outermost object is considered,
+ * so a key like `"path"` nested inside a value won't collide.
+ */
+function extractPartialTopLevelStrings(
+    json: string
+): Record<string, PartialString> {
+    const result: Record<string, PartialString> = {};
+    let i = 0;
+    const n = json.length;
+
+    const skipWs = () => {
+        while (i < n && /\s/.test(json[i] ?? "")) i++;
+    };
+
+    const readString = (): PartialString => {
+        i++;
+        let out = "";
+        while (i < n) {
+            const ch = json[i]!;
+            if (ch === "\\") {
+                if (i + 1 >= n) return { value: out, complete: false };
+                const next = json[i + 1]!;
+                if (next === "u") {
+                    if (i + 5 >= n) {
+                        return { value: out, complete: false };
+                    }
+                    const hex = json.slice(i + 2, i + 6);
+                    if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+                        return { value: out, complete: false };
+                    }
+                    out += String.fromCharCode(parseInt(hex, 16));
+                    i += 6;
+                    continue;
+                }
+                const escapeMap: Record<string, string> = {
+                    n: "\n",
+                    r: "\r",
+                    t: "\t",
+                    b: "\b",
+                    f: "\f",
+                    '"': '"',
+                    "\\": "\\",
+                    "/": "/"
+                };
+                out += escapeMap[next] ?? next;
+                i += 2;
+                continue;
+            }
+            if (ch === '"') {
+                i++;
+                return { value: out, complete: true };
+            }
+            out += ch;
+            i++;
+        }
+        return { value: out, complete: false };
+    };
+
+    const skipValueNonString = () => {
+        let depth = 0;
+        while (i < n) {
+            const ch = json[i]!;
+            if (depth === 0 && (ch === "," || ch === "}")) return;
+            if (ch === "{" || ch === "[") {
+                depth++;
+                i++;
+                continue;
+            }
+            if (ch === "}" || ch === "]") {
+                if (depth === 0) return;
+                depth--;
+                i++;
+                continue;
+            }
+            if (ch === '"') {
+                readString();
+                continue;
+            }
+            i++;
+        }
+    };
+
+    skipWs();
+    if (i >= n || json[i] !== "{") return result;
+    i++;
+
+    while (i < n) {
+        skipWs();
+        if (i >= n) break;
+        const ch = json[i];
+        if (ch === "}") break;
+        if (ch === ",") {
+            i++;
+            continue;
+        }
+        if (ch !== '"') break;
+        const key = readString();
+        if (!key.complete) break;
+        skipWs();
+        if (i >= n || json[i] !== ":") break;
+        i++;
+        skipWs();
+        if (i >= n) break;
+        if (json[i] === '"') {
+            const val = readString();
+            result[key.value] = val;
+            if (!val.complete) break;
+        } else {
+            skipValueNonString();
+        }
+    }
+
+    return result;
+}
+
+// ─── Write ────────────────────────────────────────────────────────────────────
+
+interface WriteInputShape {
+    path?: string;
+    contents?: string;
+}
+
+interface WriteOutputShape {
+    ok?: boolean;
+    path?: string;
+    relativePath?: string;
+    bytesWritten?: number;
+    lineCount?: number;
+    created?: boolean;
+    previousSize?: number | null;
+}
+
+function formatByteCount(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Last `max` lines of `text`. Used to tail-scroll the streaming preview so the
+ * user always sees the current write head rather than the already-rendered
+ * prefix scrolling off-screen.
+ */
+function tailLines(text: string, max: number): string {
+    if (max <= 0) return "";
+    const normalized = text.replace(/\r\n|\r/g, "\n");
+    const lines = normalized.split("\n");
+    if (lines.length <= max) return normalized;
+    return lines.slice(lines.length - max).join("\n");
+}
+
+function formatWriteDetail(
+    input: WriteInputShape | undefined,
+    output: WriteOutputShape | undefined,
+    workspacePath: string | null,
+    partialPath: string | undefined
+): string | undefined {
+    const path =
+        (typeof output?.path === "string" && output.path.length > 0
+            ? output.path
+            : undefined) ??
+        (typeof input?.path === "string" && input.path.length > 0
+            ? input.path
+            : undefined) ??
+        (typeof partialPath === "string" && partialPath.length > 0
+            ? partialPath
+            : undefined);
+
+    const label = formatReadPath(
+        typeof input?.path === "string" ? input.path : partialPath,
+        path,
+        workspacePath
+    );
+    if (!label) return undefined;
+
+    if (typeof output?.bytesWritten === "number") {
+        return `${label} · ${formatByteCount(output.bytesWritten)}`;
+    }
+    return label;
+}
+
+const WRITE_PREVIEW_TAIL_LINES = 14;
+
+function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
+    const workspacePath = useWorkspaceStore((state) => {
+        const active = state.workspaces.find(
+            (w) => w.id === state.activeWorkspaceId
+        );
+        return active?.path ?? null;
+    });
+
+    const input = isRecord(invocation.input)
+        ? (invocation.input as WriteInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as WriteOutputShape)
+        : undefined;
+    const streaming = invocation.input_streaming === true;
+    const partialFields = streaming
+        ? extractPartialTopLevelStrings(invocation.partial_input_text ?? "")
+        : {};
+
+    const partialPath = partialFields.path?.value;
+    const partialContents = partialFields.contents?.value ?? "";
+    const streamedBytes = partialContents.length;
+
+    const finalContents =
+        typeof input?.contents === "string" ? input.contents : undefined;
+    const previewSource = finalContents ?? partialContents;
+    const previewTail = tailLines(previewSource, WRITE_PREVIEW_TAIL_LINES);
+    const hasPreview = previewTail.length > 0;
+
+    const detail = formatWriteDetail(input, output, workspacePath, partialPath);
+
+    const contentPreviewRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        const el = contentPreviewRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [previewTail]);
+
+    return (
+        <ToolBlock
+            icon={<NotePencilIcon className="size-3.5" weight="bold" />}
+            pendingLabel={
+                streaming && streamedBytes > 0
+                    ? "Writing"
+                    : streaming
+                      ? "Preparing write"
+                      : "Writing"
+            }
+            successLabel={output?.created === false ? "Overwrote" : "Wrote"}
+            errorLabel="Write failed"
+            deniedLabel="Write denied"
+            detail={detail}
+            error={invocation.error}
+            status={invocation.status}
+            autoOpen
+            autoClose
+        >
+            {invocation.error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {invocation.error}
+                </p>
+            ) : hasPreview ? (
+                <div
+                    ref={contentPreviewRef}
+                    className="max-h-48 overflow-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5"
+                >
+                    <pre className="whitespace-pre font-mono text-[11px] leading-snug text-dark-200">
+                        {previewTail}
+                        {streaming && !partialFields.contents?.complete && (
+                            <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-dark-300" />
+                        )}
+                    </pre>
+                </div>
+            ) : streaming ? (
+                <p className="px-1 py-1 text-[11px] italic text-dark-400">
+                    Streaming file contents…
+                </p>
+            ) : null}
+        </ToolBlock>
+    );
+}
+
+// ─── Str replace ──────────────────────────────────────────────────────────────
+
+interface StrReplaceInputShape {
+    path?: string;
+    old_string?: string;
+    new_string?: string;
+    replace_all?: boolean;
+}
+
+interface StrReplaceOutputShape {
+    ok?: boolean;
+    path?: string;
+    relativePath?: string;
+    replacements?: number;
+    replaceAll?: boolean;
+    bytesBefore?: number;
+    bytesAfter?: number;
+}
+
+const STR_REPLACE_PREVIEW_TAIL_LINES = 10;
+
+function formatStrReplaceDetail(
+    input: StrReplaceInputShape | undefined,
+    output: StrReplaceOutputShape | undefined,
+    workspacePath: string | null,
+    partialPath: string | undefined
+): string | undefined {
+    const path =
+        (typeof output?.path === "string" && output.path.length > 0
+            ? output.path
+            : undefined) ??
+        (typeof input?.path === "string" && input.path.length > 0
+            ? input.path
+            : undefined) ??
+        (typeof partialPath === "string" && partialPath.length > 0
+            ? partialPath
+            : undefined);
+
+    const label = formatReadPath(
+        typeof input?.path === "string" ? input.path : partialPath,
+        path,
+        workspacePath
+    );
+    if (!label) return undefined;
+
+    if (typeof output?.replacements === "number" && output.replacements > 0) {
+        const plural = output.replacements === 1 ? "" : "s";
+        return `${label} · ${output.replacements} edit${plural}`;
+    }
+    return label;
+}
+
+function StrReplaceDiffPreview({
+    oldText,
+    newText,
+    streaming,
+    oldComplete,
+    newComplete
+}: {
+    oldText: string | undefined;
+    newText: string | undefined;
+    streaming: boolean;
+    oldComplete: boolean;
+    newComplete: boolean;
+}) {
+    const hasOld = typeof oldText === "string" && oldText.length > 0;
+    const hasNew = typeof newText === "string" && newText.length > 0;
+    if (!hasOld && !hasNew) return null;
+
+    const oldTail = hasOld
+        ? tailLines(oldText!, STR_REPLACE_PREVIEW_TAIL_LINES)
+        : "";
+    const newTail = hasNew
+        ? tailLines(newText!, STR_REPLACE_PREVIEW_TAIL_LINES)
+        : "";
+
+    return (
+        <div className="flex max-h-48 flex-col gap-1 overflow-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5">
+            {hasOld && (
+                <pre className="whitespace-pre font-mono text-[11px] leading-snug text-red-300/80">
+                    {oldTail.split("\n").map((line, idx) => (
+                        <span key={idx} className="block">
+                            <span className="select-none text-red-400/60">
+                                -{" "}
+                            </span>
+                            {line}
+                        </span>
+                    ))}
+                    {streaming && !oldComplete && (
+                        <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-red-400/50" />
+                    )}
+                </pre>
+            )}
+            {hasNew && (
+                <pre className="whitespace-pre font-mono text-[11px] leading-snug text-emerald-300/80">
+                    {newTail.split("\n").map((line, idx) => (
+                        <span key={idx} className="block">
+                            <span className="select-none text-emerald-400/60">
+                                +{" "}
+                            </span>
+                            {line}
+                        </span>
+                    ))}
+                    {streaming && oldComplete && !newComplete && (
+                        <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-emerald-400/50" />
+                    )}
+                </pre>
+            )}
+        </div>
+    );
+}
+
+function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
+    const workspacePath = useWorkspaceStore((state) => {
+        const active = state.workspaces.find(
+            (w) => w.id === state.activeWorkspaceId
+        );
+        return active?.path ?? null;
+    });
+
+    const input = isRecord(invocation.input)
+        ? (invocation.input as StrReplaceInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as StrReplaceOutputShape)
+        : undefined;
+    const streaming = invocation.input_streaming === true;
+    const partialFields = streaming
+        ? extractPartialTopLevelStrings(invocation.partial_input_text ?? "")
+        : {};
+
+    const partialPath = partialFields.path?.value;
+    const oldText =
+        typeof input?.old_string === "string"
+            ? input.old_string
+            : partialFields.old_string?.value;
+    const newText =
+        typeof input?.new_string === "string"
+            ? input.new_string
+            : partialFields.new_string?.value;
+    const oldComplete =
+        typeof input?.old_string === "string" ||
+        partialFields.old_string?.complete === true;
+    const newComplete =
+        typeof input?.new_string === "string" ||
+        partialFields.new_string?.complete === true;
+
+    const detail = formatStrReplaceDetail(
+        input,
+        output,
+        workspacePath,
+        partialPath
+    );
+
+    return (
+        <ToolBlock
+            icon={<PencilLineIcon className="size-3.5" weight="bold" />}
+            pendingLabel={streaming ? "Editing" : "Applying edit"}
+            successLabel="Edited"
+            errorLabel="Edit failed"
+            deniedLabel="Edit denied"
+            detail={detail}
+            error={invocation.error}
+            status={invocation.status}
+            autoOpen
+            autoClose
+        >
+            {invocation.error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {invocation.error}
+                </p>
+            ) : (
+                <StrReplaceDiffPreview
+                    oldText={oldText}
+                    newText={newText}
+                    streaming={streaming}
+                    oldComplete={oldComplete}
+                    newComplete={newComplete}
+                />
+            )}
+        </ToolBlock>
+    );
+}
+
 function GenericToolBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
@@ -1408,6 +1884,10 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <WebSearchBlock invocation={invocation} />;
         case "web_fetch":
             return <WebFetchBlock invocation={invocation} />;
+        case "write":
+            return <WriteBlock invocation={invocation} />;
+        case "str_replace":
+            return <StrReplaceBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }
