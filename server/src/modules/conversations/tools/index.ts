@@ -9,6 +9,7 @@ import { webSearchToolDef, createWebSearchToolDef } from "./web-search";
 import { webFetchToolDef, createWebFetchToolDef } from "./web-fetch";
 import { writeToolDef, createWriteToolDef } from "./write";
 import { strReplaceToolDef, createStrReplaceToolDef } from "./str-replace";
+import { applyPatchToolDef, createApplyPatchToolDef } from "./apply-patch";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -22,7 +23,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     webSearchToolDef as ToolDefinition,
     webFetchToolDef as ToolDefinition,
     writeToolDef as ToolDefinition,
-    strReplaceToolDef as ToolDefinition
+    strReplaceToolDef as ToolDefinition,
+    applyPatchToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -67,6 +69,8 @@ export {
     writeToolDef,
     createWriteToolDef,
     strReplaceToolDef,
-    createStrReplaceToolDef
+    createStrReplaceToolDef,
+    applyPatchToolDef,
+    createApplyPatchToolDef
 };
 export type { ToolDefinition };

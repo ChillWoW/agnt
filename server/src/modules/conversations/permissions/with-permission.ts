@@ -12,6 +12,7 @@ import {
     createImageGenToolDef,
     createQuestionToolDef,
     createReadFileToolDef,
+    createApplyPatchToolDef,
     createStrReplaceToolDef,
     createTodoWriteToolDef,
     createUseSkillToolDef,
@@ -144,6 +145,10 @@ export function buildConversationTools(
                 return createWriteToolDef(ctx.workspacePath) as ToolDefinition;
             case "str_replace":
                 return createStrReplaceToolDef(
+                    ctx.workspacePath
+                ) as ToolDefinition;
+            case "apply_patch":
+                return createApplyPatchToolDef(
                     ctx.workspacePath
                 ) as ToolDefinition;
             default:
