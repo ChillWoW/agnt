@@ -10,6 +10,8 @@ import { webFetchToolDef, createWebFetchToolDef } from "./web-fetch";
 import { writeToolDef, createWriteToolDef } from "./write";
 import { strReplaceToolDef, createStrReplaceToolDef } from "./str-replace";
 import { applyPatchToolDef, createApplyPatchToolDef } from "./apply-patch";
+import { shellToolDef, createShellToolDef } from "./shell";
+import { awaitShellToolDef, createAwaitShellToolDef } from "./await-shell";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -24,7 +26,9 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     webFetchToolDef as ToolDefinition,
     writeToolDef as ToolDefinition,
     strReplaceToolDef as ToolDefinition,
-    applyPatchToolDef as ToolDefinition
+    applyPatchToolDef as ToolDefinition,
+    shellToolDef as ToolDefinition,
+    awaitShellToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -71,6 +75,10 @@ export {
     strReplaceToolDef,
     createStrReplaceToolDef,
     applyPatchToolDef,
-    createApplyPatchToolDef
+    createApplyPatchToolDef,
+    shellToolDef,
+    createShellToolDef,
+    awaitShellToolDef,
+    createAwaitShellToolDef
 };
 export type { ToolDefinition };

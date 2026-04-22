@@ -518,6 +518,86 @@ async function runStream(
                 break;
             }
 
+            case "tool-progress": {
+                const messageId = data.messageId as string;
+                const invocationId = data.id as string;
+                const stream = (data.stream as "stdout" | "stderr") ?? "stdout";
+                const chunk = (data.chunk as string) ?? "";
+                const taskId = data.task_id as string | undefined;
+                const at = data.at as string | undefined;
+                if (chunk.length === 0) break;
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.tool_invocations ?? [];
+                        let mutated = false;
+                        const tool_invocations = existing.map((inv) => {
+                            if (inv.id !== invocationId) return inv;
+                            mutated = true;
+                            const prevStream = inv.shell_stream ?? {
+                                chunks: []
+                            };
+                            return {
+                                ...inv,
+                                shell_stream: {
+                                    ...prevStream,
+                                    task_id:
+                                        prevStream.task_id ??
+                                        taskId ??
+                                        undefined,
+                                    chunks: [
+                                        ...prevStream.chunks,
+                                        { stream, chunk, at }
+                                    ]
+                                }
+                            };
+                        });
+                        return mutated ? { ...m, tool_invocations } : m;
+                    })
+                }));
+                break;
+            }
+
+            case "tool-lifecycle": {
+                const messageId = data.messageId as string;
+                const invocationId = data.id as string;
+                const state = data.state as
+                    | "running_foreground"
+                    | "running_background"
+                    | "completed"
+                    | "killed"
+                    | undefined;
+                const exitCode = (data.exit_code ?? null) as number | null;
+                const taskId = data.task_id as string | undefined;
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) => {
+                        if (m.id !== messageId) return m;
+                        const existing = m.tool_invocations ?? [];
+                        let mutated = false;
+                        const tool_invocations = existing.map((inv) => {
+                            if (inv.id !== invocationId) return inv;
+                            mutated = true;
+                            const prevStream = inv.shell_stream ?? {
+                                chunks: []
+                            };
+                            return {
+                                ...inv,
+                                shell_stream: {
+                                    ...prevStream,
+                                    state,
+                                    exit_code: exitCode,
+                                    task_id: prevStream.task_id ?? taskId
+                                }
+                            };
+                        });
+                        return mutated ? { ...m, tool_invocations } : m;
+                    })
+                }));
+                break;
+            }
+
             case "tool-result": {
                 const messageId = data.messageId as string;
                 const toolName = data.toolName as string;

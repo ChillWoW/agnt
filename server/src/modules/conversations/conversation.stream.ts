@@ -38,6 +38,15 @@ import {
 } from "./permissions";
 import { abortQuestions, subscribeToQuestions } from "./questions";
 import { subscribeToTodos } from "./todos";
+import {
+    killForegroundForConversation,
+    subscribeToShellLifecycle,
+    subscribeToShellProgress
+} from "./shell";
+import {
+    registerToolInvocationContext,
+    unregisterToolInvocationContext
+} from "./shell/tool-context";
 import { compactConversation } from "./compact.service";
 import { COMPACT_THRESHOLD, computeContextSummary } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
@@ -738,6 +747,39 @@ async function runStreamTextIntoController({
         );
     });
 
+    const unsubscribeShellProgress = subscribeToShellProgress(
+        conversationId,
+        (event) => {
+            controller.enqueue(
+                sseEvent("tool-progress", {
+                    id: event.id,
+                    messageId: event.message_id,
+                    task_id: event.task_id,
+                    stream: event.stream,
+                    chunk: event.chunk,
+                    at: event.at
+                })
+            );
+        }
+    );
+
+    const unsubscribeShellLifecycle = subscribeToShellLifecycle(
+        conversationId,
+        (event) => {
+            controller.enqueue(
+                sseEvent("tool-lifecycle", {
+                    id: event.id,
+                    messageId: event.message_id,
+                    task_id: event.task_id,
+                    type: event.type,
+                    state: event.state,
+                    exit_code: event.exit_code,
+                    ended_at: event.ended_at
+                })
+            );
+        }
+    );
+
     const unsubscribeQuestions = subscribeToQuestions(
         conversationId,
         (event) => {
@@ -1011,6 +1053,12 @@ async function runStreamTextIntoController({
                     messageSeq,
                     createdAt
                 });
+                registerToolInvocationContext(part.id, {
+                    invocationId,
+                    conversationId,
+                    workspaceId,
+                    messageId: assistantMsgId
+                });
                 controller.enqueue(
                     sseEvent("tool-input-start", {
                         id: invocationId,
@@ -1059,6 +1107,12 @@ async function runStreamTextIntoController({
                 const messageSeq =
                     pending?.messageSeq ?? allocateMessageSeq();
                 if (pending) pendingToolCallIds.delete(part.toolCallId);
+                registerToolInvocationContext(part.toolCallId, {
+                    invocationId,
+                    conversationId,
+                    workspaceId,
+                    messageId: assistantMsgId
+                });
 
                 const inputJson = safeStringify(part.input);
                 const status: ToolInvocationStatus = "pending";
@@ -1106,6 +1160,8 @@ async function runStreamTextIntoController({
                     part.toolName
                 );
 
+                unregisterToolInvocationContext(part.toolCallId);
+
                 controller.enqueue(
                     sseEvent("tool-result", {
                         messageId: assistantMsgId,
@@ -1137,6 +1193,8 @@ async function runStreamTextIntoController({
                     part.toolName
                 );
 
+                unregisterToolInvocationContext(part.toolCallId);
+
                 controller.enqueue(
                     sseEvent("tool-result", {
                         messageId: assistantMsgId,
@@ -1153,6 +1211,7 @@ async function runStreamTextIntoController({
             if (part.type === "abort") {
                 abortPermissions(conversationId, "aborted");
                 abortQuestions(conversationId, "aborted");
+                killForegroundForConversation(conversationId);
                 markPendingToolInvocationsAsError(
                     db,
                     assistantMsgId,
@@ -1225,6 +1284,7 @@ async function runStreamTextIntoController({
             });
             abortPermissions(conversationId, "aborted");
             abortQuestions(conversationId, "aborted");
+            killForegroundForConversation(conversationId);
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
             if (currentReasoningPart && !currentReasoningPart.endedAt) {
                 currentReasoningPart.endedAt = new Date().toISOString();
@@ -1248,6 +1308,7 @@ async function runStreamTextIntoController({
 
         abortPermissions(conversationId, message);
         abortQuestions(conversationId, message);
+        killForegroundForConversation(conversationId);
         markPendingToolInvocationsAsError(db, assistantMsgId, message);
         db.query("DELETE FROM messages WHERE id = ?").run(assistantMsgId);
         controller.enqueue(sseEvent("error", { message }));
@@ -1255,6 +1316,8 @@ async function runStreamTextIntoController({
         unsubscribePermissions();
         unsubscribeQuestions();
         unsubscribeTodos();
+        unsubscribeShellProgress();
+        unsubscribeShellLifecycle();
     }
 }
 

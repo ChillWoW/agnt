@@ -26,6 +26,34 @@ export interface ToolInvocation {
      * to false on `tool-input-end` or once the finalized input is known.
      */
     input_streaming?: boolean;
+    /**
+     * Live stdout/stderr feed for `shell` / `await_shell` invocations. Chunks
+     * are appended as `tool-progress` SSE events arrive and reconstructed
+     * from the periodically-persisted `output_json.partial_output` on history
+     * hydration.
+     */
+    shell_stream?: ShellStreamState;
+}
+
+export interface ShellStreamChunk {
+    stream: "stdout" | "stderr";
+    chunk: string;
+    at?: string;
+}
+
+export interface ShellStreamState {
+    chunks: ShellStreamChunk[];
+    task_id?: string;
+    state?:
+        | "running_foreground"
+        | "running_background"
+        | "completed"
+        | "killed";
+    exit_code?: number | null;
+    pid?: number | null;
+    running_for_ms?: number;
+    log_path?: string;
+    truncated?: boolean;
 }
 
 export interface ReasoningPart {

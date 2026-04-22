@@ -8,16 +8,20 @@ import {
     FileTextIcon,
     FilesIcon,
     GlobeHemisphereWestIcon,
+    HourglassMediumIcon,
     ImageIcon,
     ListChecksIcon,
     GitDiffIcon,
     MagnifyingGlassIcon,
     NotePencilIcon,
     PencilLineIcon,
+    TerminalWindowIcon,
     WrenchIcon
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type {
+    ShellStreamChunk,
+    ShellStreamState,
     ToolInvocation,
     ToolInvocationStatus
 } from "@/features/conversations/conversation-types";
@@ -2201,6 +2205,406 @@ function ApplyPatchBlock({ invocation }: { invocation: ToolInvocation }) {
     );
 }
 
+// ─── shell + await_shell ──────────────────────────────────────────────────────
+
+interface ShellInputShape {
+    command?: string;
+    description?: string;
+    working_directory?: string;
+    block_until_ms?: number;
+}
+
+interface ShellOutputShape {
+    status?: "completed" | "backgrounded" | "killed" | "streaming";
+    state?:
+        | "running_foreground"
+        | "running_background"
+        | "completed"
+        | "killed";
+    task_id?: string;
+    exit_code?: number | null;
+    pid?: number | null;
+    cwd?: string;
+    output?: string;
+    partial_output?: string;
+    running_for_ms?: number;
+    log_path?: string;
+    output_truncated?: boolean;
+    streaming?: boolean;
+}
+
+function chunksFromPersistedOutput(
+    output: ShellOutputShape | undefined
+): ShellStreamChunk[] {
+    if (!output) return [];
+    const body =
+        typeof output.output === "string" && output.output.length > 0
+            ? output.output
+            : typeof output.partial_output === "string"
+              ? output.partial_output
+              : "";
+    if (body.length === 0) return [];
+    return [{ stream: "stdout", chunk: body }];
+}
+
+interface TerminalPaneProps {
+    chunks: readonly ShellStreamChunk[];
+    isStreaming: boolean;
+    truncated?: boolean;
+    emptyLabel?: string;
+}
+
+function TerminalPane({
+    chunks,
+    isStreaming,
+    truncated,
+    emptyLabel
+}: TerminalPaneProps) {
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const pinnedToBottomRef = useRef(true);
+
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        const handleScroll = () => {
+            const distanceFromBottom =
+                el.scrollHeight - el.scrollTop - el.clientHeight;
+            pinnedToBottomRef.current = distanceFromBottom < 24;
+        };
+        el.addEventListener("scroll", handleScroll, { passive: true });
+        return () => el.removeEventListener("scroll", handleScroll);
+    }, []);
+
+    useEffect(() => {
+        if (!pinnedToBottomRef.current) return;
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+    }, [chunks, isStreaming]);
+
+    if (chunks.length === 0 && !isStreaming) {
+        return (
+            <div className="rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5 font-mono text-[11px] italic text-dark-400">
+                {emptyLabel ?? "(no output)"}
+            </div>
+        );
+    }
+
+    return (
+        <div
+            ref={scrollRef}
+            className="max-h-56 overflow-y-auto rounded-md border border-dark-700 bg-dark-950/80 px-2 py-1.5 font-mono text-[11px] leading-[1.45] text-dark-100"
+        >
+            {truncated && (
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-amber-200/80">
+                    in-memory buffer truncated — see log_path for full output
+                </div>
+            )}
+            <pre className="whitespace-pre-wrap break-words">
+                {chunks.map((part, idx) => (
+                    <span
+                        key={idx}
+                        className={
+                            part.stream === "stderr"
+                                ? "text-red-300"
+                                : "text-dark-100"
+                        }
+                    >
+                        {part.chunk}
+                    </span>
+                ))}
+                {isStreaming && (
+                    <span
+                        aria-hidden
+                        className="ml-0.5 inline-block w-[7px] animate-pulse bg-dark-200"
+                    >
+                        &#x2007;
+                    </span>
+                )}
+            </pre>
+        </div>
+    );
+}
+
+function formatShellDuration(ms: number | undefined | null): string {
+    if (typeof ms !== "number" || !Number.isFinite(ms)) return "";
+    if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remSec = Math.round(seconds - minutes * 60);
+    return `${minutes}m ${remSec}s`;
+}
+
+function ShellBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input: ShellInputShape = isRecord(invocation.input)
+        ? (invocation.input as ShellInputShape)
+        : {};
+    const partial = isRecord(invocation.partial_input_text)
+        ? undefined
+        : undefined;
+    void partial;
+
+    const output = isRecord(invocation.output)
+        ? (invocation.output as ShellOutputShape)
+        : undefined;
+
+    const streamState: ShellStreamState | undefined = invocation.shell_stream;
+
+    // Prefer live chunks if we've been streaming this session; otherwise
+    // hydrate from the persisted output body so reloading a completed tool
+    // call still shows its output, just without stream-vs-stdout coloring.
+    const liveChunks = streamState?.chunks ?? [];
+    const hydratedChunks =
+        liveChunks.length === 0
+            ? chunksFromPersistedOutput(output)
+            : liveChunks;
+
+    const command = typeof input.command === "string" ? input.command : "";
+    const description =
+        typeof input.description === "string" && input.description.length > 0
+            ? input.description
+            : command.slice(0, 60);
+
+    const workingDirectory =
+        typeof input.working_directory === "string" &&
+        input.working_directory.trim().length > 0
+            ? input.working_directory
+            : undefined;
+
+    const isPending = invocation.status === "pending";
+    const isBackgrounded =
+        streamState?.state === "running_background" ||
+        output?.status === "backgrounded" ||
+        output?.state === "running_background";
+    const exitCode =
+        streamState?.exit_code ??
+        (typeof output?.exit_code === "number" ? output.exit_code : null);
+    const runningMs =
+        typeof output?.running_for_ms === "number"
+            ? output.running_for_ms
+            : undefined;
+    const truncated = Boolean(
+        output?.output_truncated || streamState?.truncated
+    );
+
+    const pendingLabel = `Running "${description}"`;
+    const successLabel = isBackgrounded
+        ? `Backgrounded "${description}"`
+        : `Ran "${description}"`;
+    const errorLabel = `Shell failed`;
+
+    const detailBits: string[] = [];
+    if (!isPending && typeof exitCode === "number") {
+        detailBits.push(`exit ${exitCode}`);
+    }
+    if (!isPending && typeof runningMs === "number") {
+        const dur = formatShellDuration(runningMs);
+        if (dur) detailBits.push(dur);
+    }
+    if (isBackgrounded) {
+        const tid =
+            streamState?.task_id ?? output?.task_id ?? invocation.id;
+        if (tid) detailBits.push(`task ${tid.slice(0, 8)}`);
+    }
+    const detail = detailBits.join(" · ");
+
+    return (
+        <ToolBlock
+            icon={<TerminalWindowIcon className="size-3.5" weight="bold" />}
+            pendingLabel={pendingLabel}
+            successLabel={successLabel}
+            errorLabel={errorLabel}
+            deniedLabel="Shell denied"
+            detail={detail || undefined}
+            error={invocation.error}
+            status={invocation.status}
+            autoOpen
+            autoClose
+        >
+            <div className="flex flex-col gap-1.5 py-1">
+                {command && (
+                    <div className="flex flex-col gap-0.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
+                        <div className="flex items-center gap-1.5">
+                            <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
+                                $
+                            </span>
+                            <span className="min-w-0 truncate font-mono text-[11px] text-dark-100">
+                                {command}
+                            </span>
+                        </div>
+                        {workingDirectory && (
+                            <div className="flex items-center gap-1.5">
+                                <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
+                                    cwd
+                                </span>
+                                <span className="min-w-0 truncate font-mono text-[10px] text-dark-300">
+                                    {workingDirectory}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
+                <TerminalPane
+                    chunks={hydratedChunks}
+                    isStreaming={isPending}
+                    truncated={truncated}
+                    emptyLabel={
+                        isBackgrounded
+                            ? "Backgrounded — poll with await_shell for more output."
+                            : "(command produced no output)"
+                    }
+                />
+                {invocation.error && (
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                        {invocation.error}
+                    </p>
+                )}
+            </div>
+        </ToolBlock>
+    );
+}
+
+interface AwaitShellInputShape {
+    task_id?: string;
+    block_until_ms?: number;
+    pattern?: string;
+}
+
+interface AwaitShellOutputShape {
+    status?:
+        | "completed"
+        | "backgrounded"
+        | "killed"
+        | "sleep"
+        | "not_found";
+    task_id?: string | null;
+    new_output?: string;
+    partial_output?: string;
+    elapsed_ms?: number;
+    pattern_matched?: boolean;
+    pattern?: string;
+    snapshot?: {
+        exit_code?: number | null;
+        running_for_ms?: number;
+        log_path?: string;
+    };
+    streaming?: boolean;
+}
+
+function AwaitShellBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input: AwaitShellInputShape = isRecord(invocation.input)
+        ? (invocation.input as AwaitShellInputShape)
+        : {};
+    const output = isRecord(invocation.output)
+        ? (invocation.output as AwaitShellOutputShape)
+        : undefined;
+
+    const streamState: ShellStreamState | undefined = invocation.shell_stream;
+    const liveChunks = streamState?.chunks ?? [];
+    const persistedBody =
+        typeof output?.new_output === "string" && output.new_output.length > 0
+            ? output.new_output
+            : typeof output?.partial_output === "string"
+              ? output.partial_output
+              : "";
+    const hydratedChunks: ShellStreamChunk[] =
+        liveChunks.length > 0
+            ? liveChunks
+            : persistedBody.length > 0
+              ? [{ stream: "stdout", chunk: persistedBody }]
+              : [];
+
+    const taskId =
+        input.task_id ??
+        output?.task_id ??
+        streamState?.task_id ??
+        undefined;
+    const isSleep =
+        output?.status === "sleep" ||
+        (invocation.status !== "pending" && !taskId);
+    const blockMs =
+        typeof input.block_until_ms === "number"
+            ? input.block_until_ms
+            : undefined;
+
+    const isPending = invocation.status === "pending";
+    const matched = output?.pattern_matched === true;
+    const snapshotState = output?.status;
+
+    const pendingLabel = taskId
+        ? `Awaiting shell${input.pattern ? ` for /${input.pattern}/` : ""}`
+        : blockMs !== undefined
+          ? `Sleeping ${formatShellDuration(blockMs)}`
+          : "Awaiting";
+    const successLabel = isSleep
+        ? "Slept"
+        : snapshotState === "completed"
+          ? `Shell completed`
+          : snapshotState === "killed"
+            ? `Shell killed`
+            : snapshotState === "not_found"
+              ? `Task not found`
+              : matched
+                ? `Pattern matched`
+                : `Still running`;
+
+    const detailBits: string[] = [];
+    if (taskId && typeof taskId === "string") {
+        detailBits.push(`task ${taskId.slice(0, 8)}`);
+    }
+    if (typeof output?.snapshot?.exit_code === "number") {
+        detailBits.push(`exit ${output.snapshot.exit_code}`);
+    }
+    if (typeof output?.elapsed_ms === "number") {
+        const dur = formatShellDuration(output.elapsed_ms);
+        if (dur) detailBits.push(dur);
+    }
+    const detail = detailBits.join(" · ");
+
+    const hasBody = hydratedChunks.length > 0 || isPending;
+
+    return (
+        <ToolBlock
+            icon={<HourglassMediumIcon className="size-3.5" weight="bold" />}
+            pendingLabel={pendingLabel}
+            successLabel={successLabel}
+            errorLabel="await_shell failed"
+            deniedLabel="await_shell denied"
+            detail={detail || undefined}
+            error={invocation.error}
+            status={invocation.status}
+            autoOpen
+            autoClose
+        >
+            <div className="flex flex-col gap-1.5 py-1">
+                {input.pattern && (
+                    <div className="flex items-center gap-1.5 rounded-md border border-dark-700 bg-dark-900/40 px-2 py-1.5">
+                        <span className="shrink-0 text-[10px] uppercase tracking-wide text-dark-400">
+                            pattern
+                        </span>
+                        <span className="min-w-0 truncate font-mono text-[11px] text-dark-100">
+                            /{input.pattern}/m
+                        </span>
+                    </div>
+                )}
+                {hasBody && !isSleep && (
+                    <TerminalPane
+                        chunks={hydratedChunks}
+                        isStreaming={isPending}
+                        emptyLabel="(no new output since attach)"
+                    />
+                )}
+                {invocation.error && (
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                        {invocation.error}
+                    </p>
+                )}
+            </div>
+        </ToolBlock>
+    );
+}
+
 function GenericToolBlock({ invocation }: { invocation: ToolInvocation }) {
     return (
         <ToolBlock
@@ -2253,6 +2657,10 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <StrReplaceBlock invocation={invocation} />;
         case "apply_patch":
             return <ApplyPatchBlock invocation={invocation} />;
+        case "shell":
+            return <ShellBlock invocation={invocation} />;
+        case "await_shell":
+            return <AwaitShellBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }

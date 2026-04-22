@@ -7,12 +7,14 @@ import {
 } from "../../settings/settings.types";
 import {
     AGNT_TOOL_DEFS,
+    createAwaitShellToolDef,
     createGlobToolDef,
     createGrepToolDef,
     createImageGenToolDef,
     createQuestionToolDef,
     createReadFileToolDef,
     createApplyPatchToolDef,
+    createShellToolDef,
     createStrReplaceToolDef,
     createTodoWriteToolDef,
     createUseSkillToolDef,
@@ -20,6 +22,7 @@ import {
     isUngatedTool,
     type ToolDefinition
 } from "../tools";
+import type { ToolExecuteContext } from "../tools/types";
 import type { Skill } from "../../skills/skills.service";
 import {
     isSessionAllowed,
@@ -56,8 +59,8 @@ function resolveConfiguredDecision(
 function wrapExecute<TInput extends object, TOutput>(
     def: ToolDefinition<TInput, TOutput>,
     ctx: ConversationPermissionContext
-): (input: TInput) => Promise<TOutput> {
-    return async (input: TInput) => {
+): (input: TInput, toolCtx?: ToolExecuteContext) => Promise<TOutput> {
+    return async (input: TInput, toolCtx?: ToolExecuteContext) => {
         // Resolve mode + configured decision fresh on every invocation so
         // toggling the PermissionModeSelector or updating the per-tool
         // setting takes effect immediately, even mid-stream.
@@ -83,7 +86,7 @@ function wrapExecute<TInput extends object, TOutput>(
             isSessionAllowed(ctx.conversationId, def.name);
 
         if (autoAllow) {
-            return def.execute(input);
+            return def.execute(input, toolCtx);
         }
 
         const decision = await requestPermission({
@@ -102,7 +105,7 @@ function wrapExecute<TInput extends object, TOutput>(
             rememberSessionAllow(ctx.conversationId, def.name);
         }
 
-        return def.execute(input);
+        return def.execute(input, toolCtx);
     };
 }
 
@@ -151,6 +154,21 @@ export function buildConversationTools(
                 return createApplyPatchToolDef(
                     ctx.workspacePath
                 ) as ToolDefinition;
+            case "shell":
+                return createShellToolDef({
+                    workspacePath: ctx.workspacePath,
+                    conversationId: ctx.conversationId,
+                    workspaceId: ctx.workspaceId,
+                    getAssistantMessageId:
+                        ctx.getAssistantMessageId ?? (() => "")
+                }) as ToolDefinition;
+            case "await_shell":
+                return createAwaitShellToolDef({
+                    conversationId: ctx.conversationId,
+                    workspaceId: ctx.workspaceId,
+                    getAssistantMessageId:
+                        ctx.getAssistantMessageId ?? (() => "")
+                }) as ToolDefinition;
             default:
                 return rawDef;
         }
@@ -179,10 +197,25 @@ export function buildConversationTools(
               }
             : undefined;
 
+        // Adapter that relays the AI SDK's ToolCallOptions (toolCallId,
+        // abortSignal, messages) into our ToolDefinition.execute(input, ctx)
+        // contract. Tools that don't care about ctx ignore the second arg.
+        const executeAdapter = async (
+            input: object,
+            options?: { toolCallId?: string; abortSignal?: AbortSignal; messages?: unknown }
+        ): Promise<unknown> => {
+            const toolCtx: ToolExecuteContext = {
+                toolCallId: options?.toolCallId,
+                abortSignal: options?.abortSignal,
+                messages: options?.messages
+            };
+            return execute(input, toolCtx);
+        };
+
         tools[def.name] = tool({
             description: def.description,
             inputSchema: def.inputSchema,
-            execute,
+            execute: executeAdapter as never,
             ...(toModelOutputAdapter
                 ? { toModelOutput: toModelOutputAdapter as never }
                 : {})
