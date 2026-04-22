@@ -7,6 +7,8 @@ import { todoWriteToolDef, createTodoWriteToolDef } from "./todo-write";
 import { imageGenToolDef, createImageGenToolDef } from "./image-gen";
 import { webSearchToolDef, createWebSearchToolDef } from "./web-search";
 import { webFetchToolDef, createWebFetchToolDef } from "./web-fetch";
+import { writeToolDef, createWriteToolDef } from "./write";
+import { strReplaceToolDef, createStrReplaceToolDef } from "./str-replace";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -18,7 +20,9 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     todoWriteToolDef as ToolDefinition,
     imageGenToolDef as ToolDefinition,
     webSearchToolDef as ToolDefinition,
-    webFetchToolDef as ToolDefinition
+    webFetchToolDef as ToolDefinition,
+    writeToolDef as ToolDefinition,
+    strReplaceToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -59,6 +63,10 @@ export {
     webSearchToolDef,
     createWebSearchToolDef,
     webFetchToolDef,
-    createWebFetchToolDef
+    createWebFetchToolDef,
+    writeToolDef,
+    createWriteToolDef,
+    strReplaceToolDef,
+    createStrReplaceToolDef
 };
 export type { ToolDefinition };

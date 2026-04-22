@@ -12,8 +12,10 @@ import {
     createImageGenToolDef,
     createQuestionToolDef,
     createReadFileToolDef,
+    createStrReplaceToolDef,
     createTodoWriteToolDef,
     createUseSkillToolDef,
+    createWriteToolDef,
     isUngatedTool,
     type ToolDefinition
 } from "../tools";
@@ -138,6 +140,12 @@ export function buildConversationTools(
                     getAssistantMessageId:
                         ctx.getAssistantMessageId ?? (() => "")
                 }) as ToolDefinition;
+            case "write":
+                return createWriteToolDef(ctx.workspacePath) as ToolDefinition;
+            case "str_replace":
+                return createStrReplaceToolDef(
+                    ctx.workspacePath
+                ) as ToolDefinition;
             default:
                 return rawDef;
         }
