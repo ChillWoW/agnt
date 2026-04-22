@@ -156,6 +156,14 @@ export function subscribeToJobLifecycle(
     };
 }
 
+/**
+ * Tracks jobs currently mid-dispatch so a listener that calls back into
+ * `emitShellProgress` for the SAME task_id can't re-enter its own per-job
+ * fan-out and recurse infinitely. (See `await_shell`'s re-emit for the
+ * historical bug this guards against.)
+ */
+const jobsCurrentlyEmittingProgress = new Set<string>();
+
 export function emitShellProgress(event: ShellProgressEvent): void {
     const perConv = progressListenersByConversation.get(event.conversation_id);
     if (perConv) {
@@ -167,14 +175,50 @@ export function emitShellProgress(event: ShellProgressEvent): void {
             }
         }
     }
+    if (jobsCurrentlyEmittingProgress.has(event.task_id)) {
+        // Re-entry: a per-job listener for this task is already running.
+        // Skip the per-job fan-out to avoid infinite recursion.
+        return;
+    }
     const perJob = progressListenersByJob.get(event.task_id);
     if (perJob) {
-        for (const listener of perJob) {
-            try {
-                listener(event);
-            } catch (error) {
-                logger.error("[shell] per-job progress listener threw", error);
+        jobsCurrentlyEmittingProgress.add(event.task_id);
+        try {
+            for (const listener of perJob) {
+                try {
+                    listener(event);
+                } catch (error) {
+                    logger.error(
+                        "[shell] per-job progress listener threw",
+                        error
+                    );
+                }
             }
+        } finally {
+            jobsCurrentlyEmittingProgress.delete(event.task_id);
+        }
+    }
+}
+
+/**
+ * Fan-out a progress event to per-conversation listeners only, bypassing
+ * per-job subscribers. Use this when forwarding an already-observed chunk
+ * to a different SSE card (e.g. `await_shell` re-routing source-shell
+ * output under the await invocation's id). Calling the regular
+ * `emitShellProgress` with the same `task_id` from inside a per-job
+ * listener would loop into the caller's own subscription; this helper
+ * avoids that entire class of bug.
+ */
+export function forwardShellProgressToConversation(
+    event: ShellProgressEvent
+): void {
+    const perConv = progressListenersByConversation.get(event.conversation_id);
+    if (!perConv) return;
+    for (const listener of perConv) {
+        try {
+            listener(event);
+        } catch (error) {
+            logger.error("[shell] forwarded progress listener threw", error);
         }
     }
 }

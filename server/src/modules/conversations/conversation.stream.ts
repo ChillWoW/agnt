@@ -36,6 +36,8 @@ import {
     subscribeToPermissions,
     type PermissionMode
 } from "./permissions";
+import { AGNT_TOOL_DEF_BY_NAME } from "./tools";
+import type { ToolModelOutput } from "./tools/types";
 import { abortQuestions, subscribeToQuestions } from "./questions";
 import { subscribeToTodos } from "./todos";
 import {
@@ -348,6 +350,35 @@ function loadToolInvocationsByMessage(
     return byMessage;
 }
 
+function modelOutputToSdk(output: ToolModelOutput): SdkToolResultOutput {
+    // Both shapes happen to line up for text/json/content — cast the value
+    // fields without per-key validation. We trust each tool's own
+    // `toModelOutput` to return a well-formed shape.
+    if (output.type === "text") {
+        return { type: "text", value: output.value };
+    }
+    if (output.type === "json") {
+        return {
+            type: "json",
+            value: output.value as SdkToolResultOutput extends {
+                type: "json";
+                value: infer V;
+            }
+                ? V
+                : never
+        };
+    }
+    return {
+        type: "content",
+        value: output.value as SdkToolResultOutput extends {
+            type: "content";
+            value: infer V;
+        }
+            ? V
+            : never
+    };
+}
+
 function toolResultOutputFromInvocation(
     invocation: ToolInvocation
 ): SdkToolResultOutput {
@@ -372,6 +403,38 @@ function toolResultOutputFromInvocation(
     if (output === null || output === undefined) {
         return { type: "text", value: "" };
     }
+
+    // Apply the tool's toModelOutput on replay so the stored raw JSON
+    // (which can be >1 MiB for shell/await_shell/apply_patch) is narrowed
+    // to the same compact text/summary the model saw on the original turn.
+    // Without this, every subsequent turn re-injects the full stored
+    // payload into the prompt, exploding context.
+    const def = AGNT_TOOL_DEF_BY_NAME[invocation.tool_name];
+    if (def?.toModelOutput) {
+        try {
+            const narrowed = def.toModelOutput({
+                input: (invocation.input ?? {}) as object,
+                output
+            });
+            if (narrowed && typeof (narrowed as Promise<unknown>).then !== "function") {
+                return modelOutputToSdk(narrowed as ToolModelOutput);
+            }
+            // Async toModelOutput is not supported on the replay path (we're
+            // sync here). Fall through to the raw-JSON fallback below rather
+            // than blocking. Every in-tree toModelOutput is sync today.
+            logger.log(
+                "[stream] toolResultOutputFromInvocation skipped async toModelOutput",
+                { tool: invocation.tool_name }
+            );
+        } catch (error) {
+            logger.error(
+                "[stream] toModelOutput threw during replay; falling back to raw JSON",
+                { tool: invocation.tool_name },
+                error
+            );
+        }
+    }
+
     if (typeof output === "string") {
         return { type: "text", value: output };
     }

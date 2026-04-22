@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getWorkspaceDb } from "../../../lib/db";
 import { logger } from "../../../lib/logger";
 import {
-    emitShellProgress,
+    forwardShellProgressToConversation,
     getShellJob,
     snapshotShellJob,
     subscribeToJobLifecycle,
@@ -170,11 +170,19 @@ function makeExecuteAwaitShell(ctx: AwaitShellToolContext) {
 
         // Re-emit each target-job chunk under THIS await_shell invocation so
         // the live stream's SSE subscription routes them into this card too.
+        //
+        // IMPORTANT: we MUST NOT fan this re-emission out to per-job listeners
+        // — this very function is subscribed as a per-job listener for
+        // `job.task_id`, so `emitShellProgress` with the same task_id would
+        // recurse into us, append `progress.chunk` again, and repeat until the
+        // JS stack overflows (leaving `newOutputBuffer` bloated with tens of
+        // thousands of duplicated chunks that then get piped back into the
+        // model's context). `forwardShellProgressToConversation` is SSE-only.
         const unsubscribeProgress = subscribeToJobProgress(
             job.id,
             (progress) => {
                 newOutputBuffer += progress.chunk;
-                emitShellProgress({
+                forwardShellProgressToConversation({
                     id: awaitInvocationId,
                     task_id: job.task_id,
                     conversation_id: conversationId,
