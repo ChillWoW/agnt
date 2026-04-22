@@ -22,6 +22,7 @@ import type {
 } from "@/features/conversations/conversation-types";
 import { useWorkspaceStore } from "@/features/workspaces";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
+import { PierreDiff } from "@/components/chat/PierreDiff";
 
 // ─── Universal primitive ──────────────────────────────────────────────────────
 
@@ -37,6 +38,10 @@ interface ToolBlockProps {
     children?: React.ReactNode;
     autoOpen?: boolean;
     autoClose?: boolean;
+    // When true, the expanded children are rendered directly (without the
+    // default `max-h-48 overflow-y-auto` wrapper) so the child can own its
+    // own scroll container — required for sticky headers inside the child.
+    bareChildren?: boolean;
 }
 
 type ToolBlockState = "pending" | "success" | "error" | "denied";
@@ -77,7 +82,8 @@ export function ToolBlock({
     status,
     children,
     autoOpen,
-    autoClose
+    autoClose,
+    bareChildren
 }: ToolBlockProps) {
     const state = resolveToolBlockState(status, error);
     const isPending = state === "pending";
@@ -160,9 +166,15 @@ export function ToolBlock({
                 )}
             </button>
 
-            {expanded && children && (
-                <div className="mt-1 max-h-48 overflow-y-auto">{children}</div>
-            )}
+            {expanded &&
+                children &&
+                (bareChildren ? (
+                    <div className="mt-1">{children}</div>
+                ) : (
+                    <div className="mt-1 max-h-48 overflow-y-auto">
+                        {children}
+                    </div>
+                ))}
         </div>
     );
 }
@@ -1528,19 +1540,6 @@ function formatByteCount(n: number): string {
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * Last `max` lines of `text`. Used to tail-scroll the streaming preview so the
- * user always sees the current write head rather than the already-rendered
- * prefix scrolling off-screen.
- */
-function tailLines(text: string, max: number): string {
-    if (max <= 0) return "";
-    const normalized = text.replace(/\r\n|\r/g, "\n");
-    const lines = normalized.split("\n");
-    if (lines.length <= max) return normalized;
-    return lines.slice(lines.length - max).join("\n");
-}
-
 function formatWriteDetail(
     input: WriteInputShape | undefined,
     output: WriteOutputShape | undefined,
@@ -1571,8 +1570,6 @@ function formatWriteDetail(
     return label;
 }
 
-const WRITE_PREVIEW_TAIL_LINES = 14;
-
 function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
     const workspacePath = useWorkspaceStore((state) => {
         const active = state.workspaces.find(
@@ -1599,16 +1596,26 @@ function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
     const finalContents =
         typeof input?.contents === "string" ? input.contents : undefined;
     const previewSource = finalContents ?? partialContents;
-    const previewTail = tailLines(previewSource, WRITE_PREVIEW_TAIL_LINES);
-    const hasPreview = previewTail.length > 0;
+    const hasPreview = previewSource.length > 0;
 
     const detail = formatWriteDetail(input, output, workspacePath, partialPath);
 
-    const contentPreviewRef = useRef<HTMLDivElement | null>(null);
-    useEffect(() => {
-        const el = contentPreviewRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-    }, [previewTail]);
+    const rawPath =
+        (typeof output?.path === "string" && output.path.length > 0
+            ? output.path
+            : undefined) ??
+        (typeof input?.path === "string" && input.path.length > 0
+            ? input.path
+            : undefined) ??
+        (typeof partialPath === "string" && partialPath.length > 0
+            ? partialPath
+            : undefined);
+    const diffPath =
+        formatReadPath(
+            typeof input?.path === "string" ? input.path : partialPath,
+            rawPath,
+            workspacePath
+        ) ?? "";
 
     return (
         <ToolBlock
@@ -1628,23 +1635,18 @@ function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
             status={invocation.status}
             autoOpen
             autoClose
+            bareChildren
         >
             {invocation.error ? (
                 <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
                     {invocation.error}
                 </p>
             ) : hasPreview ? (
-                <div
-                    ref={contentPreviewRef}
-                    className="max-h-48 overflow-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5"
-                >
-                    <pre className="whitespace-pre font-mono text-[11px] leading-snug text-dark-200">
-                        {previewTail}
-                        {streaming && !partialFields.contents?.complete && (
-                            <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-dark-300" />
-                        )}
-                    </pre>
-                </div>
+                <PierreDiff
+                    path={diffPath}
+                    oldContents=""
+                    newContents={previewSource}
+                />
             ) : streaming ? (
                 <p className="px-1 py-1 text-[11px] italic text-dark-400">
                     Streaming file contents…
@@ -1672,8 +1674,6 @@ interface StrReplaceOutputShape {
     bytesBefore?: number;
     bytesAfter?: number;
 }
-
-const STR_REPLACE_PREVIEW_TAIL_LINES = 10;
 
 function formatStrReplaceDetail(
     input: StrReplaceInputShape | undefined,
@@ -1706,66 +1706,6 @@ function formatStrReplaceDetail(
     return label;
 }
 
-function StrReplaceDiffPreview({
-    oldText,
-    newText,
-    streaming,
-    oldComplete,
-    newComplete
-}: {
-    oldText: string | undefined;
-    newText: string | undefined;
-    streaming: boolean;
-    oldComplete: boolean;
-    newComplete: boolean;
-}) {
-    const hasOld = typeof oldText === "string" && oldText.length > 0;
-    const hasNew = typeof newText === "string" && newText.length > 0;
-    if (!hasOld && !hasNew) return null;
-
-    const oldTail = hasOld
-        ? tailLines(oldText!, STR_REPLACE_PREVIEW_TAIL_LINES)
-        : "";
-    const newTail = hasNew
-        ? tailLines(newText!, STR_REPLACE_PREVIEW_TAIL_LINES)
-        : "";
-
-    return (
-        <div className="flex max-h-48 flex-col gap-1 overflow-auto rounded-md border border-dark-700 bg-dark-900/60 px-2 py-1.5">
-            {hasOld && (
-                <pre className="whitespace-pre font-mono text-[11px] leading-snug text-red-300/80">
-                    {oldTail.split("\n").map((line, idx) => (
-                        <span key={idx} className="block">
-                            <span className="select-none text-red-400/60">
-                                -{" "}
-                            </span>
-                            {line}
-                        </span>
-                    ))}
-                    {streaming && !oldComplete && (
-                        <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-red-400/50" />
-                    )}
-                </pre>
-            )}
-            {hasNew && (
-                <pre className="whitespace-pre font-mono text-[11px] leading-snug text-emerald-300/80">
-                    {newTail.split("\n").map((line, idx) => (
-                        <span key={idx} className="block">
-                            <span className="select-none text-emerald-400/60">
-                                +{" "}
-                            </span>
-                            {line}
-                        </span>
-                    ))}
-                    {streaming && oldComplete && !newComplete && (
-                        <span className="inline-block h-3 w-[6px] translate-y-[2px] animate-pulse bg-emerald-400/50" />
-                    )}
-                </pre>
-            )}
-        </div>
-    );
-}
-
 function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
     const workspacePath = useWorkspaceStore((state) => {
         const active = state.workspaces.find(
@@ -1789,17 +1729,11 @@ function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
     const oldText =
         typeof input?.old_string === "string"
             ? input.old_string
-            : partialFields.old_string?.value;
+            : (partialFields.old_string?.value ?? "");
     const newText =
         typeof input?.new_string === "string"
             ? input.new_string
-            : partialFields.new_string?.value;
-    const oldComplete =
-        typeof input?.old_string === "string" ||
-        partialFields.old_string?.complete === true;
-    const newComplete =
-        typeof input?.new_string === "string" ||
-        partialFields.new_string?.complete === true;
+            : (partialFields.new_string?.value ?? "");
 
     const detail = formatStrReplaceDetail(
         input,
@@ -1807,6 +1741,25 @@ function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
         workspacePath,
         partialPath
     );
+
+    const rawPath =
+        (typeof output?.path === "string" && output.path.length > 0
+            ? output.path
+            : undefined) ??
+        (typeof input?.path === "string" && input.path.length > 0
+            ? input.path
+            : undefined) ??
+        (typeof partialPath === "string" && partialPath.length > 0
+            ? partialPath
+            : undefined);
+    const diffPath =
+        formatReadPath(
+            typeof input?.path === "string" ? input.path : partialPath,
+            rawPath,
+            workspacePath
+        ) ?? "";
+
+    const hasAnyText = oldText.length > 0 || newText.length > 0;
 
     return (
         <ToolBlock
@@ -1820,20 +1773,23 @@ function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
             status={invocation.status}
             autoOpen
             autoClose
+            bareChildren
         >
             {invocation.error ? (
                 <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
                     {invocation.error}
                 </p>
-            ) : (
-                <StrReplaceDiffPreview
-                    oldText={oldText}
-                    newText={newText}
-                    streaming={streaming}
-                    oldComplete={oldComplete}
-                    newComplete={newComplete}
+            ) : hasAnyText ? (
+                <PierreDiff
+                    path={diffPath}
+                    oldContents={oldText}
+                    newContents={newText}
                 />
-            )}
+            ) : streaming ? (
+                <p className="px-1 py-1 text-[11px] italic text-dark-400">
+                    Streaming edit…
+                </p>
+            ) : null}
         </ToolBlock>
     );
 }

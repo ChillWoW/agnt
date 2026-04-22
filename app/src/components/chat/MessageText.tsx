@@ -17,7 +17,7 @@ export function MessageText({ content, className }: MessageTextProps) {
     if (content.length === 0) return null;
 
     return (
-        <div className={cn("whitespace-pre-wrap text-sm leading-6", className)}>
+        <div className={cn("whitespace-pre-wrap text-sm", className)}>
             {renderWithMentions(content)}
         </div>
     );
@@ -66,9 +66,7 @@ function renderWithMentions(content: string): ReactNode[] {
 
     if (lastIndex < content.length) {
         nodes.push(
-            <Fragment key={`t-${key++}`}>
-                {content.slice(lastIndex)}
-            </Fragment>
+            <Fragment key={`t-${key++}`}>{content.slice(lastIndex)}</Fragment>
         );
     }
 

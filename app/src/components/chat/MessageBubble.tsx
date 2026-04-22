@@ -46,10 +46,7 @@ function buildTimeline(message: Message): TimelineEntry[] {
             kind: "reasoning",
             key: `reasoning-${part.id}`,
             part,
-            seq:
-                typeof part.message_seq === "number"
-                    ? part.message_seq
-                    : null,
+            seq: typeof part.message_seq === "number" ? part.message_seq : null,
             time: Number.isFinite(started) ? started : 0,
             order: order++
         });
@@ -127,7 +124,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     message_id: message.id,
                     text: "",
                     started_at:
-                        message.reasoning_started_at ?? new Date().toISOString(),
+                        message.reasoning_started_at ??
+                        new Date().toISOString(),
                     ended_at: null,
                     sort_index: 0
                 }
@@ -148,10 +146,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     })();
 
     const showStreamingDots =
-        message.isStreaming &&
-        !hasContent &&
-        !hasToolCalls &&
-        !hasReasoning;
+        message.isStreaming && !hasContent && !hasToolCalls && !hasReasoning;
 
     return (
         <div
@@ -162,7 +157,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         >
             <div
                 className={cn(
-                    "min-w-0 text-sm leading-relaxed",
+                    "min-w-0 text-xs leading-relaxed",
                     isUser
                         ? "max-w-[85%] rounded-md border border-dark-700 bg-dark-850 px-2.5 py-0.5 text-dark-50"
                         : "w-full text-dark-50"
