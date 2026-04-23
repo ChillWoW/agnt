@@ -54,6 +54,12 @@ import { compactConversation } from "./compact.service";
 import { COMPACT_THRESHOLD, computeContextSummary } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
 import { subscribeToPlanUpdates } from "./plans";
+import {
+    abortSubagentsForParent,
+    getSubagentTypeConfig,
+    subscribeToSubagentLifecycle
+} from "./subagents";
+import { wrapControllerWithBroadcast } from "./conversation-events";
 
 import {
     DEFAULT_CONVERSATION_TITLE,
@@ -66,8 +72,11 @@ import {
     estimateMentionsBlockTokens,
     parseMentionsFromContent
 } from "./mentions";
-import type { MessageMention } from "./conversations.types";
+import type { MessageMention, SubagentType } from "./conversations.types";
 export { DEFAULT_MODEL };
+
+const DEFAULT_SUBAGENT_MODEL = "gpt-5.4-mini";
+const DEFAULT_SUBAGENT_REASONING_EFFORT: ReasoningEffort = "high";
 
 type UserTextPart = { type: "text"; text: string };
 type UserImagePart = { type: "image"; image: Uint8Array; mediaType: string };
@@ -637,9 +646,17 @@ function isAgenticMode(value: unknown): value is AgenticMode {
     return value === "agent" || value === "plan";
 }
 
+interface SubagentOverrides {
+    subagentType: SubagentType;
+    parentConversationId: string | null;
+    modelOverride?: string;
+    reasoningEffortOverride?: ReasoningEffort | null;
+}
+
 function resolveConversationModelSettings(
     workspaceId: string,
-    conversationId: string
+    conversationId: string,
+    subagentOverrides?: SubagentOverrides
 ): {
     modelName: string;
     reasoningEffort: ReasoningEffort | null;
@@ -651,6 +668,61 @@ function resolveConversationModelSettings(
         workspaceId,
         conversationId
     ).merged;
+
+    // Subagent path: the conversation is a spawned child. Resolution order:
+    //   1. Explicit override on the task-tool call (modelOverride).
+    //   2. Parent conversation's `subagentModel` / `subagentReasoningEffort`
+    //      state keys (set via ModelSelector's "Subagent model" section).
+    //   3. Hard-coded defaults (gpt-5.4-mini + high).
+    // Permission + agentic mode always come from the subagent's OWN row;
+    // subagents run in `agent` mode regardless of parent mode (enforced at
+    // spawn time, see runSubagent / permissions docs).
+    if (subagentOverrides) {
+        const parentState =
+            subagentOverrides.parentConversationId
+                ? getEffectiveConversationState(
+                      workspaceId,
+                      subagentOverrides.parentConversationId
+                  ).merged
+                : {};
+        const parentSubagentModel =
+            typeof parentState.subagentModel === "string"
+                ? parentState.subagentModel.trim()
+                : "";
+        const parentSubagentEffort = parentState.subagentReasoningEffort;
+
+        const resolvedModelName =
+            subagentOverrides.modelOverride?.trim() ||
+            (parentSubagentModel.length > 0
+                ? parentSubagentModel
+                : DEFAULT_SUBAGENT_MODEL);
+        const model = getModelById(resolvedModelName);
+
+        const rawEffort =
+            subagentOverrides.reasoningEffortOverride !== undefined
+                ? subagentOverrides.reasoningEffortOverride
+                : parentSubagentEffort !== undefined
+                  ? parentSubagentEffort
+                  : DEFAULT_SUBAGENT_REASONING_EFFORT;
+        const reasoningEffort =
+            isReasoningEffort(rawEffort) &&
+            model?.supportsReasoningEffort === true &&
+            model.allowedEfforts.includes(rawEffort)
+                ? rawEffort
+                : (model?.defaultEffort ?? null);
+
+        return {
+            modelName: resolvedModelName,
+            reasoningEffort,
+            fastMode:
+                state.fastMode === true && model?.supportsFastMode === true,
+            permissionMode: isPermissionMode(state.permissionMode)
+                ? state.permissionMode
+                : "ask",
+            agenticMode: "agent"
+        };
+    }
+
     const configuredModel =
         typeof state.activeModel === "string"
             ? state.activeModel
@@ -707,7 +779,8 @@ async function runStreamTextIntoController({
     conversationId,
     assistantMsgId,
     modelMessages,
-    abortSignal
+    abortSignal,
+    subagentOverrides
 }: {
     controller: SseStreamController;
     workspaceId: string;
@@ -715,10 +788,15 @@ async function runStreamTextIntoController({
     assistantMsgId: string;
     modelMessages: ModelMessage[];
     abortSignal?: AbortSignal;
+    subagentOverrides?: SubagentOverrides;
 }): Promise<void> {
     const db = getWorkspaceDb(workspaceId);
     const { modelName, reasoningEffort, fastMode, permissionMode, agenticMode } =
-        resolveConversationModelSettings(workspaceId, conversationId);
+        resolveConversationModelSettings(
+            workspaceId,
+            conversationId,
+            subagentOverrides
+        );
 
     // Persist the resolved model on the assistant placeholder row so the
     // global stats aggregator can count "favorite model" per-turn. Placeholder
@@ -917,10 +995,46 @@ async function runStreamTextIntoController({
         }
     );
 
+    // Only the parent (non-subagent) cares about its children's lifecycle
+    // events. Forward them so the frontend can render a TaskBlock that
+    // flips to `done` + shows the final text once the subagent finishes.
+    const unsubscribeSubagents = subagentOverrides
+        ? () => {}
+        : subscribeToSubagentLifecycle((event) => {
+              if (event.type === "started") {
+                  if (event.parentConversationId !== conversationId) return;
+                  controller.enqueue(
+                      sseEvent("subagent-started", {
+                          parent_conversation_id: event.parentConversationId,
+                          messageId: assistantMsgId,
+                          subagent: event.subagent
+                      })
+                  );
+                  return;
+              }
+              if (event.parentConversationId !== conversationId) return;
+              controller.enqueue(
+                  sseEvent("subagent-finished", {
+                      parent_conversation_id: event.parentConversationId,
+                      messageId: assistantMsgId,
+                      subagent_id: event.subagentId,
+                      outcome: event.outcome,
+                      final_text: event.finalText,
+                      error: event.error,
+                      ended_at: event.endedAt
+                  })
+              );
+          });
+
     try {
         const codex = await createCodexClient();
         const prompt = buildConversationPrompt(workspaceId, conversationId, agenticMode);
         const skills = prompt.skills.skills;
+        const subagentPromptAddition = subagentOverrides
+            ? getSubagentTypeConfig(subagentOverrides.subagentType)
+                  .systemPromptAddition
+            : "";
+        const instructions = prompt.prompt + subagentPromptAddition;
 
         logger.log(
             "[stream] Starting streamText with model:",
@@ -954,7 +1068,7 @@ async function runStreamTextIntoController({
         //   that case for reasoning models so multi-step tool loops keep
         //   reasoning context within a turn.
         const openaiOptions: Record<string, string | boolean | undefined> = {
-            instructions: prompt.prompt,
+            instructions,
             store: false,
             promptCacheKey: conversationId,
             serviceTier: fastMode ? "priority" : undefined
@@ -978,11 +1092,14 @@ async function runStreamTextIntoController({
             workspacePath,
             getSkills: () => skills,
             getAssistantMessageId: () => assistantMsgId,
+            subagentType: subagentOverrides?.subagentType,
+            getParentAbortSignal: () => abortSignal,
             getMode: () => {
                 try {
                     return resolveConversationModelSettings(
                         workspaceId,
-                        conversationId
+                        conversationId,
+                        subagentOverrides
                     ).permissionMode;
                 } catch (error) {
                     logger.error(
@@ -996,7 +1113,8 @@ async function runStreamTextIntoController({
                 try {
                     return resolveConversationModelSettings(
                         workspaceId,
-                        conversationId
+                        conversationId,
+                        subagentOverrides
                     ).agenticMode;
                 } catch (error) {
                     logger.error(
@@ -1334,6 +1452,7 @@ async function runStreamTextIntoController({
             if (part.type === "abort") {
                 abortPermissions(conversationId, "aborted");
                 abortQuestions(conversationId, "aborted");
+                abortSubagentsForParent(conversationId, "parent-aborted");
                 killForegroundForConversation(conversationId);
                 markPendingToolInvocationsAsError(
                     db,
@@ -1407,6 +1526,7 @@ async function runStreamTextIntoController({
             });
             abortPermissions(conversationId, "aborted");
             abortQuestions(conversationId, "aborted");
+            abortSubagentsForParent(conversationId, "parent-aborted");
             killForegroundForConversation(conversationId);
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
             if (currentReasoningPart && !currentReasoningPart.endedAt) {
@@ -1431,6 +1551,7 @@ async function runStreamTextIntoController({
 
         abortPermissions(conversationId, message);
         abortQuestions(conversationId, message);
+        abortSubagentsForParent(conversationId, message);
         killForegroundForConversation(conversationId);
         markPendingToolInvocationsAsError(db, assistantMsgId, message);
         db.query("DELETE FROM messages WHERE id = ?").run(assistantMsgId);
@@ -1442,6 +1563,7 @@ async function runStreamTextIntoController({
         unsubscribeShellProgress();
         unsubscribeShellLifecycle();
         unsubscribePlans();
+        unsubscribeSubagents();
     }
 }
 
@@ -1543,7 +1665,11 @@ export async function streamReplyToLastMessage(
         assistantMsgId
     );
 
-    return buildStreamResponse(async (controller) => {
+    return buildStreamResponse(async (rawController) => {
+        const controller = wrapControllerWithBroadcast(
+            rawController,
+            conversationId
+        );
         startTitleGenerationForController({
             workspaceId,
             conversationId,
@@ -1724,7 +1850,11 @@ export async function streamConversationReply(
 
     logger.log("[stream] Created assistant placeholder:", assistantMsgId);
 
-    return buildStreamResponse(async (controller) => {
+    return buildStreamResponse(async (rawController) => {
+        const controller = wrapControllerWithBroadcast(
+            rawController,
+            conversationId
+        );
         startTitleGenerationForController({
             workspaceId,
             conversationId,
@@ -1769,4 +1899,115 @@ export async function streamConversationReply(
             abortSignal
         });
     });
+}
+
+/**
+ * Drive a subagent stream to completion. The parent `task` tool calls this
+ * and awaits the returned promise; when it resolves, the parent receives
+ * the subagent's final assistant text as the tool result.
+ *
+ * Unlike `streamReplyToLastMessage`, this does NOT return an HTTP Response.
+ * All SSE events are published through the per-conversation broadcaster
+ * (conversation-events.ts), so the subagent page in the UI can attach via
+ * `GET /conversations/:id/events` and watch the stream live — but there's
+ * no primary HTTP client reading the stream here.
+ */
+export async function runSubagentStream(params: {
+    workspaceId: string;
+    conversationId: string;
+    abortSignal: AbortSignal;
+    subagentType: SubagentType;
+    modelOverride?: string;
+    reasoningEffortOverride?: ReasoningEffort | null;
+}): Promise<{ finalText: string; aborted: boolean }> {
+    const {
+        workspaceId,
+        conversationId,
+        abortSignal,
+        subagentType,
+        modelOverride,
+        reasoningEffortOverride
+    } = params;
+
+    const db = getWorkspaceDb(workspaceId);
+
+    interface ParentRow {
+        parent_conversation_id: string | null;
+    }
+    const parentRow = db
+        .query(
+            "SELECT parent_conversation_id FROM conversations WHERE id = ?"
+        )
+        .get(conversationId) as ParentRow | null;
+    const parentConversationId = parentRow?.parent_conversation_id ?? null;
+
+    const history = db
+        .query(
+            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+        )
+        .all(conversationId) as Message[];
+
+    const modelMessages = buildModelMessages(workspaceId, history);
+
+    const assistantMsgId = crypto.randomUUID();
+    const assistantCreatedAt = new Date().toISOString();
+    db.query(
+        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
+    ).run(assistantMsgId, conversationId, "assistant", "", assistantCreatedAt);
+
+    // Build a broadcast-only controller. No HTTP client owns this stream;
+    // the raw enqueue sink is a noop. Observers subscribed via
+    // `subscribeToConversationSse(conversationId, ...)` get the events.
+    const rawController: SseStreamController = {
+        enqueue() {
+            // noop — everything of value goes through the broadcaster
+        },
+        close() {
+            // noop
+        }
+    };
+    const controller = wrapControllerWithBroadcast(rawController, conversationId);
+
+    let aborted = false;
+
+    controller.enqueue(
+        sseEvent("assistant-start", {
+            id: assistantMsgId,
+            role: "assistant" as const,
+            conversation_id: conversationId,
+            created_at: assistantCreatedAt
+        })
+    );
+
+    try {
+        await runStreamTextIntoController({
+            controller,
+            workspaceId,
+            conversationId,
+            assistantMsgId,
+            modelMessages,
+            abortSignal,
+            subagentOverrides: {
+                subagentType,
+                parentConversationId,
+                modelOverride,
+                reasoningEffortOverride
+            }
+        });
+    } catch (error) {
+        if (abortSignal.aborted || isAbortError(error)) {
+            aborted = true;
+        } else {
+            throw error;
+        }
+    }
+
+    if (abortSignal.aborted) aborted = true;
+
+    const row = db
+        .query("SELECT content FROM messages WHERE id = ?")
+        .get(assistantMsgId) as { content: string } | null;
+    const finalText = row?.content ?? "";
+
+    return { finalText, aborted };
 }

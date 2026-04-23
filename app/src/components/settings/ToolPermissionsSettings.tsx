@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { useSettings } from "@/features/settings";
 import { fetchTools, type ToolCatalogEntry } from "@/features/permissions";
@@ -32,11 +32,111 @@ const DECISION_CONFIG: Record<
     }
 };
 
+type ToolCategoryId =
+    | "read-research"
+    | "edit-files"
+    | "execution"
+    | "planning"
+    | "web-external"
+    | "media"
+    | "other";
+
+const TOOL_CATEGORY_CONFIG: Record<
+    ToolCategoryId,
+    { label: string; description: string }
+> = {
+    "read-research": {
+        label: "Read & research",
+        description: "Inspect files, search the workspace, and load reusable skills."
+    },
+    "edit-files": {
+        label: "Edit & files",
+        description: "Create or modify files inside the workspace."
+    },
+    execution: {
+        label: "Execution",
+        description: "Run commands and wait for longer-running tasks to finish."
+    },
+    planning: {
+        label: "Planning",
+        description: "Ask questions, track todos, and write implementation plans."
+    },
+    "web-external": {
+        label: "Web & external",
+        description: "Search the web or fetch remote pages for context."
+    },
+    media: {
+        label: "Media",
+        description: "Generate image attachments."
+    },
+    other: {
+        label: "Other",
+        description: "Tools that do not fit a primary category yet."
+    }
+};
+
+const TOOL_CATEGORY_ORDER: ToolCategoryId[] = [
+    "read-research",
+    "edit-files",
+    "execution",
+    "planning",
+    "web-external",
+    "media",
+    "other"
+];
+
+const TOOL_CATEGORIES: Partial<Record<string, ToolCategoryId>> = {
+    read_file: "read-research",
+    glob: "read-research",
+    grep: "read-research",
+    use_skill: "read-research",
+    write: "edit-files",
+    str_replace: "edit-files",
+    apply_patch: "edit-files",
+    shell: "execution",
+    await_shell: "execution",
+    question: "planning",
+    todo_write: "planning",
+    write_plan: "planning",
+    web_search: "web-external",
+    web_fetch: "web-external",
+    image_gen: "media"
+};
+
 function formatToolLabel(name: string): string {
     return name
         .split("_")
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ");
+}
+
+function getToolCategory(name: string): ToolCategoryId {
+    return TOOL_CATEGORIES[name] ?? "other";
+}
+
+function groupToolsByCategory(tools: ToolCatalogEntry[]) {
+    const grouped = new Map<ToolCategoryId, ToolCatalogEntry[]>();
+
+    for (const tool of tools) {
+        const category = getToolCategory(tool.name);
+        const existing = grouped.get(category);
+
+        if (existing) {
+            existing.push(tool);
+            continue;
+        }
+
+        grouped.set(category, [tool]);
+    }
+
+    return TOOL_CATEGORY_ORDER.map((category) => ({
+        category,
+        config: TOOL_CATEGORY_CONFIG[category],
+        tools:
+            grouped.get(category)?.sort((a, b) =>
+                formatToolLabel(a.name).localeCompare(formatToolLabel(b.name))
+            ) ?? []
+    })).filter((group) => group.tools.length > 0);
 }
 
 function PermissionPills({
@@ -78,6 +178,7 @@ export function ToolPermissionsSettings() {
     const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const toolGroups = useMemo(() => groupToolsByCategory(tools), [tools]);
 
     useEffect(() => {
         let cancelled = false;
@@ -124,9 +225,9 @@ export function ToolPermissionsSettings() {
             />
 
             <div className="flex flex-col gap-3">
-                <div className="flex flex-col divide-y divide-dark-700 rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
-                    {isLoading &&
-                        Array.from({ length: 5 }).map((_, i) => (
+                {isLoading && (
+                    <div className="flex flex-col divide-y divide-dark-700 rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
+                        {Array.from({ length: 5 }).map((_, i) => (
                             <div
                                 key={i}
                                 className="flex items-center justify-between gap-4 px-4 py-3"
@@ -138,52 +239,85 @@ export function ToolPermissionsSettings() {
                                 <div className="h-7 w-[116px] rounded-md bg-dark-800 animate-pulse" />
                             </div>
                         ))}
+                    </div>
+                )}
 
-                    {!isLoading &&
-                        tools.map((tool) => {
-                            const current: ToolPermissionDecision =
-                                defaults[tool.name] ??
-                                getDefaultToolPermissionDecision(tool.name);
-
-                            return (
-                                <div
-                                    key={tool.name}
-                                    className="flex items-center justify-between gap-4 p-3"
-                                >
-                                    <div className="flex flex-col gap-0.5 min-w-0">
-                                        <span className="text-xs font-medium text-dark-50 leading-tight">
-                                            {formatToolLabel(tool.name)}
-                                        </span>
-                                        {tool.description && (
-                                            <span className="text-[11px] text-dark-200 leading-tight truncate">
-                                                {tool.description.length > 48
-                                                    ? tool.description
-                                                          .slice(0, 48)
-                                                          .trimEnd() + "…"
-                                                    : tool.description}
-                                            </span>
-                                        )}
+                {!isLoading &&
+                    toolGroups.map((group) => (
+                        <section
+                            key={group.category}
+                            className="overflow-hidden rounded-md border border-dark-700 bg-dark-900"
+                        >
+                            <div className="border-b border-dark-700 bg-dark-950/60 px-4 py-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-dark-200">
+                                            {group.config.label}
+                                        </h3>
+                                        <p className="mt-1 text-[11px] leading-relaxed text-dark-400">
+                                            {group.config.description}
+                                        </p>
                                     </div>
-                                    <div className="shrink-0">
-                                        <PermissionPills
-                                            current={current}
-                                            onChange={(d) =>
-                                                handleChange(tool.name, d)
-                                            }
-                                        />
-                                    </div>
+                                    <span className="rounded-full border border-dark-700 bg-dark-900 px-2 py-1 text-[10px] font-medium text-dark-300">
+                                        {group.tools.length}
+                                    </span>
                                 </div>
-                            );
-                        })}
+                            </div>
 
-                    {!isLoading && tools.length === 0 && !error && (
-                        <div className="flex flex-col items-center gap-2 py-10">
-                            <span className="text-xs text-dark-300">
-                                No tools found
-                            </span>
-                        </div>
-                    )}
-                </div>
+                            <div className="flex flex-col divide-y divide-dark-700">
+                                {group.tools.map((tool) => {
+                                    const current: ToolPermissionDecision =
+                                        defaults[tool.name] ??
+                                        getDefaultToolPermissionDecision(
+                                            tool.name
+                                        );
+
+                                    return (
+                                        <div
+                                            key={tool.name}
+                                            className="flex items-center justify-between gap-4 p-3"
+                                        >
+                                            <div className="flex min-w-0 flex-col gap-0.5">
+                                                <span className="text-xs font-medium leading-tight text-dark-50">
+                                                    {formatToolLabel(tool.name)}
+                                                </span>
+                                                {tool.description && (
+                                                    <span className="truncate text-[11px] leading-tight text-dark-200">
+                                                        {tool.description.length >
+                                                        56
+                                                            ? tool.description
+                                                                  .slice(0, 56)
+                                                                  .trimEnd() +
+                                                              "…"
+                                                            : tool.description}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="shrink-0">
+                                                <PermissionPills
+                                                    current={current}
+                                                    onChange={(d) =>
+                                                        handleChange(
+                                                            tool.name,
+                                                            d
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    ))}
+
+                {!isLoading && tools.length === 0 && !error && (
+                    <div className="flex flex-col items-center gap-2 rounded-md border border-dark-700 bg-dark-900 py-10">
+                        <span className="text-xs text-dark-300">
+                            No tools found
+                        </span>
+                    </div>
+                )}
 
                 {error && (
                     <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">

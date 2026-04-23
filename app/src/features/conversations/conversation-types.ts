@@ -33,6 +33,14 @@ export interface ToolInvocation {
      * hydration.
      */
     shell_stream?: ShellStreamState;
+    /**
+     * For `task` tool invocations only: the UUID of the spawned subagent
+     * conversation. Populated by `subagent-started` SSE events as soon as
+     * the hidden child row is created, and also from `output_json.subagentId`
+     * on history hydration. Used by TaskBlock to build the
+     * `/conversations/<id>` click-through link.
+     */
+    subagent_id?: string | null;
 }
 
 export interface ShellStreamChunk {
@@ -88,11 +96,45 @@ export interface Message {
     summary_of_until?: string | null;
 }
 
+export type SubagentType =
+    | "generalPurpose"
+    | "explore"
+    | "shell"
+    | "docs"
+    | "best-of-n-runner";
+
 export interface Conversation {
     id: string;
     title: string;
     created_at: string;
     updated_at: string;
+    parent_conversation_id?: string | null;
+    subagent_type?: SubagentType | null;
+    subagent_name?: string | null;
+    hidden?: boolean;
+}
+
+export interface SubagentStartedEvent {
+    parent_conversation_id: string;
+    messageId: string;
+    subagent: {
+        id: string;
+        parentConversationId: string;
+        subagentType: SubagentType;
+        subagentName: string;
+        title: string;
+        startedAt: string;
+    };
+}
+
+export interface SubagentFinishedEvent {
+    parent_conversation_id: string;
+    messageId: string;
+    subagent_id: string;
+    outcome: "success" | "error" | "aborted";
+    final_text: string | null;
+    error: string | null;
+    ended_at: string;
 }
 
 export interface ConversationWithMessages extends Conversation {

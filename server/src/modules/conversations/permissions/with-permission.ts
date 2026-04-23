@@ -16,6 +16,7 @@ import {
     createApplyPatchToolDef,
     createShellToolDef,
     createStrReplaceToolDef,
+    createTaskToolDef,
     createTodoWriteToolDef,
     createUseSkillToolDef,
     createWriteToolDef,
@@ -25,6 +26,8 @@ import {
 } from "../tools";
 import type { ToolExecuteContext } from "../tools/types";
 import type { Skill } from "../../skills/skills.service";
+import type { SubagentType } from "../conversations.types";
+import { getSubagentTypeConfig } from "../subagents/subagent-types";
 import {
     isSessionAllowed,
     rememberSessionAllow,
@@ -45,7 +48,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
     "await_shell",
     "write_plan",
     "web_search",
-    "web_fetch"
+    "web_fetch",
+    "task"
 ]);
 
 export interface ConversationPermissionContext {
@@ -56,6 +60,18 @@ export interface ConversationPermissionContext {
     workspacePath?: string;
     getSkills?: () => Skill[];
     getAssistantMessageId?: () => string;
+    /**
+     * When set, this conversation is a subagent stream. Its tool set is
+     * filtered against the subagent-type allowlist, and the `task` tool is
+     * ALWAYS excluded so subagents cannot recursively spawn more subagents.
+     */
+    subagentType?: SubagentType;
+    /**
+     * When set, this conversation is a regular (non-subagent) run that MAY
+     * spawn subagents via the `task` tool. Used to wire
+     * `createTaskToolDef` with the parent context.
+     */
+    getParentAbortSignal?: () => AbortSignal | undefined;
 }
 
 function resolveConfiguredDecision(
@@ -132,8 +148,18 @@ export function buildConversationTools(
     const tools: Record<string, Tool> = {};
 
     const agenticMode = ctx.getAgenticMode?.() ?? "agent";
+    const subagentType = ctx.subagentType;
+    const subagentAllowed = subagentType
+        ? new Set(getSubagentTypeConfig(subagentType).allowedTools)
+        : null;
 
     const filteredDefs = AGNT_TOOL_DEFS.filter((def) => {
+        // Subagents: strictly filter against the type's allowlist and
+        // ALWAYS exclude the `task` tool (no nested subagents).
+        if (subagentAllowed) {
+            if (def.name === "task") return false;
+            return subagentAllowed.has(def.name);
+        }
         if (agenticMode === "plan") {
             return PLAN_MODE_TOOLS.has(def.name);
         }
@@ -200,6 +226,13 @@ export function buildConversationTools(
                 return createWritePlanToolDef({
                     workspaceId: ctx.workspaceId,
                     conversationId: ctx.conversationId
+                }) as ToolDefinition;
+            case "task":
+                return createTaskToolDef({
+                    workspaceId: ctx.workspaceId,
+                    parentConversationId: ctx.conversationId,
+                    getParentAbortSignal:
+                        ctx.getParentAbortSignal ?? (() => undefined)
                 }) as ToolDefinition;
             default:
                 return rawDef;

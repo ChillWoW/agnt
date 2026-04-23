@@ -13,6 +13,7 @@ import { applyPatchToolDef, createApplyPatchToolDef } from "./apply-patch";
 import { shellToolDef, createShellToolDef } from "./shell";
 import { awaitShellToolDef, createAwaitShellToolDef } from "./await-shell";
 import { writePlanToolDef, createWritePlanToolDef } from "./write-plan";
+import { taskToolDef, createTaskToolDef } from "./task";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -30,7 +31,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     applyPatchToolDef as ToolDefinition,
     shellToolDef as ToolDefinition,
     awaitShellToolDef as ToolDefinition,
-    writePlanToolDef as ToolDefinition
+    writePlanToolDef as ToolDefinition,
+    taskToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -83,6 +85,8 @@ export {
     awaitShellToolDef,
     createAwaitShellToolDef,
     writePlanToolDef,
-    createWritePlanToolDef
+    createWritePlanToolDef,
+    taskToolDef,
+    createTaskToolDef
 };
 export type { ToolDefinition };

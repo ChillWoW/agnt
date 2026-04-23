@@ -75,6 +75,32 @@ export function deleteConversation(workspaceId: string, conversationId: string) 
     );
 }
 
+export function fetchSubagents(workspaceId: string, parentConversationId: string) {
+    return api.get<{ subagents: Conversation[] }>(
+        `/workspaces/${workspaceId}/conversations/${parentConversationId}/subagents`
+    );
+}
+
+/**
+ * Open a read-only SSE observer on an existing conversation. Returns the
+ * raw Response; caller is responsible for consuming / releasing it.
+ *
+ * This does NOT trigger a new stream — it only replays live events the
+ * conversation's primary streamer is already emitting through the server
+ * broadcaster. Used by the subagent page to watch a subagent spawned by
+ * its parent's `task` tool call.
+ */
+export function observeConversationEvents(
+    workspaceId: string,
+    conversationId: string,
+    signal?: AbortSignal
+): Promise<Response> {
+    return api.get<Response>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/events`,
+        { parseAs: "response", signal }
+    );
+}
+
 export function updateConversationTitle(
     workspaceId: string,
     conversationId: string,

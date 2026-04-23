@@ -74,11 +74,23 @@ export const messageMentionSchema = z.object({
 export type MessageMentionType = z.infer<typeof messageMentionTypeSchema>;
 export type MessageMention = z.infer<typeof messageMentionSchema>;
 
+export const subagentTypeSchema = z.enum([
+    "generalPurpose",
+    "explore",
+    "shell",
+    "docs",
+    "best-of-n-runner"
+]);
+
 export const conversationSchema = z.object({
     id: z.string().uuid(),
     title: z.string(),
     created_at: z.string(),
-    updated_at: z.string()
+    updated_at: z.string(),
+    parent_conversation_id: z.string().uuid().nullable().optional(),
+    subagent_type: subagentTypeSchema.nullable().optional(),
+    subagent_name: z.string().nullable().optional(),
+    hidden: z.boolean().optional()
 });
 
 export const conversationWithMessagesSchema = conversationSchema.extend({
@@ -92,5 +104,6 @@ export type ReasoningPart = z.infer<typeof reasoningPartSchema>;
 export type AttachmentKind = z.infer<typeof attachmentKindSchema>;
 export type Attachment = z.infer<typeof attachmentSchema>;
 export type Message = z.infer<typeof messageSchema>;
+export type SubagentType = z.infer<typeof subagentTypeSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type ConversationWithMessages = z.infer<typeof conversationWithMessagesSchema>;

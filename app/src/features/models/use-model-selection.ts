@@ -52,6 +52,73 @@ function getDefaultSelection(models: ModelCatalogEntry[]): ModelSelection {
     };
 }
 
+// Keep in sync with `DEFAULT_SUBAGENT_MODEL` +
+// `DEFAULT_SUBAGENT_REASONING_EFFORT` on the server (conversation.stream.ts).
+// These are only used as the UI's fallback when no per-scope override has
+// been persisted yet; the server also falls back to these, so the two sides
+// agree even when the keys are missing.
+export const DEFAULT_SUBAGENT_MODEL_ID = "gpt-5.4-mini";
+export const DEFAULT_SUBAGENT_REASONING_EFFORT: ReasoningEffort = "high";
+
+export type SubagentSelection = {
+    modelId: string | null;
+    reasoningEffort: ReasoningEffort | null;
+};
+
+function getDefaultSubagentSelection(
+    models: ModelCatalogEntry[]
+): SubagentSelection {
+    const preferred =
+        models.find((m) => m.id === DEFAULT_SUBAGENT_MODEL_ID) ?? null;
+    return {
+        modelId: preferred?.id ?? null,
+        reasoningEffort: preferred?.allowedEfforts.includes(
+            DEFAULT_SUBAGENT_REASONING_EFFORT
+        )
+            ? DEFAULT_SUBAGENT_REASONING_EFFORT
+            : (preferred?.defaultEffort ?? null)
+    };
+}
+
+function normalizeSubagentSelection(
+    models: ModelCatalogEntry[],
+    raw: Partial<SubagentSelection>
+): SubagentSelection {
+    const fallback = getDefaultSubagentSelection(models);
+    const model = models.find((entry) => entry.id === raw.modelId) ?? null;
+
+    if (!model) {
+        return fallback;
+    }
+
+    const reasoningEffort =
+        isReasoningEffort(raw.reasoningEffort) &&
+        model.supportsReasoningEffort &&
+        model.allowedEfforts.includes(raw.reasoningEffort)
+            ? raw.reasoningEffort
+            : model.allowedEfforts.includes(DEFAULT_SUBAGENT_REASONING_EFFORT)
+              ? DEFAULT_SUBAGENT_REASONING_EFFORT
+              : model.defaultEffort;
+
+    return {
+        modelId: model.id,
+        reasoningEffort
+    };
+}
+
+function toSubagentSelection(
+    models: ModelCatalogEntry[],
+    values: Record<string, unknown>
+): SubagentSelection {
+    const rawModelId =
+        typeof values.subagentModel === "string" ? values.subagentModel : null;
+    const rawEffort = values.subagentReasoningEffort;
+    return normalizeSubagentSelection(models, {
+        modelId: rawModelId,
+        reasoningEffort: isReasoningEffort(rawEffort) ? rawEffort : null
+    });
+}
+
 function normalizeSelection(
     models: ModelCatalogEntry[],
     raw: Partial<ModelSelection>
@@ -106,6 +173,8 @@ export function useModelSelection({
         reasoningEffort: null,
         speed: "standard"
     });
+    const [subagentSelection, setSubagentSelection] =
+        useState<SubagentSelection>(() => getDefaultSubagentSelection([]));
     const [isLoading, setIsLoading] = useState(() => getCachedModels() == null);
 
     useEffect(() => {
@@ -115,6 +184,9 @@ export function useModelSelection({
         if (cachedModels) {
             setModels(cachedModels);
             setSelection((current) => normalizeSelection(cachedModels, current));
+            setSubagentSelection((current) =>
+                normalizeSubagentSelection(cachedModels, current)
+            );
             setIsLoading(false);
             return;
         }
@@ -130,6 +202,9 @@ export function useModelSelection({
 
                 setModels(nextModels);
                 setSelection((current) => normalizeSelection(nextModels, current));
+                setSubagentSelection((current) =>
+                    normalizeSubagentSelection(nextModels, current)
+                );
             } finally {
                 if (!cancelled) {
                     setIsLoading(false);
@@ -162,6 +237,7 @@ export function useModelSelection({
             }
 
             setSelection(toSelection(models, values));
+            setSubagentSelection(toSubagentSelection(models, values));
         }
 
         void loadSelection();
@@ -206,12 +282,64 @@ export function useModelSelection({
         [models, persistSelection]
     );
 
+    const persistSubagentSelection = useCallback(
+        async (nextSelection: SubagentSelection) => {
+            if (!workspaceId) {
+                return;
+            }
+
+            const nextWorkspaceId = workspaceId;
+            // Subagent defaults live on the *parent* conversation (the
+            // conversation spawning the subagent). Scope writes mirror the
+            // primary model selector: conversation-scoped when a
+            // conversationId is provided, workspace-wide otherwise.
+            const payload = {
+                values: {
+                    subagentModel: nextSelection.modelId,
+                    subagentReasoningEffort: nextSelection.reasoningEffort
+                },
+                source: "chat-model-selector.subagent"
+            };
+
+            if (conversationId) {
+                await updateConversationState(
+                    nextWorkspaceId,
+                    conversationId,
+                    payload
+                );
+                return;
+            }
+
+            await updateWorkspaceState(nextWorkspaceId, payload);
+        },
+        [workspaceId, conversationId]
+    );
+
+    const applySubagentSelection = useCallback(
+        (nextSelection: SubagentSelection) => {
+            const normalized = normalizeSubagentSelection(models, nextSelection);
+            setSubagentSelection(normalized);
+            void persistSubagentSelection(normalized);
+        },
+        [models, persistSubagentSelection]
+    );
+
     const selectedModel = useMemo(
         () => models.find((model) => model.id === selection.modelId) ?? null,
         [models, selection.modelId]
     );
 
     const selectedReasoningEfforts = selectedModel?.allowedEfforts ?? [];
+
+    const selectedSubagentModel = useMemo(
+        () =>
+            models.find((model) => model.id === subagentSelection.modelId) ??
+            null,
+        [models, subagentSelection.modelId]
+    );
+
+    const selectedSubagentReasoningEfforts =
+        selectedSubagentModel?.allowedEfforts ?? [];
 
     const cycleReasoningEffort = useCallback(() => {
         if (!selectedModel || selectedReasoningEfforts.length === 0) {
@@ -255,6 +383,26 @@ export function useModelSelection({
         [applySelection, selection]
     );
 
+    const selectSubagentModel = useCallback(
+        (modelId: string) => {
+            applySubagentSelection({
+                modelId,
+                reasoningEffort: null
+            });
+        },
+        [applySubagentSelection]
+    );
+
+    const selectSubagentReasoningEffort = useCallback(
+        (effort: ReasoningEffort) => {
+            applySubagentSelection({
+                ...subagentSelection,
+                reasoningEffort: effort
+            });
+        },
+        [applySubagentSelection, subagentSelection]
+    );
+
     return {
         isLoading,
         models,
@@ -264,6 +412,11 @@ export function useModelSelection({
         cycleReasoningEffort,
         selectModel,
         selectSpeed,
-        selectReasoningEffort
+        selectReasoningEffort,
+        subagentSelection,
+        selectedSubagentModel,
+        selectedSubagentReasoningEfforts,
+        selectSubagentModel,
+        selectSubagentReasoningEffort
     };
 }

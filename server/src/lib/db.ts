@@ -10,7 +10,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT 'New conversation',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    parent_conversation_id TEXT,
+    subagent_type TEXT,
+    subagent_name TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -156,6 +160,22 @@ function runMigrations(db: Database): void {
     addColumnIfMissing(db, "messages", "model_id", "TEXT");
 
     addColumnIfMissing(db, "attachments", "estimated_tokens", "INTEGER");
+
+    addColumnIfMissing(db, "conversations", "parent_conversation_id", "TEXT");
+    addColumnIfMissing(db, "conversations", "subagent_type", "TEXT");
+    addColumnIfMissing(db, "conversations", "subagent_name", "TEXT");
+    addColumnIfMissing(
+        db,
+        "conversations",
+        "hidden",
+        "INTEGER NOT NULL DEFAULT 0"
+    );
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id, created_at);"
+    );
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_visible ON conversations(hidden, parent_conversation_id, updated_at DESC);"
+    );
 
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_messages_compacted ON messages(conversation_id, compacted, created_at);"

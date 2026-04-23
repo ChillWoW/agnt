@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import {
     listConversations,
+    listSubagents,
     getConversation,
     createConversation,
     addMessage,
@@ -8,6 +9,8 @@ import {
     updateConversation
 } from "./conversations.service";
 import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
+import { buildStreamResponse } from "./conversation.sse";
+import { subscribeToConversationSse } from "./conversation-events";
 import { computeContextSummary } from "./context.service";
 import { compactConversation } from "./compact.service";
 import type { MessageRole } from "./conversations.types";
@@ -108,6 +111,88 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
+    .get(
+        "/:id/conversations/:conversationId/subagents",
+        ({ params, set }) => {
+            try {
+                return {
+                    subagents: listSubagents(params.id, params.conversationId)
+                };
+            } catch (error) {
+                set.status = 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to list subagents"
+                };
+            }
+        }
+    )
+    .get(
+        "/:id/conversations/:conversationId/events",
+        ({ params, request }) => {
+            // Read-only SSE observer for an existing conversation. Does NOT
+            // trigger or drive a stream — it just forwards live SSE events
+            // that the conversation's primary stream is already emitting
+            // through the broadcaster. Used by the subagent page to watch a
+            // subagent that was started by its parent's `task` tool call.
+            const conversationId = params.conversationId;
+            const clientAbort = request.signal;
+
+            return buildStreamResponse(async (controller) => {
+                let closed = false;
+                const unsubscribe = subscribeToConversationSse(
+                    conversationId,
+                    (line) => {
+                        if (closed) return;
+                        try {
+                            controller.enqueue(line);
+                        } catch {
+                            closed = true;
+                        }
+                    }
+                );
+
+                const onAbort = () => {
+                    closed = true;
+                    unsubscribe();
+                    try {
+                        controller.close();
+                    } catch {
+                        // already closed
+                    }
+                };
+
+                if (clientAbort.aborted) {
+                    onAbort();
+                    return;
+                }
+                clientAbort.addEventListener("abort", onAbort, { once: true });
+
+                // Hold the stream open until the client disconnects.
+                await new Promise<void>((resolve) => {
+                    const interval = setInterval(() => {
+                        if (closed) {
+                            clearInterval(interval);
+                            resolve();
+                            return;
+                        }
+                        // Heartbeat: SSE comment lines are ignored by the
+                        // parser but keep the TCP connection + buffers alive
+                        // across idle periods.
+                        try {
+                            controller.enqueue(`: keepalive\n\n`);
+                        } catch {
+                            closed = true;
+                            clearInterval(interval);
+                            resolve();
+                        }
+                    }, 15000);
+                });
+            });
+        }
+    )
     .post("/:id/conversations/:conversationId/messages", async ({ params, body, set }) => {
         try {
             const { role, content } = body as { role: MessageRole; content: string };

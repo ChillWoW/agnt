@@ -4,6 +4,8 @@ import type {
     ConversationWithMessages,
     Message,
     ReasoningPart,
+    SubagentFinishedEvent,
+    SubagentStartedEvent,
     ToolInvocation,
     ToolInvocationStatus
 } from "./conversation-types";
@@ -32,9 +34,11 @@ interface ConversationStoreState {
     isLoadingList: boolean;
     loadingConversationIds: Record<string, true>;
     streamControllersById: Record<string, AbortController>;
+    observerControllersById: Record<string, AbortController>;
     unreadConversationIds: Record<string, true>;
     contextByConversationId: Record<string, ContextSummary>;
     contextRefreshTokens: Record<string, number>;
+    subagentsByParentId: Record<string, Conversation[]>;
 
     setActiveConversation: (conversationId: string | null) => void;
     markConversationRead: (conversationId: string) => void;
@@ -47,6 +51,11 @@ interface ConversationStoreState {
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    loadSubagents: (workspaceId: string, parentConversationId: string) => Promise<void>;
+    observeConversation: (
+        workspaceId: string,
+        conversationId: string
+    ) => () => void;
     createConversation: (
         workspaceId: string,
         message: string,
@@ -182,20 +191,35 @@ async function consumeSseStream(
     }
 }
 
-async function runStream(
-    conversationId: string,
-    response: Response,
+interface SseHandlerCallbacks {
     updateConversation: (
         updater: (prev: ConversationWithMessages) => ConversationWithMessages
-    ) => void,
-    onCompacted: (event: CompactedSseEvent) => void,
-    onUsage: () => void,
-    onConversationTitle: (title: string, updatedAt: string | null) => void
-): Promise<StreamOutcome> {
-    let outcome: StreamOutcome = "aborted";
+    ) => void;
+    onCompacted: (event: CompactedSseEvent) => void;
+    onUsage: () => void;
+    onConversationTitle: (title: string, updatedAt: string | null) => void;
+    onSubagentStarted: (event: SubagentStartedEvent) => void;
+    onSubagentFinished: (event: SubagentFinishedEvent) => void;
+    setOutcome: (outcome: StreamOutcome) => void;
+}
 
-    await consumeSseStream(response, (event, data) => {
-        switch (event) {
+function handleConversationSseEvent(
+    conversationId: string,
+    event: string,
+    data: SseEventPayload,
+    callbacks: SseHandlerCallbacks
+): void {
+    const {
+        updateConversation,
+        onCompacted,
+        onUsage,
+        onConversationTitle,
+        onSubagentStarted,
+        onSubagentFinished,
+        setOutcome
+    } = callbacks;
+
+    switch (event) {
             case "user-message": {
                 const attachments = Array.isArray(data.attachments)
                     ? (data.attachments as Attachment[])
@@ -610,6 +634,20 @@ async function runStream(
                 const status =
                     (data.status as ToolInvocationStatus) ??
                     (error ? "error" : "success");
+                // For task invocations the output payload carries the
+                // spawned subagent's id — hydrate it onto the invocation
+                // so TaskBlock can render a deep-link without relying on
+                // the transient subagent-started event (which may have
+                // been emitted before the history was hydrated).
+                const maybeSubagentId =
+                    toolName === "task" &&
+                    output &&
+                    typeof output === "object" &&
+                    "subagentId" in (output as Record<string, unknown>)
+                        ? ((output as Record<string, unknown>).subagentId as
+                              | string
+                              | undefined)
+                        : undefined;
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) => {
@@ -629,7 +667,10 @@ async function runStream(
                                 ...inv,
                                 status,
                                 output,
-                                error
+                                error,
+                                ...(maybeSubagentId
+                                    ? { subagent_id: maybeSubagentId }
+                                    : {})
                             };
                         });
                         return { ...m, tool_invocations };
@@ -736,7 +777,7 @@ async function runStream(
             }
 
             case "finish": {
-                outcome = "finished";
+                setOutcome("finished");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
                 const usage = (data.usage ?? null) as UsageSseEvent | null;
@@ -836,7 +877,7 @@ async function runStream(
             }
 
             case "abort": {
-                outcome = "aborted";
+                setOutcome("aborted");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => {
@@ -886,7 +927,7 @@ async function runStream(
             }
 
             case "error": {
-                outcome = "errored";
+                setOutcome("errored");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
                 updateConversation((prev) => ({
@@ -897,9 +938,34 @@ async function runStream(
                 }));
                 break;
             }
-        }
-    });
 
+            case "subagent-started": {
+                onSubagentStarted(data as unknown as SubagentStartedEvent);
+                break;
+            }
+
+            case "subagent-finished": {
+                onSubagentFinished(data as unknown as SubagentFinishedEvent);
+                break;
+            }
+        }
+}
+
+async function runStream(
+    conversationId: string,
+    response: Response,
+    callbacks: Omit<SseHandlerCallbacks, "setOutcome">
+): Promise<StreamOutcome> {
+    let outcome: StreamOutcome = "aborted";
+    const withSetter: SseHandlerCallbacks = {
+        ...callbacks,
+        setOutcome: (value) => {
+            outcome = value;
+        }
+    };
+    await consumeSseStream(response, (event, data) => {
+        handleConversationSseEvent(conversationId, event, data, withSetter);
+    });
     return outcome;
 }
 
@@ -940,17 +1006,16 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
 
         try {
             const response = await startRequest(controller.signal);
-            outcome = await runStream(
-                conversationId,
-                response,
-                (updater) => applyConversationUpdate(conversationId, updater),
-                () => {
+            outcome = await runStream(conversationId, response, {
+                updateConversation: (updater) =>
+                    applyConversationUpdate(conversationId, updater),
+                onCompacted: () => {
                     get().bumpContextRefresh(conversationId);
                 },
-                () => {
+                onUsage: () => {
                     get().bumpContextRefresh(conversationId);
                 },
-                (title, updatedAt) => {
+                onConversationTitle: (title, updatedAt) => {
                     applyConversationUpdate(conversationId, (prev) => ({
                         ...prev,
                         title,
@@ -990,8 +1055,78 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                         if (!changed) return {};
                         return { conversationsByWorkspace: nextByWorkspace };
                     });
+                },
+                onSubagentStarted: (event) => {
+                    const parentId = event.parent_conversation_id;
+                    const sub = event.subagent;
+                    const now = new Date().toISOString();
+                    const entry: Conversation = {
+                        id: sub.id,
+                        title: sub.title,
+                        created_at: sub.startedAt,
+                        updated_at: sub.startedAt ?? now,
+                        parent_conversation_id: parentId,
+                        subagent_type: sub.subagentType,
+                        subagent_name: sub.subagentName,
+                        hidden: true
+                    };
+                    set((state) => {
+                        const existing =
+                            state.subagentsByParentId[parentId] ?? [];
+                        if (existing.some((c) => c.id === entry.id)) {
+                            return {};
+                        }
+                        return {
+                            subagentsByParentId: {
+                                ...state.subagentsByParentId,
+                                [parentId]: [...existing, entry]
+                            }
+                        };
+                    });
+                    // Link the spawned subagent to its task tool invocation
+                    // in the parent's assistant message so TaskBlock can
+                    // render a deep-link + breadcrumb immediately.
+                    applyConversationUpdate(parentId, (prev) => ({
+                        ...prev,
+                        messages: prev.messages.map((m) => {
+                            if (m.id !== event.messageId) return m;
+                            const existing = m.tool_invocations ?? [];
+                            let linked = false;
+                            const tool_invocations = existing.map((inv) => {
+                                if (linked) return inv;
+                                if (inv.tool_name !== "task") return inv;
+                                if (inv.subagent_id) return inv;
+                                linked = true;
+                                return { ...inv, subagent_id: sub.id };
+                            });
+                            return linked
+                                ? { ...m, tool_invocations }
+                                : m;
+                        })
+                    }));
+                },
+                onSubagentFinished: (event) => {
+                    const parentId = event.parent_conversation_id;
+                    set((state) => {
+                        const existing =
+                            state.subagentsByParentId[parentId] ?? [];
+                        if (existing.length === 0) return {};
+                        return {
+                            subagentsByParentId: {
+                                ...state.subagentsByParentId,
+                                [parentId]: existing.map((c) =>
+                                    c.id === event.subagent_id
+                                        ? {
+                                              ...c,
+                                              updated_at: event.ended_at
+                                          }
+                                        : c
+                                )
+                            }
+                        };
+                    });
                 }
-            );
+            });
         } catch (error) {
             if (!isAbortError(error) && !controller.signal.aborted) {
                 outcome = "errored";
@@ -1034,9 +1169,11 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         isLoadingList: false,
         loadingConversationIds: {},
         streamControllersById: {},
+        observerControllersById: {},
         unreadConversationIds: {},
         contextByConversationId: {},
         contextRefreshTokens: {},
+        subagentsByParentId: {},
 
         setContextSummary: (
             conversationId: string,
@@ -1118,6 +1255,114 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             } finally {
                 if (!hadCached) set({ isLoadingList: false });
             }
+        },
+
+        loadSubagents: async (
+            workspaceId: string,
+            parentConversationId: string
+        ) => {
+            try {
+                const { subagents } = await conversationApi.fetchSubagents(
+                    workspaceId,
+                    parentConversationId
+                );
+                set((state) => ({
+                    subagentsByParentId: {
+                        ...state.subagentsByParentId,
+                        [parentConversationId]: subagents
+                    }
+                }));
+            } catch (error) {
+                console.error("[conversation-store] loadSubagents failed", error);
+            }
+        },
+
+        observeConversation: (
+            workspaceId: string,
+            conversationId: string
+        ): (() => void) => {
+            const existing = get().observerControllersById[conversationId];
+            if (existing) {
+                return () => {
+                    existing.abort();
+                    set((state) => ({
+                        observerControllersById: omitKey(
+                            state.observerControllersById,
+                            conversationId
+                        )
+                    }));
+                };
+            }
+
+            const controller = new AbortController();
+            set((state) => ({
+                observerControllersById: {
+                    ...state.observerControllersById,
+                    [conversationId]: controller
+                }
+            }));
+
+            // Launch async but return a dispose function immediately.
+            void (async () => {
+                try {
+                    const response =
+                        await conversationApi.observeConversationEvents(
+                            workspaceId,
+                            conversationId,
+                            controller.signal
+                        );
+
+                    const callbacks: Omit<SseHandlerCallbacks, "setOutcome"> = {
+                        updateConversation: (updater) =>
+                            applyConversationUpdate(conversationId, updater),
+                        onCompacted: () => {
+                            get().bumpContextRefresh(conversationId);
+                        },
+                        onUsage: () => {
+                            get().bumpContextRefresh(conversationId);
+                        },
+                        onConversationTitle: (title, updatedAt) => {
+                            applyConversationUpdate(
+                                conversationId,
+                                (prev) => ({
+                                    ...prev,
+                                    title,
+                                    updated_at:
+                                        updatedAt ?? prev.updated_at
+                                })
+                            );
+                        },
+                        onSubagentStarted: () => {},
+                        onSubagentFinished: () => {}
+                    };
+
+                    await runStream(conversationId, response, callbacks);
+                } catch (error) {
+                    if (!isAbortError(error)) {
+                        console.error(
+                            "[conversation-store] observer stream failed",
+                            error
+                        );
+                    }
+                } finally {
+                    set((state) => ({
+                        observerControllersById: omitKey(
+                            state.observerControllersById,
+                            conversationId
+                        )
+                    }));
+                }
+            })();
+
+            return () => {
+                controller.abort();
+                set((state) => ({
+                    observerControllersById: omitKey(
+                        state.observerControllersById,
+                        conversationId
+                    )
+                }));
+            };
         },
 
         loadConversation: async (

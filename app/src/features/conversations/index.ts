@@ -3,5 +3,8 @@ export type {
     Conversation,
     ConversationWithMessages,
     Message,
-    MessageRole
+    MessageRole,
+    SubagentType,
+    SubagentStartedEvent,
+    SubagentFinishedEvent
 } from "./conversation-types";

@@ -11,6 +11,7 @@ import type {
     MessageMention,
     MessageRole,
     ReasoningPart,
+    SubagentType,
     ToolInvocation,
     ToolInvocationStatus
 } from "./conversations.types";
@@ -60,19 +61,63 @@ function toolInvocationFromRow(row: ToolInvocationRow): ToolInvocation {
     };
 }
 
+interface ConversationRow {
+    id: string;
+    title: string;
+    created_at: string;
+    updated_at: string;
+    parent_conversation_id: string | null;
+    subagent_type: string | null;
+    subagent_name: string | null;
+    hidden: number;
+}
+
+function conversationFromRow(row: ConversationRow): Conversation {
+    return {
+        id: row.id,
+        title: row.title,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        parent_conversation_id: row.parent_conversation_id,
+        subagent_type: (row.subagent_type ?? null) as Conversation["subagent_type"],
+        subagent_name: row.subagent_name,
+        hidden: row.hidden === 1
+    };
+}
+
+const CONVERSATION_SELECT =
+    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden FROM conversations";
+
 export function listConversations(workspaceId: string): Conversation[] {
     const db = getWorkspaceDb(workspaceId);
-    return db
-        .query("SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC")
-        .all() as Conversation[];
+    const rows = db
+        .query(
+            `${CONVERSATION_SELECT} WHERE hidden = 0 AND parent_conversation_id IS NULL ORDER BY updated_at DESC`
+        )
+        .all() as ConversationRow[];
+    return rows.map(conversationFromRow);
+}
+
+export function listSubagents(
+    workspaceId: string,
+    parentConversationId: string
+): Conversation[] {
+    const db = getWorkspaceDb(workspaceId);
+    const rows = db
+        .query(
+            `${CONVERSATION_SELECT} WHERE parent_conversation_id = ? ORDER BY created_at ASC`
+        )
+        .all(parentConversationId) as ConversationRow[];
+    return rows.map(conversationFromRow);
 }
 
 export function getConversation(workspaceId: string, conversationId: string): ConversationWithMessages {
     const db = getWorkspaceDb(workspaceId);
 
-    const conversation = db
-        .query("SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?")
-        .get(conversationId) as Conversation | null;
+    const row = db
+        .query(`${CONVERSATION_SELECT} WHERE id = ?`)
+        .get(conversationId) as ConversationRow | null;
+    const conversation = row ? conversationFromRow(row) : null;
 
     if (!conversation) {
         throw new Error(`Conversation not found: ${conversationId}`);
@@ -230,6 +275,10 @@ export function createConversation(
         title: DEFAULT_CONVERSATION_TITLE,
         created_at: now,
         updated_at: now,
+        parent_conversation_id: null,
+        subagent_type: null,
+        subagent_name: null,
+        hidden: false,
         messages: [
             {
                 id: messageId,
@@ -238,6 +287,64 @@ export function createConversation(
                 content: firstMessage,
                 created_at: now,
                 ...(attachments.length > 0 ? { attachments } : {})
+            }
+        ]
+    };
+}
+
+export interface CreateSubagentConversationParams {
+    parentConversationId: string;
+    subagentType: SubagentType;
+    subagentName: string;
+    title: string;
+    initialUserMessage: string;
+}
+
+export function createSubagentConversation(
+    workspaceId: string,
+    params: CreateSubagentConversationParams
+): ConversationWithMessages {
+    const db = getWorkspaceDb(workspaceId);
+    const conversationId = crypto.randomUUID();
+    const messageId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    const tx = db.transaction(() => {
+        db.query(
+            "INSERT INTO conversations (id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden) VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
+        ).run(
+            conversationId,
+            params.title,
+            now,
+            now,
+            params.parentConversationId,
+            params.subagentType,
+            params.subagentName
+        );
+
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+        ).run(messageId, conversationId, "user", params.initialUserMessage, now);
+    });
+
+    tx();
+
+    return {
+        id: conversationId,
+        title: params.title,
+        created_at: now,
+        updated_at: now,
+        parent_conversation_id: params.parentConversationId,
+        subagent_type: params.subagentType,
+        subagent_name: params.subagentName,
+        hidden: true,
+        messages: [
+            {
+                id: messageId,
+                conversation_id: conversationId,
+                role: "user",
+                content: params.initialUserMessage,
+                created_at: now
             }
         ]
     };
@@ -309,14 +416,15 @@ export function updateConversation(
     const db = getWorkspaceDb(workspaceId);
     const now = new Date().toISOString();
 
-    const existing = db
-        .query("SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?")
-        .get(conversationId) as Conversation | null;
+    const row = db
+        .query(`${CONVERSATION_SELECT} WHERE id = ?`)
+        .get(conversationId) as ConversationRow | null;
 
-    if (!existing) {
+    if (!row) {
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
+    const existing = conversationFromRow(row);
     const newTitle = updates.title ?? existing.title;
 
     db.query(
