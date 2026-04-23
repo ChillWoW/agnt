@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useConversationStore } from "@/features/conversations";
 import { useWorkspaceStore } from "@/features/workspaces";
+import { StatsPanel } from "@/components/stats";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
@@ -54,13 +55,15 @@ function HomeRoute() {
 
     return (
         <div className="flex h-full flex-col">
-            <div className="flex flex-1 flex-col items-center justify-center px-4">
-                <div className="flex flex-col items-center gap-3 text-center">
-                    <h1 className="text-2xl font-semibold text-dark-50">
+            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
+                <div className="flex w-full max-w-xl flex-col items-center gap-5">
+                    <h1 className="text-xl font-semibold text-dark-50 text-center">
                         {activeWorkspace
                             ? `What can I help you with?`
                             : "Open a workspace to get started"}
                     </h1>
+
+                    <StatsPanel reloadKey={activeWorkspaceId ?? null} />
                 </div>
             </div>
 

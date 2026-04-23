@@ -8,6 +8,7 @@ import attachmentsRoutes from "./modules/attachments/attachments.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import historyRoutes from "./modules/history/history.routes";
 import modelsRoutes from "./modules/models/models.routes";
+import statsRoutes from "./modules/stats/stats.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -28,6 +29,7 @@ const app = new Elysia()
     .use(workspacesRoutes)
     .use(historyRoutes)
     .use(modelsRoutes)
+    .use(statsRoutes)
     .use(toolsRoutes)
     .use(attachmentsRoutes)
     .use(conversationsRoutes)

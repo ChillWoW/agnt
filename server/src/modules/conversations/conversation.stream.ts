@@ -720,6 +720,22 @@ async function runStreamTextIntoController({
     const { modelName, reasoningEffort, fastMode, permissionMode, agenticMode } =
         resolveConversationModelSettings(workspaceId, conversationId);
 
+    // Persist the resolved model on the assistant placeholder row so the
+    // global stats aggregator can count "favorite model" per-turn. Placeholder
+    // inserts happen before model resolution, so patch it here.
+    try {
+        db.query("UPDATE messages SET model_id = ? WHERE id = ?").run(
+            modelName,
+            assistantMsgId
+        );
+    } catch (error) {
+        logger.error(
+            "[stream] Failed to record model_id on assistant message",
+            { assistantMsgId, modelName },
+            error
+        );
+    }
+
     let fullText = "";
     const reasoningParts: StreamReasoningPart[] = [];
     let currentReasoningPart: StreamReasoningPart | null = null;
