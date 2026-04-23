@@ -41,7 +41,7 @@ export function AgenticModeSelector({
     const cycleHotkey = useResolvedHotkeyCombo("agentic.mode.cycle");
 
     useHotkey({
-        id: "agentic.mode.cycle",
+        id: "models.agentic-mode.cycle",
         label: "Cycle agentic mode",
         description: "Toggle between Agent and Plan modes",
         defaultCombo: "Shift+Tab",
@@ -59,9 +59,7 @@ export function AgenticModeSelector({
                     size="sm"
                     className={cn(
                         "h-7 gap-2 hover:bg-dark-800",
-                        mode === "plan"
-                            ? "text-amber-400"
-                            : "text-dark-200"
+                        mode === "plan" ? "text-amber-400" : "text-dark-200"
                     )}
                 >
                     <span className="truncate">{labelFor(mode)}</span>

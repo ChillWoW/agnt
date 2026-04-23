@@ -41,7 +41,7 @@ export function PermissionModeSelector({
     const cycleHotkey = useResolvedHotkeyCombo("permissions.mode.cycle");
 
     useHotkey({
-        id: "permissions.mode.cycle",
+        id: "models.permission-mode.cycle",
         label: "Cycle permission mode",
         description: "Toggle between Ask and Bypass permission modes",
         defaultCombo: "Ctrl+Shift+P",
