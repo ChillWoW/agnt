@@ -729,8 +729,6 @@ function QuestionBlock({ invocation }: { invocation: ToolInvocation }) {
         ? (invocation.output as QuestionOutputShape)
         : undefined;
     const detail = formatQuestionDetail(input, output);
-    const questions = Array.isArray(input?.questions) ? input.questions : [];
-    const answers = Array.isArray(output?.answers) ? output.answers : [];
 
     return (
         <ToolBlock

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
-import { ArrowDownIcon } from "@phosphor-icons/react";
+import { ArrowDownIcon, FolderNotchIcon } from "@phosphor-icons/react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
 import { useConversationStore } from "@/features/conversations";
@@ -13,6 +14,12 @@ export const Route = createFileRoute("/conversations/$conversationId")({
 function ConversationRoute() {
     const { conversationId } = Route.useParams();
     const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const activeWorkspace = useWorkspaceStore(
+        (s) =>
+            s.workspaces.find(
+                (workspace) => workspace.id === activeWorkspaceId
+            ) ?? null
+    );
 
     const conversation = useConversationStore(
         (s) => s.conversationsById[conversationId] ?? null
@@ -79,11 +86,51 @@ function ConversationRoute() {
 
     return (
         <div className="relative flex h-full flex-col">
+            <div className="sticky top-0 z-10 shrink-0">
+                <div className="mx-auto flex px-2.5 py-1.5">
+                    <Popover>
+                        <PopoverTrigger
+                            type="button"
+                            className="w-auto max-w-full rounded-md text-xs hover:bg-dark-900 px-2.5 py-1 transition-colors"
+                        >
+                            <span className="truncate font-medium">
+                                {conversation.title}
+                            </span>
+                        </PopoverTrigger>
+                        <PopoverContent
+                            align="start"
+                            sideOffset={10}
+                            className="flex flex-col gap-2 text-[11px]"
+                        >
+                            {conversation.title && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-dark-100">
+                                        {conversation.title}
+                                    </span>
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <FolderNotchIcon
+                                    className="size-3.5 shrink-0 text-dark-300"
+                                    weight="duotone"
+                                />
+                                <div className="min-w-0 text-dark-100">
+                                    {activeWorkspace?.path ??
+                                        "No workspace selected"}
+                                </div>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
+            </div>
+
             <div
                 className="min-h-0 flex-1 overflow-hidden"
                 style={{
-                    WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)",
-                    maskImage: "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)"
+                    WebkitMaskImage:
+                        "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)",
+                    maskImage:
+                        "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)"
                 }}
             >
                 <MessageList
@@ -101,7 +148,8 @@ function ConversationRoute() {
                             opacity: 0,
                             pointerEvents: "none",
                             transform: "translateY(4px)",
-                            transition: "opacity 150ms ease, transform 150ms ease"
+                            transition:
+                                "opacity 150ms ease, transform 150ms ease"
                         }}
                         className="mb-2 inline-flex"
                     >
