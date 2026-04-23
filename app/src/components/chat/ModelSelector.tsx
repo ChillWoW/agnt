@@ -256,17 +256,15 @@ export function ModelSelector({
                 </div>
 
                 <div className="border-b border-dark-700 p-1 space-y-0.5">
-                    <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-dark-400">
-                        Subagent model
+                    <div className="px-2.5 py-1 text-[10px] font-medium uppercase text-dark-200">
+                        Subagents
                     </div>
                     <Popover
                         open={subagentModelOpen}
                         onOpenChange={setSubagentModelOpen}
                     >
                         <PopoverTrigger className="flex w-full items-center justify-between rounded-sm px-2.5 py-1.5 text-left transition-colors hover:bg-dark-800">
-                            <span className="text-xs text-dark-100">
-                                Model
-                            </span>
+                            <span className="text-xs text-dark-100">Model</span>
                             <div className="flex min-w-0 items-center gap-1 text-xs text-dark-300">
                                 <span className="max-w-[10rem] truncate">
                                     {selectedSubagentModel?.displayName ??
