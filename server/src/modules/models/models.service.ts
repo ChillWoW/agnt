@@ -5,6 +5,48 @@ import {
 
 const MODELS: ModelCatalogEntry[] = [
     {
+        id: "gpt-5.5",
+        apiModelId: "gpt-5.5",
+        provider: "openai",
+        displayName: "GPT-5.5",
+        tagline: "OpenAI's newest frontier model for complex tasks.",
+        description:
+            "Most capable frontier model for complex coding, computer use, knowledge work, and research workflows. Available in Codex with ChatGPT sign-in; API key access coming soon.",
+        status: "recommended",
+        releaseStage: "general",
+        supportsReasoningEffort: true,
+        allowedEfforts: ["low", "medium", "high", "xhigh"],
+        defaultEffort: "medium",
+        contextWindow: 1050000,
+        maxOutputTokens: 128000,
+        knowledgeCutoff: "2025-12-31",
+        speedLabel: "Medium",
+        reasoningLabel: "Highest",
+        inputModalities: ["text", "image"],
+        outputModalities: ["text"],
+        supportsImageInput: true,
+        supportsApi: false, // ← was wrongly true; no API key auth yet
+        supportsChatCompletions: false,
+        supportsResponsesApi: false,
+        supportsRealtimeApi: null,
+        supportsBuiltInTools: null,
+        supportsComputerUse: null,
+        supportsWebSearch: null,
+        supportsFileSearch: null,
+        supportsMcp: null,
+        supportsApplyPatch: null,
+        supportsSkills: null,
+        supportsFastMode: true,
+        docsUrl: "https://developers.openai.com/codex/models",
+        codexDocsUrl: "https://developers.openai.com/codex/models",
+        access: {
+            cli: true, // ← available via `codex -m gpt-5.5`
+            ide: true, // ← available in Codex IDE extension
+            cloud: true, // ← Codex Cloud
+            api: false // ← NOT available with API key auth yet
+        }
+    },
+    {
         id: "gpt-5.4",
         apiModelId: "gpt-5.4",
         provider: "openai",
