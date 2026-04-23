@@ -1,5 +1,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+#[cfg(windows)]
+use tauri::image::Image;
+#[cfg(windows)]
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -143,6 +147,41 @@ async fn stop_server(state: State<'_, SidecarState>) -> Result<(), String> {
     Ok(())
 }
 
+// Update the Windows taskbar overlay icon to reflect the unread count.
+// On non-Windows platforms this is a no-op because `set_overlay_icon`
+// is only exposed by Tauri on Windows.
+#[tauri::command]
+async fn set_unread_badge(app: AppHandle, count: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let Some(window) = app.get_webview_window("main") else {
+            return Ok(());
+        };
+        if count == 0 {
+            window.set_overlay_icon(None).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        let file = if count >= 10 {
+            "9plus.png".to_string()
+        } else {
+            format!("{}.png", count)
+        };
+        let resource_path = app
+            .path()
+            .resolve(format!("icons/badges/{}", file), BaseDirectory::Resource)
+            .map_err(|e| e.to_string())?;
+        let image = Image::from_path(&resource_path).map_err(|e| e.to_string())?;
+        window
+            .set_overlay_icon(Some(image))
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, count);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -156,7 +195,11 @@ pub fn run() {
             initializing: Arc::new(Mutex::new(false)),
             server_info: Arc::new(Mutex::new(None)),
         })
-        .invoke_handler(tauri::generate_handler![start_server, stop_server])
+        .invoke_handler(tauri::generate_handler![
+            start_server,
+            stop_server,
+            set_unread_badge
+        ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 let state = window.app_handle().state::<SidecarState>();

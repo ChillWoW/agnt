@@ -4,6 +4,7 @@ import { getHomePath } from "../../lib/homedir";
 import {
     settingsSchema,
     DEFAULT_SETTINGS,
+    DEFAULT_NOTIFICATIONS_SETTINGS,
     getDefaultToolPermissionSettings,
     type Settings,
     type SettingsCategory
@@ -33,6 +34,10 @@ function normalizeSettings(settings: Settings): Settings {
                 ...getDefaultToolPermissionSettings().defaults,
                 ...settings.toolPermissions.defaults
             }
+        },
+        notifications: {
+            ...DEFAULT_NOTIFICATIONS_SETTINGS,
+            ...settings.notifications
         }
     };
 }

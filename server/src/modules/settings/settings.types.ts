@@ -31,6 +31,18 @@ export const toolPermissionsSettingsSchema = z.object({
     defaults: z.record(z.string(), toolPermissionDecisionSchema).default({})
 });
 
+export const notificationsSettingsSchema = z.object({
+    enabled: z.boolean().default(true),
+    soundEnabled: z.boolean().default(true),
+    osNotificationsEnabled: z.boolean().default(true)
+});
+
+export const DEFAULT_NOTIFICATIONS_SETTINGS: NotificationsSettings = {
+    enabled: true,
+    soundEnabled: true,
+    osNotificationsEnabled: true
+};
+
 export const settingsSchema = z.object({
     hotkeys: z
         .object({
@@ -41,28 +53,35 @@ export const settingsSchema = z.object({
         }),
     toolPermissions: toolPermissionsSettingsSchema.default(
         getDefaultToolPermissionSettings()
+    ),
+    notifications: notificationsSettingsSchema.default(
+        DEFAULT_NOTIFICATIONS_SETTINGS
     )
 });
 
 export type HotkeySettings = z.infer<typeof settingsSchema.shape.hotkeys>;
 export type ToolPermissionDecision = z.infer<typeof toolPermissionDecisionSchema>;
 export type ToolPermissionsSettings = z.infer<typeof toolPermissionsSettingsSchema>;
+export type NotificationsSettings = z.infer<typeof notificationsSettingsSchema>;
 export type Settings = z.infer<typeof settingsSchema>;
 export type SettingsCategory = keyof Settings;
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     "hotkeys",
-    "toolPermissions"
+    "toolPermissions",
+    "notifications"
 ] as const;
 
 export const DEFAULT_SETTINGS: Settings = {
     hotkeys: {
         bindings: {}
     },
-    toolPermissions: getDefaultToolPermissionSettings()
+    toolPermissions: getDefaultToolPermissionSettings(),
+    notifications: DEFAULT_NOTIFICATIONS_SETTINGS
 };
 
 export const categorySchemas: Record<SettingsCategory, z.ZodType> = {
     hotkeys: settingsSchema.shape.hotkeys,
-    toolPermissions: toolPermissionsSettingsSchema
+    toolPermissions: toolPermissionsSettingsSchema,
+    notifications: notificationsSettingsSchema
 };

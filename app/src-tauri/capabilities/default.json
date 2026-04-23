@@ -16,6 +16,7 @@
         "shell:allow-open",
         "opener:default",
         "dialog:default",
-        "notification:default"
+        "notification:default",
+        "core:window:allow-set-overlay-icon"
     ]
 }

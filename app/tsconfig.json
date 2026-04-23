@@ -27,5 +27,8 @@
         "noFallthroughCasesInSwitch": true
     },
     "include": ["src"],
+    "exclude": [
+        "src/assets/sounds/generate-sounds.ts"
+    ],
     "references": [{ "path": "./tsconfig.node.json" }]
 }

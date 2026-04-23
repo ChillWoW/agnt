@@ -19,6 +19,10 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
                 ...DEFAULT_SETTINGS.toolPermissions.defaults,
                 ...raw.toolPermissions?.defaults
             }
+        },
+        notifications: {
+            ...DEFAULT_SETTINGS.notifications,
+            ...raw.notifications
         }
     };
 }

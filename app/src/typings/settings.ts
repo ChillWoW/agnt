@@ -33,9 +33,22 @@ export function getDefaultToolPermissionSettings(): ToolPermissionsSettings {
     };
 }
 
+export type NotificationsSettings = {
+    enabled: boolean;
+    soundEnabled: boolean;
+    osNotificationsEnabled: boolean;
+};
+
+export const DEFAULT_NOTIFICATIONS_SETTINGS: NotificationsSettings = {
+    enabled: true,
+    soundEnabled: true,
+    osNotificationsEnabled: true
+};
+
 export type Settings = {
     hotkeys: HotkeySettings;
     toolPermissions: ToolPermissionsSettings;
+    notifications: NotificationsSettings;
 };
 
 export type SettingsCategory = keyof Settings;
@@ -44,5 +57,6 @@ export const DEFAULT_SETTINGS: Settings = {
     hotkeys: {
         bindings: {}
     },
-    toolPermissions: getDefaultToolPermissionSettings()
+    toolPermissions: getDefaultToolPermissionSettings(),
+    notifications: DEFAULT_NOTIFICATIONS_SETTINGS
 };

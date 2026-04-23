@@ -1,5 +1,6 @@
 import { type ElementType, useEffect } from "react";
 import {
+    BellIcon,
     FileTextIcon,
     KeyboardIcon,
     RobotIcon,
@@ -7,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { HotkeySettings } from "./HotkeySettings";
 import { CodexSettings } from "./CodexSettings";
+import { NotificationsSettings } from "./NotificationsSettings";
 import { RepoInstructionsSettings } from "./RepoInstructionsSettings";
 import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
 import { useSettingsStore } from "./settings-store";
@@ -23,6 +25,12 @@ export const settingsCategories: SettingsCategory[] = [
         key: "hotkeys",
         label: "Hotkeys",
         icon: KeyboardIcon,
+        group: "Desktop"
+    },
+    {
+        key: "notifications",
+        label: "Notifications",
+        icon: BellIcon,
         group: "Desktop"
     },
     {
@@ -63,6 +71,9 @@ export function SettingsPanel() {
         <div className="absolute inset-0 z-30 bg-dark-950">
             <div className="h-full overflow-y-auto">
                 {activeCategory === "hotkeys" && <HotkeySettings />}
+                {activeCategory === "notifications" && (
+                    <NotificationsSettings />
+                )}
                 {activeCategory === "codex" && <CodexSettings />}
                 {activeCategory === "toolPermissions" && (
                     <ToolPermissionsSettings />

@@ -21,6 +21,8 @@ import type { Plan } from "@/features/plans";
 import { useRightSidebarStore } from "@/features/right-sidebar/right-sidebar-store";
 import { useOpenedFilesStore } from "@/features/right-sidebar/filetree";
 import type { Attachment } from "@/features/attachments";
+import { notify } from "@/features/notifications/notify";
+import { isWindowFocused } from "@/features/notifications/focus";
 import type {
     CompactedSseEvent,
     ContextSummary,
@@ -693,6 +695,12 @@ function handleConversationSseEvent(
                 usePermissionStore
                     .getState()
                     .setPending(conversationId, request);
+                notify({
+                    kind: "permission",
+                    title: "Permission required",
+                    body: `A tool is requesting permission to run`,
+                    conversationId
+                });
                 break;
             }
 
@@ -721,6 +729,13 @@ function handleConversationSseEvent(
                 useQuestionStore
                     .getState()
                     .setPending(conversationId, request);
+                const firstQuestion = request.questions[0]?.question ?? "";
+                notify({
+                    kind: "question",
+                    title: "Agent asked a question",
+                    body: firstQuestion.slice(0, 120),
+                    conversationId
+                });
                 break;
             }
 
@@ -784,6 +799,27 @@ function handleConversationSseEvent(
                 const assistantMessageId = data.assistantMessageId as
                     | string
                     | undefined;
+                // Suppress the finish notification only when the user is
+                // actively watching this conversation — i.e. the window is
+                // focused AND this conversation is the active one. In every
+                // other case (window unfocused, or a different conversation
+                // active) we fire both the sound and the OS notification
+                // (OS notification is additionally gated by focus inside
+                // `notify`).
+                {
+                    const currentState = useConversationStore.getState();
+                    const isActiveConvo =
+                        currentState.activeConversationId === conversationId;
+                    const userIsWatching = isActiveConvo && isWindowFocused();
+                    if (!userIsWatching) {
+                        notify({
+                            kind: "finish",
+                            title: "Assistant finished",
+                            body: "Assistant has finished its work",
+                            conversationId
+                        });
+                    }
+                }
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.map((m) => {
