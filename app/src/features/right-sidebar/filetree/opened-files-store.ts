@@ -28,6 +28,7 @@ interface OpenedFilesState {
     setWorkspace: (id: string | null) => void;
     setActive: (view: ActiveView) => void;
     openFile: (path: string, name: string) => void;
+    openVirtualFile: (path: string, name: string) => void;
     closeFile: (path: string) => void;
     refreshFile: (path: string) => Promise<void>;
 }
@@ -89,6 +90,37 @@ export const useOpenedFilesStore = create<OpenedFilesState>()((set, get) => ({
         ) {
             void get().refreshFile(path);
         }
+    },
+
+    openVirtualFile: (path, name) => {
+        const existing = get().files[path];
+        if (existing) {
+            set((state) => ({
+                files: {
+                    ...state.files,
+                    [path]: { ...existing, name }
+                },
+                active: { kind: "file", path }
+            }));
+            return;
+        }
+        set((state) => ({
+            order: [...state.order, path],
+            files: {
+                ...state.files,
+                [path]: {
+                    path,
+                    name,
+                    size: 0,
+                    content: "",
+                    truncated: false,
+                    binary: false,
+                    loading: false,
+                    error: null
+                }
+            },
+            active: { kind: "file", path }
+        }));
     },
 
     closeFile: (path) => {

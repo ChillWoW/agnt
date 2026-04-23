@@ -104,6 +104,18 @@ CREATE INDEX IF NOT EXISTS idx_reasoning_parts_message ON message_reasoning_part
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(conversation_id, message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_todos_conversation ON todos(conversation_id, sort_index);
+
+CREATE TABLE IF NOT EXISTS plans (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    title TEXT,
+    todos_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_plans_conversation ON plans(conversation_id);
 `;
 
 interface TableInfoRow {
@@ -173,6 +185,19 @@ function runMigrations(db: Database): void {
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_todos_conversation ON todos(conversation_id, sort_index);
+    `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS plans (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+            file_path TEXT NOT NULL,
+            title TEXT,
+            todos_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_plans_conversation ON plans(conversation_id);
     `);
 
     backfillLegacyReasoningParts(db);

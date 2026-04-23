@@ -21,7 +21,9 @@ import {
     clearConversationQuestionState,
     resolveQuestions
 } from "./questions";
-import { listTodos } from "./todos";
+import { listTodos, replaceTodos } from "./todos";
+import { getPlan, deletePlan } from "./plans";
+import { mergeScopeState } from "../history/history.service";
 import type { MessageMention } from "./conversations.types";
 
 function isPermissionDecision(value: unknown): value is PermissionDecision {
@@ -352,6 +354,88 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             }
 
             return { success: true };
+        }
+    )
+    .get(
+        "/:id/conversations/:conversationId/plan",
+        ({ params, set }) => {
+            try {
+                const plan = getPlan(params.id, params.conversationId);
+                if (!plan) {
+                    set.status = 404;
+                    return { error: "No plan found for this conversation" };
+                }
+                return { plan };
+            } catch (error) {
+                set.status = 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to get plan"
+                };
+            }
+        }
+    )
+    .delete(
+        "/:id/conversations/:conversationId/plan",
+        ({ params, set }) => {
+            try {
+                const deleted = deletePlan(params.id, params.conversationId);
+                if (!deleted) {
+                    set.status = 404;
+                    return { error: "No plan found for this conversation" };
+                }
+                return { success: true };
+            } catch (error) {
+                set.status = 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to delete plan"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/plan/build",
+        ({ params, set }) => {
+            try {
+                const plan = getPlan(params.id, params.conversationId);
+                if (!plan) {
+                    set.status = 404;
+                    return { error: "No plan found for this conversation" };
+                }
+
+                const todoInputs = plan.todos.map((t) => ({
+                    content: t.content,
+                    status: "pending" as const
+                }));
+                const todos = replaceTodos(
+                    params.id,
+                    params.conversationId,
+                    todoInputs
+                );
+
+                mergeScopeState(
+                    params.id,
+                    "conversation",
+                    params.conversationId,
+                    { agenticMode: "agent" },
+                    "plan-build"
+                );
+
+                return { success: true, todos, agenticMode: "agent" };
+            } catch (error) {
+                set.status = 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to build from plan"
+                };
+            }
         }
     );
 

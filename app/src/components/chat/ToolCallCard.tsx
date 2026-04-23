@@ -14,6 +14,7 @@ import {
     ListChecksIcon,
     GitDiffIcon,
     MagnifyingGlassIcon,
+    NotepadIcon,
     NotePencilIcon,
     PencilLineIcon,
     TerminalWindowIcon,
@@ -837,6 +838,21 @@ function TodoWriteBlock({ invocation }: { invocation: ToolInvocation }) {
                 </ul>
             ) : null}
         </ToolBlock>
+    );
+}
+
+// ─── Write plan ───────────────────────────────────────────────────────────────
+
+function WritePlanBlock({ invocation }: { invocation: ToolInvocation }) {
+    return (
+        <ToolBlock
+            icon={<NotepadIcon className="size-3.5" weight="bold" />}
+            pendingLabel="Writing plan"
+            successLabel="Created plan"
+            errorLabel="Plan failed"
+            error={invocation.error}
+            status={invocation.status}
+        />
     );
 }
 
@@ -2662,6 +2678,8 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <QuestionBlock invocation={invocation} />;
         case "todo_write":
             return <TodoWriteBlock invocation={invocation} />;
+        case "write_plan":
+            return <WritePlanBlock invocation={invocation} />;
         case "image_gen":
             return <ImageGenBlock invocation={invocation} />;
         case "web_search":

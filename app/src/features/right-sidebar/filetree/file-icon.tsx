@@ -28,7 +28,8 @@ import {
     FileCsvIcon,
     FileDocIcon,
     FileXlsIcon,
-    FilePptIcon
+    FilePptIcon,
+    NotepadIcon
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 
@@ -159,6 +160,8 @@ const NAME_MAP: Record<string, Icon> = {
 
 export function getFileIcon(fileName: string): Icon {
     const lower = fileName.toLowerCase();
+
+    if (lower.startsWith("__plan__")) return NotepadIcon;
 
     if (NAME_MAP[lower]) return NAME_MAP[lower];
     if (lower.startsWith(".env")) return FileLockIcon;

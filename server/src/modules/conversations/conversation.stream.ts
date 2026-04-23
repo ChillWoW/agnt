@@ -34,7 +34,8 @@ import {
     abortPermissions,
     buildConversationTools,
     subscribeToPermissions,
-    type PermissionMode
+    type PermissionMode,
+    type AgenticMode
 } from "./permissions";
 import { AGNT_TOOL_DEF_BY_NAME } from "./tools";
 import type { ToolModelOutput } from "./tools/types";
@@ -52,6 +53,7 @@ import {
 import { compactConversation } from "./compact.service";
 import { COMPACT_THRESHOLD, computeContextSummary } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
+import { subscribeToPlanUpdates } from "./plans";
 
 import {
     DEFAULT_CONVERSATION_TITLE,
@@ -631,6 +633,10 @@ function isPermissionMode(value: unknown): value is PermissionMode {
     return value === "ask" || value === "bypass";
 }
 
+function isAgenticMode(value: unknown): value is AgenticMode {
+    return value === "agent" || value === "plan";
+}
+
 function resolveConversationModelSettings(
     workspaceId: string,
     conversationId: string
@@ -639,6 +645,7 @@ function resolveConversationModelSettings(
     reasoningEffort: ReasoningEffort | null;
     fastMode: boolean;
     permissionMode: PermissionMode;
+    agenticMode: AgenticMode;
 } {
     const state = getEffectiveConversationState(
         workspaceId,
@@ -673,11 +680,16 @@ function resolveConversationModelSettings(
         ? state.permissionMode
         : "ask";
 
+    const agenticMode = isAgenticMode(state.agenticMode)
+        ? state.agenticMode
+        : "agent";
+
     return {
         modelName,
         reasoningEffort,
         fastMode: state.fastMode === true && model?.supportsFastMode === true,
-        permissionMode
+        permissionMode,
+        agenticMode
     };
 }
 
@@ -705,7 +717,7 @@ async function runStreamTextIntoController({
     abortSignal?: AbortSignal;
 }): Promise<void> {
     const db = getWorkspaceDb(workspaceId);
-    const { modelName, reasoningEffort, fastMode, permissionMode } =
+    const { modelName, reasoningEffort, fastMode, permissionMode, agenticMode } =
         resolveConversationModelSettings(workspaceId, conversationId);
 
     let fullText = "";
@@ -869,9 +881,29 @@ async function runStreamTextIntoController({
         }
     );
 
+    const unsubscribePlans = subscribeToPlanUpdates(
+        conversationId,
+        (event) => {
+            controller.enqueue(
+                sseEvent("plan-updated", {
+                    conversation_id: event.conversationId,
+                    plan: {
+                        id: event.plan.id,
+                        title: event.plan.title,
+                        content: event.plan.content,
+                        todos: event.plan.todos,
+                        filePath: event.plan.file_path,
+                        createdAt: event.plan.created_at,
+                        updatedAt: event.plan.updated_at
+                    }
+                })
+            );
+        }
+    );
+
     try {
         const codex = await createCodexClient();
-        const prompt = buildConversationPrompt(workspaceId, conversationId);
+        const prompt = buildConversationPrompt(workspaceId, conversationId, agenticMode);
         const skills = prompt.skills.skills;
 
         logger.log(
@@ -884,7 +916,9 @@ async function runStreamTextIntoController({
             "fastMode:",
             fastMode,
             "permissionMode:",
-            permissionMode
+            permissionMode,
+            "agenticMode:",
+            agenticMode
         );
 
         // Caching strategy mirrors the real Codex CLI
@@ -929,10 +963,6 @@ async function runStreamTextIntoController({
             getSkills: () => skills,
             getAssistantMessageId: () => assistantMsgId,
             getMode: () => {
-                // Re-resolve permission mode from effective conversation
-                // state on every tool invocation so toggling the selector
-                // takes effect immediately (even mid-stream). Falls back
-                // to the mode captured at stream start on any error.
                 try {
                     return resolveConversationModelSettings(
                         workspaceId,
@@ -944,6 +974,20 @@ async function runStreamTextIntoController({
                         error
                     );
                     return permissionMode;
+                }
+            },
+            getAgenticMode: () => {
+                try {
+                    return resolveConversationModelSettings(
+                        workspaceId,
+                        conversationId
+                    ).agenticMode;
+                } catch (error) {
+                    logger.error(
+                        "[stream] failed to resolve agentic mode, falling back",
+                        error
+                    );
+                    return agenticMode;
                 }
             }
         });
@@ -1381,6 +1425,7 @@ async function runStreamTextIntoController({
         unsubscribeTodos();
         unsubscribeShellProgress();
         unsubscribeShellLifecycle();
+        unsubscribePlans();
     }
 }
 

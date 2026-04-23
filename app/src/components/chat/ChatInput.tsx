@@ -21,6 +21,7 @@ import { ContextMeter } from "./ContextMeter";
 import { ModelSelector } from "./ModelSelector";
 import { PermissionCard } from "./PermissionCard";
 import { PermissionModeSelector } from "./PermissionModeSelector";
+import { AgenticModeSelector } from "./AgenticModeSelector";
 import { QuestionCard } from "./QuestionCard";
 import { TodosCard } from "./TodosCard";
 import {
@@ -336,10 +337,16 @@ export function ChatInput({
             </div>
 
             <div className="flex items-center justify-between px-1">
-                <PermissionModeSelector
-                    workspaceId={workspaceId}
-                    conversationId={conversationId}
-                />
+                <div className="flex items-center gap-1">
+                    <AgenticModeSelector
+                        workspaceId={workspaceId}
+                        conversationId={conversationId}
+                    />
+                    <PermissionModeSelector
+                        workspaceId={workspaceId}
+                        conversationId={conversationId}
+                    />
+                </div>
                 <ContextMeter
                     workspaceId={workspaceId}
                     conversationId={conversationId}

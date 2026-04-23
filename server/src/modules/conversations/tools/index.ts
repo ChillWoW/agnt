@@ -12,6 +12,7 @@ import { strReplaceToolDef, createStrReplaceToolDef } from "./str-replace";
 import { applyPatchToolDef, createApplyPatchToolDef } from "./apply-patch";
 import { shellToolDef, createShellToolDef } from "./shell";
 import { awaitShellToolDef, createAwaitShellToolDef } from "./await-shell";
+import { writePlanToolDef, createWritePlanToolDef } from "./write-plan";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -28,7 +29,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     strReplaceToolDef as ToolDefinition,
     applyPatchToolDef as ToolDefinition,
     shellToolDef as ToolDefinition,
-    awaitShellToolDef as ToolDefinition
+    awaitShellToolDef as ToolDefinition,
+    writePlanToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -43,7 +45,7 @@ export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
  * caching. Use sparingly — this is for tools that ARE themselves the user
  * interaction (e.g. `question`), not for tools that happen to be safe.
  */
-export const UNGATED_TOOL_NAMES = new Set<string>(["question", "todo_write"]);
+export const UNGATED_TOOL_NAMES = new Set<string>(["question", "todo_write", "write_plan"]);
 
 export function isUngatedTool(toolName: string): boolean {
     return UNGATED_TOOL_NAMES.has(toolName);
@@ -79,6 +81,8 @@ export {
     shellToolDef,
     createShellToolDef,
     awaitShellToolDef,
-    createAwaitShellToolDef
+    createAwaitShellToolDef,
+    writePlanToolDef,
+    createWritePlanToolDef
 };
 export type { ToolDefinition };

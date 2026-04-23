@@ -12,6 +12,7 @@ import {
     XIcon
 } from "@phosphor-icons/react";
 import { GitTab, BrowserTab, TerminalsTab, FiletreeTab } from "./tabs";
+import { PlanPanel, PLAN_FILE_PREFIX } from "@/features/plans/PlanPanel";
 import { KeybindTooltip } from "@/components/ui/Tooltip";
 import type { HotkeyCombo } from "@/features/hotkeys/types";
 import {
@@ -248,6 +249,8 @@ export function RightSidebar() {
                                         <FiletreeTab />
                                     )}
                                 </>
+                            ) : active.path.startsWith(PLAN_FILE_PREFIX) ? (
+                                <PlanPanel />
                             ) : (
                                 <FileViewer path={active.path} />
                             )}

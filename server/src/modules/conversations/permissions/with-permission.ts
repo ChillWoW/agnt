@@ -19,6 +19,7 @@ import {
     createTodoWriteToolDef,
     createUseSkillToolDef,
     createWriteToolDef,
+    createWritePlanToolDef,
     isUngatedTool,
     type ToolDefinition
 } from "../tools";
@@ -31,11 +32,27 @@ import {
 } from "./gate";
 
 export type PermissionMode = "ask" | "bypass";
+export type AgenticMode = "agent" | "plan";
+
+const PLAN_MODE_TOOLS = new Set<string>([
+    "read_file",
+    "glob",
+    "grep",
+    "use_skill",
+    "question",
+    "todo_write",
+    "shell",
+    "await_shell",
+    "write_plan",
+    "web_search",
+    "web_fetch"
+]);
 
 export interface ConversationPermissionContext {
     conversationId: string;
     workspaceId: string;
     getMode: () => PermissionMode;
+    getAgenticMode?: () => AgenticMode;
     workspacePath?: string;
     getSkills?: () => Skill[];
     getAssistantMessageId?: () => string;
@@ -114,7 +131,17 @@ export function buildConversationTools(
 ): Record<string, Tool> {
     const tools: Record<string, Tool> = {};
 
-    const defs = AGNT_TOOL_DEFS.map((rawDef) => {
+    const agenticMode = ctx.getAgenticMode?.() ?? "agent";
+
+    const filteredDefs = AGNT_TOOL_DEFS.filter((def) => {
+        if (agenticMode === "plan") {
+            return PLAN_MODE_TOOLS.has(def.name);
+        }
+        // Agent mode: everything except write_plan
+        return def.name !== "write_plan";
+    });
+
+    const defs = filteredDefs.map((rawDef) => {
         switch (rawDef.name) {
             case "read_file":
                 return createReadFileToolDef(
@@ -168,6 +195,11 @@ export function buildConversationTools(
                     workspaceId: ctx.workspaceId,
                     getAssistantMessageId:
                         ctx.getAssistantMessageId ?? (() => "")
+                }) as ToolDefinition;
+            case "write_plan":
+                return createWritePlanToolDef({
+                    workspaceId: ctx.workspaceId,
+                    conversationId: ctx.conversationId
                 }) as ToolDefinition;
             default:
                 return rawDef;

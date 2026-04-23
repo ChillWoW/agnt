@@ -14,6 +14,10 @@ import { useQuestionStore } from "@/features/questions";
 import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
 import { useTodoStore } from "@/features/todos";
 import type { Todo } from "@/features/todos";
+import { usePlanStore, PLAN_FILE_PREFIX } from "@/features/plans";
+import type { Plan } from "@/features/plans";
+import { useRightSidebarStore } from "@/features/right-sidebar/right-sidebar-store";
+import { useOpenedFilesStore } from "@/features/right-sidebar/filetree";
 import type { Attachment } from "@/features/attachments";
 import type {
     CompactedSseEvent,
@@ -684,6 +688,38 @@ async function runStream(
                     ? (data.todos as Todo[])
                     : [];
                 useTodoStore.getState().setTodos(conversationId, todos);
+                break;
+            }
+
+            case "plan-updated": {
+                const planData = data.plan as {
+                    id: string;
+                    title: string | null;
+                    content: string;
+                    todos: { id: string; content: string }[];
+                    filePath: string;
+                    createdAt: string;
+                    updatedAt: string;
+                } | undefined;
+                if (planData) {
+                    const plan: Plan = {
+                        id: planData.id,
+                        conversationId,
+                        title: planData.title,
+                        content: planData.content,
+                        todos: planData.todos,
+                        filePath: planData.filePath,
+                        createdAt: planData.createdAt,
+                        updatedAt: planData.updatedAt
+                    };
+                    usePlanStore.getState().setPlan(conversationId, plan);
+                    useRightSidebarStore.getState().setCollapsed(false);
+                    const planPath = `${PLAN_FILE_PREFIX}${conversationId}`;
+                    const planName = planData.title ?? "Plan";
+                    useOpenedFilesStore
+                        .getState()
+                        .openVirtualFile(planPath, planName);
+                }
                 break;
             }
 
