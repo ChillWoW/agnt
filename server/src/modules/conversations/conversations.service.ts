@@ -3,6 +3,10 @@ import {
     linkAttachmentsToMessage,
     listAttachmentsForMessages
 } from "../attachments/attachments.service";
+import {
+    recordStatSession,
+    recordStatUserMessage
+} from "../stats/stats.recorder";
 import { DEFAULT_CONVERSATION_TITLE } from "./conversation.constants";
 import type {
     Conversation,
@@ -260,6 +264,17 @@ export function createConversation(
 
     tx();
 
+    // Record the lifetime session + first user message in the append-only
+    // stats ledger (~/.agnt/stats.db). These rows survive conversation
+    // deletion so the dashboard keeps counting them forever.
+    recordStatSession({ workspaceId, conversationId, createdAt: now });
+    recordStatUserMessage({
+        workspaceId,
+        conversationId,
+        messageId,
+        createdAt: now
+    });
+
     const attachments =
         attachmentIds.length > 0
             ? linkAttachmentsToMessage(
@@ -379,6 +394,17 @@ export function addMessage(
     });
 
     tx();
+
+    // Only user messages count toward the stats ledger — assistant rows are
+    // recorded from the stream's onFinish (so we have tokens + model).
+    if (role === "user") {
+        recordStatUserMessage({
+            workspaceId,
+            conversationId,
+            messageId,
+            createdAt: now
+        });
+    }
 
     return {
         id: messageId,

@@ -1,4 +1,4 @@
-import { getWorkspaceDb } from "../../lib/db";
+import { getStatsDb } from "../../lib/stats-db";
 import { listWorkspaces } from "../workspaces/workspaces.service";
 import { getModelById } from "../models/models.service";
 
@@ -130,6 +130,14 @@ function computeStreaks(
     return { current, longest };
 }
 
+/**
+ * Aggregate lifetime stats from the append-only ledger at ~/.agnt/stats.db.
+ *
+ * Critically this NEVER touches per-workspace conversation DBs. Rows in
+ * stat_sessions / stat_messages are inserted at record time (createConversation
+ * / user insert / assistant onFinish) and are never deleted — even when the
+ * user deletes the originating conversation — so totals only ever grow.
+ */
 export function getGlobalStats(tzOffsetMinutes: number): GlobalStats {
     const modifier = tzModifier(tzOffsetMinutes);
     const today = todayInClientTz(tzOffsetMinutes);
@@ -158,99 +166,90 @@ export function getGlobalStats(tzOffsetMinutes: number): GlobalStats {
         activeDays: 0
     };
 
-    const registry = listWorkspaces();
+    const db = getStatsDb();
 
-    for (const ws of registry.workspaces) {
-        let db;
-        try {
-            db = getWorkspaceDb(ws.id);
-        } catch {
-            continue;
+    try {
+        const sessionsRow = db
+            .query("SELECT COUNT(*) AS c FROM stat_sessions")
+            .get() as CountRow | null;
+        totals.sessions = sessionsRow?.c ?? 0;
+
+        const totalsRow = db
+            .query(
+                `SELECT
+                    SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS user_messages,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM stat_messages`
+            )
+            .get() as TotalRow | null;
+
+        if (totalsRow) {
+            totals.userMessages = totalsRow.user_messages ?? 0;
+            totals.inputTokens = totalsRow.input_tokens ?? 0;
+            totals.outputTokens = totalsRow.output_tokens ?? 0;
+            totals.reasoningTokens = totalsRow.reasoning_tokens ?? 0;
+            totals.totalTokens = totalsRow.total_tokens ?? 0;
         }
 
-        try {
-            const sessionsRow = db
-                .query("SELECT COUNT(*) AS c FROM conversations")
-                .get() as CountRow | null;
-            totals.sessions += sessionsRow?.c ?? 0;
-
-            const totalsRow = db
-                .query(
-                    `SELECT
-                        SUM(CASE WHEN role = 'user' AND compacted = 0 THEN 1 ELSE 0 END) AS user_messages,
-                        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                        COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-                        COALESCE(SUM(total_tokens), 0) AS total_tokens
-                    FROM messages`
-                )
-                .get() as TotalRow | null;
-
-            if (totalsRow) {
-                totals.userMessages += totalsRow.user_messages ?? 0;
-                totals.inputTokens += totalsRow.input_tokens ?? 0;
-                totals.outputTokens += totalsRow.output_tokens ?? 0;
-                totals.reasoningTokens += totalsRow.reasoning_tokens ?? 0;
-                totals.totalTokens += totalsRow.total_tokens ?? 0;
+        const hourRows = db
+            .query(
+                `SELECT CAST(strftime('%H', created_at, ?) AS INTEGER) AS h, COUNT(*) AS c
+                 FROM stat_messages
+                 WHERE role = 'user'
+                 GROUP BY h`
+            )
+            .all(modifier) as HourRow[];
+        for (const row of hourRows) {
+            if (row.h >= 0 && row.h < 24) {
+                hourTotals[row.h] = (hourTotals[row.h] ?? 0) + row.c;
             }
-
-            const hourRows = db
-                .query(
-                    `SELECT CAST(strftime('%H', created_at, ?) AS INTEGER) AS h, COUNT(*) AS c
-                     FROM messages
-                     WHERE role = 'user'
-                     GROUP BY h`
-                )
-                .all(modifier) as HourRow[];
-            for (const row of hourRows) {
-                if (row.h >= 0 && row.h < 24) {
-                    hourTotals[row.h] = (hourTotals[row.h] ?? 0) + row.c;
-                }
-            }
-
-            const heatmapRows = db
-                .query(
-                    `SELECT date(created_at, ?) AS d, COUNT(*) AS c
-                     FROM messages
-                     WHERE role = 'user' AND created_at >= ?
-                     GROUP BY d`
-                )
-                .all(modifier, heatmapStartIso) as DayRow[];
-            for (const row of heatmapRows) {
-                heatmapCounts.set(
-                    row.d,
-                    (heatmapCounts.get(row.d) ?? 0) + row.c
-                );
-            }
-
-            const distinctDayRows = db
-                .query(
-                    `SELECT DISTINCT date(created_at, ?) AS d
-                     FROM messages
-                     WHERE role = 'user'`
-                )
-                .all(modifier) as DistinctDayRow[];
-            for (const row of distinctDayRows) {
-                if (row.d) daysSet.add(row.d);
-            }
-
-            const modelRows = db
-                .query(
-                    `SELECT model_id, COUNT(*) AS c
-                     FROM messages
-                     WHERE role = 'assistant' AND model_id IS NOT NULL AND model_id != ''
-                     GROUP BY model_id`
-                )
-                .all() as ModelRow[];
-            for (const row of modelRows) {
-                modelCounts.set(
-                    row.model_id,
-                    (modelCounts.get(row.model_id) ?? 0) + row.c
-                );
-            }
-        } catch {
-            // ignore a single workspace failure and continue aggregating.
         }
+
+        const heatmapRows = db
+            .query(
+                `SELECT date(created_at, ?) AS d, COUNT(*) AS c
+                 FROM stat_messages
+                 WHERE role = 'user' AND created_at >= ?
+                 GROUP BY d`
+            )
+            .all(modifier, heatmapStartIso) as DayRow[];
+        for (const row of heatmapRows) {
+            heatmapCounts.set(
+                row.d,
+                (heatmapCounts.get(row.d) ?? 0) + row.c
+            );
+        }
+
+        const distinctDayRows = db
+            .query(
+                `SELECT DISTINCT date(created_at, ?) AS d
+                 FROM stat_messages
+                 WHERE role = 'user'`
+            )
+            .all(modifier) as DistinctDayRow[];
+        for (const row of distinctDayRows) {
+            if (row.d) daysSet.add(row.d);
+        }
+
+        const modelRows = db
+            .query(
+                `SELECT model_id, COUNT(*) AS c
+                 FROM stat_messages
+                 WHERE role = 'assistant' AND model_id IS NOT NULL AND model_id != ''
+                 GROUP BY model_id`
+            )
+            .all() as ModelRow[];
+        for (const row of modelRows) {
+            modelCounts.set(
+                row.model_id,
+                (modelCounts.get(row.model_id) ?? 0) + row.c
+            );
+        }
+    } catch {
+        // Degrade silently — a corrupted stats DB should not take down the UI.
     }
 
     totals.activeDays = daysSet.size;
@@ -298,6 +297,6 @@ export function getGlobalStats(tzOffsetMinutes: number): GlobalStats {
             endDate: today,
             days
         },
-        workspaceCount: registry.workspaces.length
+        workspaceCount: listWorkspaces().workspaces.length
     };
 }

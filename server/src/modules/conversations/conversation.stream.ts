@@ -60,6 +60,10 @@ import {
     subscribeToSubagentLifecycle
 } from "./subagents";
 import { wrapControllerWithBroadcast } from "./conversation-events";
+import {
+    recordStatAssistantMessage,
+    recordStatUserMessage
+} from "../stats/stats.recorder";
 
 import {
     DEFAULT_CONVERSATION_TITLE,
@@ -778,6 +782,7 @@ async function runStreamTextIntoController({
     workspaceId,
     conversationId,
     assistantMsgId,
+    assistantCreatedAt,
     modelMessages,
     abortSignal,
     subagentOverrides
@@ -786,6 +791,7 @@ async function runStreamTextIntoController({
     workspaceId: string;
     conversationId: string;
     assistantMsgId: string;
+    assistantCreatedAt: string;
     modelMessages: ModelMessage[];
     abortSignal?: AbortSignal;
     subagentOverrides?: SubagentOverrides;
@@ -1193,6 +1199,22 @@ async function runStreamTextIntoController({
                     legacy.endedAt,
                     assistantMsgId
                 );
+
+                // Record the assistant turn in the append-only stats ledger.
+                // This is the authoritative point — `onFinish` fires once the
+                // stream has final usage data + the resolved model is known,
+                // and the row survives any later conversation deletion.
+                recordStatAssistantMessage({
+                    workspaceId,
+                    conversationId,
+                    messageId: assistantMsgId,
+                    modelId: modelName,
+                    inputTokens: input,
+                    outputTokens: output,
+                    reasoningTokens: reasoning,
+                    totalTokens: total,
+                    createdAt: assistantCreatedAt
+                });
             },
             onAbort: () => {
                 logger.log("[stream] Generation aborted", {
@@ -1690,6 +1712,7 @@ export async function streamReplyToLastMessage(
             workspaceId,
             conversationId,
             assistantMsgId,
+            assistantCreatedAt,
             modelMessages,
             abortSignal
         });
@@ -1813,6 +1836,15 @@ export async function streamConversationReply(
         conversationId
     );
 
+    // Lifetime user-message count lives in the append-only stats ledger so
+    // it is not affected by later conversation deletion.
+    recordStatUserMessage({
+        workspaceId,
+        conversationId,
+        messageId: userMsgId,
+        createdAt: now
+    });
+
     const linkedAttachments =
         attachmentIds.length > 0
             ? linkAttachmentsToMessage(
@@ -1895,6 +1927,7 @@ export async function streamConversationReply(
             workspaceId,
             conversationId,
             assistantMsgId,
+            assistantCreatedAt,
             modelMessages,
             abortSignal
         });
@@ -1985,6 +2018,7 @@ export async function runSubagentStream(params: {
             workspaceId,
             conversationId,
             assistantMsgId,
+            assistantCreatedAt,
             modelMessages,
             abortSignal,
             subagentOverrides: {
