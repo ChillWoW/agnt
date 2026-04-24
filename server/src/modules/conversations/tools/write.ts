@@ -2,8 +2,13 @@ import { z } from "zod";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { logger } from "../../../lib/logger";
-import type { ToolDefinition } from "./types";
+import type { ToolDefinition, ToolModelOutput } from "./types";
 import { resolveWorkspacePath, toPosix } from "./workspace-path";
+import type { DiagnosticsResult } from "../../lsp/lsp.types";
+import {
+    runPostEditDiagnostics,
+    summarizeDiagnosticsForModel
+} from "./post-edit-diagnostics";
 
 // ─── Limits ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +44,14 @@ export interface WriteOutput {
     created: boolean;
     previousSize: number | null;
     createdDirectories: string[];
+    /**
+     * Optional diagnostics collected from the language server after this edit.
+     * Omitted when diagnostics are disabled, the file isn't a TS/JS file, or
+     * the LSP failed to start. Non-empty `results` may still contain a
+     * per-file entry with an empty `diagnostics` array, which means "the LSP
+     * ran and found nothing" — a useful clean-bill-of-health signal.
+     */
+    diagnostics?: DiagnosticsResult;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -193,16 +206,49 @@ function makeExecuteWrite(workspacePath?: string) {
             createdDirectories
         };
 
+        const diagnostics = await runPostEditDiagnostics(workspacePath, [absolute]);
+        if (diagnostics) {
+            output.diagnostics = diagnostics;
+        }
+
         logger.log("[tool:write]", {
             path: absolute,
             bytesWritten,
             created: output.created,
             previousSize: output.previousSize,
-            createdDirectories: createdDirectories.length
+            createdDirectories: createdDirectories.length,
+            diagnostics: diagnostics
+                ? {
+                      errors: diagnostics.summary.errors,
+                      warnings: diagnostics.summary.warnings
+                  }
+                : undefined
         });
 
         return output;
     };
+}
+
+// ─── Model output (narrow non-text fields, append LSP summary) ───────────────
+
+function toWriteModelOutput({
+    output
+}: {
+    input: WriteInput;
+    output: WriteOutput;
+}): ToolModelOutput {
+    const lines: string[] = [];
+    lines.push(
+        `${output.created ? "Created" : "Overwrote"} ${output.relativePath} (${output.bytesWritten} bytes, ${output.lineCount} lines).`
+    );
+    if (output.createdDirectories.length > 0) {
+        lines.push(
+            `Created directories: ${output.createdDirectories.join(", ")}`
+        );
+    }
+    const lspSummary = summarizeDiagnosticsForModel(output.diagnostics);
+    if (lspSummary) lines.push(lspSummary);
+    return { type: "text", value: lines.join("\n") };
 }
 
 // ─── Description ──────────────────────────────────────────────────────────────
@@ -224,7 +270,8 @@ export function createWriteToolDef(
         name: "write",
         description: TOOL_DESCRIPTION,
         inputSchema: writeInputSchema,
-        execute: makeExecuteWrite(workspacePath)
+        execute: makeExecuteWrite(workspacePath),
+        toModelOutput: toWriteModelOutput
     };
 }
 

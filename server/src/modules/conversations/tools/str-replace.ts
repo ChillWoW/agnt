@@ -1,8 +1,13 @@
 import { z } from "zod";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { logger } from "../../../lib/logger";
-import type { ToolDefinition } from "./types";
+import type { ToolDefinition, ToolModelOutput } from "./types";
 import { resolveWorkspacePath, toPosix } from "./workspace-path";
+import type { DiagnosticsResult } from "../../lsp/lsp.types";
+import {
+    runPostEditDiagnostics,
+    summarizeDiagnosticsForModel
+} from "./post-edit-diagnostics";
 
 // ─── Limits ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +57,8 @@ export interface StrReplaceOutput {
     bytesAfter: number;
     /** True when `old_string` was normalized to match the file's CRLF endings. */
     crlfNormalized: boolean;
+    /** See `WriteOutput.diagnostics` for semantics. */
+    diagnostics?: DiagnosticsResult;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -205,16 +212,24 @@ function makeExecuteStrReplace(workspacePath?: string) {
 
         const bytesAfter = Buffer.byteLength(after, "utf8");
 
+        const diagnostics = await runPostEditDiagnostics(workspacePath, [absolute]);
+
         logger.log("[tool:str_replace]", {
             path: absolute,
             replacements,
             replaceAll,
             bytesBefore,
             bytesAfter,
-            crlfNormalized
+            crlfNormalized,
+            diagnostics: diagnostics
+                ? {
+                      errors: diagnostics.summary.errors,
+                      warnings: diagnostics.summary.warnings
+                  }
+                : undefined
         });
 
-        return {
+        const output: StrReplaceOutput = {
             ok: true,
             path: absolute,
             relativePath: toPosix(relPath),
@@ -224,7 +239,27 @@ function makeExecuteStrReplace(workspacePath?: string) {
             bytesAfter,
             crlfNormalized
         };
+        if (diagnostics) output.diagnostics = diagnostics;
+        return output;
     };
+}
+
+// ─── Model output ─────────────────────────────────────────────────────────────
+
+function toStrReplaceModelOutput({
+    output
+}: {
+    input: StrReplaceInput;
+    output: StrReplaceOutput;
+}): ToolModelOutput {
+    const lines: string[] = [];
+    const plural = output.replacements === 1 ? "" : "s";
+    lines.push(
+        `Edited ${output.relativePath} (${output.replacements} replacement${plural}, ${output.bytesBefore} → ${output.bytesAfter} bytes).`
+    );
+    const lspSummary = summarizeDiagnosticsForModel(output.diagnostics);
+    if (lspSummary) lines.push(lspSummary);
+    return { type: "text", value: lines.join("\n") };
 }
 
 // ─── Description ──────────────────────────────────────────────────────────────
@@ -245,7 +280,8 @@ export function createStrReplaceToolDef(
         name: "str_replace",
         description: TOOL_DESCRIPTION,
         inputSchema: strReplaceInputSchema,
-        execute: makeExecuteStrReplace(workspacePath)
+        execute: makeExecuteStrReplace(workspacePath),
+        toModelOutput: toStrReplaceModelOutput
     };
 }
 

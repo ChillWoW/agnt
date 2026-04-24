@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import {
     ArrowSquareOutIcon,
     BookOpenTextIcon,
+    BugIcon,
     CaretRightIcon,
     ChatTeardropDotsIcon,
     DownloadSimpleIcon,
@@ -34,6 +35,10 @@ import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations/conversation-store";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
 import { PierreDiff } from "@/components/chat/PierreDiff";
+import {
+    DiagnosticsInline,
+    parseDiagnosticsResult
+} from "@/components/chat/DiagnosticsInline";
 
 // ─── Universal primitive ──────────────────────────────────────────────────────
 
@@ -1627,11 +1632,14 @@ function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
                     {invocation.error}
                 </p>
             ) : hasPreview ? (
-                <PierreDiff
-                    path={diffPath}
-                    oldContents=""
-                    newContents={previewSource}
-                />
+                <>
+                    <PierreDiff
+                        path={diffPath}
+                        oldContents=""
+                        newContents={previewSource}
+                    />
+                    <PostEditDiagnostics output={output} />
+                </>
             ) : streaming ? (
                 <p className="px-1 py-1 text-[11px] italic text-dark-400">
                     Streaming file contents…
@@ -1639,6 +1647,15 @@ function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
             ) : null}
         </ToolBlock>
     );
+}
+
+function PostEditDiagnostics({ output }: { output: unknown }) {
+    const parsed = (() => {
+        if (!isRecord(output)) return undefined;
+        return parseDiagnosticsResult(output.diagnostics);
+    })();
+    if (!parsed) return null;
+    return <DiagnosticsInline result={parsed} />;
 }
 
 // ─── Str replace ──────────────────────────────────────────────────────────────
@@ -1765,11 +1782,14 @@ function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
                     {invocation.error}
                 </p>
             ) : hasAnyText ? (
-                <PierreDiff
-                    path={diffPath}
-                    oldContents={oldText}
-                    newContents={newText}
-                />
+                <>
+                    <PierreDiff
+                        path={diffPath}
+                        oldContents={oldText}
+                        newContents={newText}
+                    />
+                    <PostEditDiagnostics output={output} />
+                </>
             ) : streaming ? (
                 <p className="px-1 py-1 text-[11px] italic text-dark-400">
                     Streaming edit…
@@ -2180,6 +2200,114 @@ function ApplyPatchBlock({ invocation }: { invocation: ToolInvocation }) {
                     No changes applied.
                 </p>
             ) : null}
+            {!invocation.error && serverChanges.length > 0 && (
+                <PostEditDiagnostics output={output} />
+            )}
+        </ToolBlock>
+    );
+}
+
+// ─── Diagnostics tool ─────────────────────────────────────────────────────────
+
+interface DiagnosticsOutputShape {
+    ok?: boolean;
+    scope?: "file" | "workspace";
+    enabled?: boolean;
+    results?: unknown;
+    summary?: {
+        errors?: number;
+        warnings?: number;
+        infos?: number;
+        hints?: number;
+        filesChecked?: number;
+    };
+}
+
+interface DiagnosticsInputShape {
+    path?: string;
+    scope?: "file" | "workspace";
+    minSeverity?: string;
+}
+
+function formatDiagnosticsDetail(
+    input: DiagnosticsInputShape | undefined,
+    output: DiagnosticsOutputShape | undefined
+): string | undefined {
+    const scope: "file" | "workspace" =
+        output?.scope ?? input?.scope ?? (input?.path ? "file" : "workspace");
+    const summary = output?.summary;
+    if (!summary) {
+        return scope === "workspace" ? "Workspace" : input?.path;
+    }
+    const errors = summary.errors ?? 0;
+    const warnings = summary.warnings ?? 0;
+    const filesChecked = summary.filesChecked ?? 0;
+
+    const scopeLabel =
+        scope === "workspace"
+            ? "Workspace"
+            : input?.path
+              ? input.path
+              : "File";
+
+    const issues: string[] = [];
+    if (errors > 0) issues.push(`${errors}E`);
+    if (warnings > 0) issues.push(`${warnings}W`);
+    const tail =
+        issues.length > 0
+            ? ` · ${issues.join(" ")}`
+            : filesChecked > 0
+              ? " · clean"
+              : "";
+    return `${scopeLabel}${tail}`;
+}
+
+function DiagnosticsBlock({ invocation }: { invocation: ToolInvocation }) {
+    const input = isRecord(invocation.input)
+        ? (invocation.input as DiagnosticsInputShape)
+        : undefined;
+    const output = isRecord(invocation.output)
+        ? (invocation.output as DiagnosticsOutputShape)
+        : undefined;
+
+    const parsed = output ? parseDiagnosticsResult(output) : undefined;
+    const enabled = output?.enabled !== false;
+
+    const detail = formatDiagnosticsDetail(input, output);
+
+    return (
+        <ToolBlock
+            icon={<BugIcon className="size-3.5" weight="bold" />}
+            pendingLabel="Checking diagnostics"
+            successLabel={
+                parsed && parsed.summary.errors + parsed.summary.warnings > 0
+                    ? "Diagnostics found issues"
+                    : "Diagnostics"
+            }
+            errorLabel="Diagnostics failed"
+            deniedLabel="Diagnostics denied"
+            detail={detail}
+            error={invocation.error}
+            status={invocation.status}
+            autoOpen
+            autoClose
+            bareChildren
+        >
+            {invocation.error ? (
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-red-200">
+                    {invocation.error}
+                </p>
+            ) : !enabled ? (
+                <p className="px-1 py-1 text-[11px] italic text-dark-300">
+                    Diagnostics are disabled in settings.
+                </p>
+            ) : parsed ? (
+                <DiagnosticsInline result={parsed} showCleanState />
+            ) : (
+                <p className="px-1 py-1 text-[11px] italic text-dark-400">
+                    Waiting for language server…
+                </p>
+            )}
         </ToolBlock>
     );
 }
@@ -2868,6 +2996,8 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
             return <AwaitShellBlock invocation={invocation} />;
         case "task":
             return <TaskBlock invocation={invocation} />;
+        case "diagnostics":
+            return <DiagnosticsBlock invocation={invocation} />;
         default:
             return <GenericToolBlock invocation={invocation} />;
     }

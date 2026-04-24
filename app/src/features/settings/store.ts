@@ -23,6 +23,10 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
         notifications: {
             ...DEFAULT_SETTINGS.notifications,
             ...raw.notifications
+        },
+        diagnostics: {
+            ...DEFAULT_SETTINGS.diagnostics,
+            ...raw.diagnostics
         }
     };
 }

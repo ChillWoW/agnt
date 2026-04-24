@@ -2,6 +2,7 @@ import { Command } from "commander";
 import app from "./app";
 import { markServerInitializing, markServerReady } from "./readiness";
 import { logger } from "./lib/logger";
+import { disposeAll as disposeAllLspProviders } from "./modules/lsp/lsp.service";
 
 const allowedOrigins = new Set([
     "tauri://localhost",
@@ -120,13 +121,25 @@ program
             );
         };
 
-        const handleSignal = (signal: string) => {
+        const handleSignal = async (signal: string) => {
             logShutdown(signal);
+            // Tear down long-lived children (language servers) before
+            // exiting so we don't leave zombie processes around.
+            try {
+                await Promise.race([
+                    disposeAllLspProviders(),
+                    new Promise<void>((resolve) =>
+                        setTimeout(() => resolve(undefined), 2500)
+                    )
+                ]);
+            } catch (error) {
+                logger.error("[shutdown] LSP dispose failed", error);
+            }
             process.exit(0);
         };
 
-        process.on("SIGINT", () => handleSignal("SIGINT"));
-        process.on("SIGTERM", () => handleSignal("SIGTERM"));
+        process.on("SIGINT", () => void handleSignal("SIGINT"));
+        process.on("SIGTERM", () => void handleSignal("SIGTERM"));
         process.on("exit", () => logShutdown("process exit"));
     });
 

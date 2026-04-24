@@ -4,6 +4,11 @@ import { dirname, relative, resolve } from "node:path";
 import { logger } from "../../../lib/logger";
 import type { ToolDefinition, ToolModelOutput } from "./types";
 import { resolveWorkspacePath, toPosix } from "./workspace-path";
+import type { DiagnosticsResult } from "../../lsp/lsp.types";
+import {
+    runPostEditDiagnostics,
+    summarizeDiagnosticsForModel
+} from "./post-edit-diagnostics";
 
 // ─── Limits ───────────────────────────────────────────────────────────────────
 
@@ -77,6 +82,8 @@ export interface ApplyPatchOutput {
     ok: true;
     changes: ApplyPatchChange[];
     summary: ApplyPatchSummary;
+    /** See `WriteOutput.diagnostics` for semantics. Covers every changed file. */
+    diagnostics?: DiagnosticsResult;
 }
 
 // ─── Parser: patch text → structured actions ─────────────────────────────────
@@ -806,12 +813,37 @@ function makeExecuteApplyPatch(workspacePath?: string) {
             void targetRelative;
         }
 
+        // Collect absolute paths of files that still exist after the patch
+        // and ask the LSP for diagnostics on the set. Deleted files are
+        // dropped — there's nothing to type-check.
+        const changedTsPaths: string[] = [];
+        for (const c of changes) {
+            if (c.op === "delete") continue;
+            if (c.op === "rename" && c.newPath) {
+                changedTsPaths.push(c.newPath);
+            } else {
+                changedTsPaths.push(c.path);
+            }
+        }
+        const diagnostics = await runPostEditDiagnostics(
+            workspacePath,
+            changedTsPaths
+        );
+
         logger.log("[tool:apply_patch]", {
             files: changes.length,
-            summary
+            summary,
+            diagnostics: diagnostics
+                ? {
+                      errors: diagnostics.summary.errors,
+                      warnings: diagnostics.summary.warnings
+                  }
+                : undefined
         });
 
-        return { ok: true, changes, summary };
+        const output: ApplyPatchOutput = { ok: true, changes, summary };
+        if (diagnostics) output.diagnostics = diagnostics;
+        return output;
     };
 }
 
@@ -852,6 +884,8 @@ function toApplyPatchModelOutput({
             );
         }
     }
+    const lspSummary = summarizeDiagnosticsForModel(output.diagnostics);
+    if (lspSummary) lines.push(lspSummary);
     return { type: "text", value: lines.join("\n") };
 }
 

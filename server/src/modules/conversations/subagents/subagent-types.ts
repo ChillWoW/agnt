@@ -37,7 +37,8 @@ const GENERAL_PURPOSE_TOOLS: readonly string[] = [
     "apply_patch",
     "shell",
     "await_shell",
-    "image_gen"
+    "image_gen",
+    "diagnostics"
 ];
 
 const EXPLORE_TOOLS: readonly string[] = [
@@ -48,7 +49,8 @@ const EXPLORE_TOOLS: readonly string[] = [
     "question",
     "todo_write",
     "web_search",
-    "web_fetch"
+    "web_fetch",
+    "diagnostics"
 ];
 
 const SHELL_TOOLS: readonly string[] = [
@@ -59,7 +61,8 @@ const SHELL_TOOLS: readonly string[] = [
     "grep",
     "use_skill",
     "question",
-    "todo_write"
+    "todo_write",
+    "diagnostics"
 ];
 
 const DOCS_TOOLS: readonly string[] = [

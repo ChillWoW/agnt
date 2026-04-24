@@ -12,7 +12,8 @@ export const ALLOW_BY_DEFAULT_TOOL_NAMES = [
     "read_file",
     "glob",
     "grep",
-    "use_skill"
+    "use_skill",
+    "diagnostics"
 ] as const;
 
 export function getDefaultToolPermissionDecision(
@@ -45,10 +46,27 @@ export const DEFAULT_NOTIFICATIONS_SETTINGS: NotificationsSettings = {
     osNotificationsEnabled: true
 };
 
+export type DiagnosticsSeverity = "error" | "warning" | "info" | "hint";
+
+export type DiagnosticsSettings = {
+    enabled: boolean;
+    autoRunOnEdits: boolean;
+    minSeverity: DiagnosticsSeverity;
+    waitMs: number;
+};
+
+export const DEFAULT_DIAGNOSTICS_SETTINGS: DiagnosticsSettings = {
+    enabled: true,
+    autoRunOnEdits: true,
+    minSeverity: "warning",
+    waitMs: 1500
+};
+
 export type Settings = {
     hotkeys: HotkeySettings;
     toolPermissions: ToolPermissionsSettings;
     notifications: NotificationsSettings;
+    diagnostics: DiagnosticsSettings;
 };
 
 export type SettingsCategory = keyof Settings;
@@ -58,5 +76,6 @@ export const DEFAULT_SETTINGS: Settings = {
         bindings: {}
     },
     toolPermissions: getDefaultToolPermissionSettings(),
-    notifications: DEFAULT_NOTIFICATIONS_SETTINGS
+    notifications: DEFAULT_NOTIFICATIONS_SETTINGS,
+    diagnostics: DEFAULT_DIAGNOSTICS_SETTINGS
 };

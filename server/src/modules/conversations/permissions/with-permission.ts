@@ -8,6 +8,7 @@ import {
 import {
     AGNT_TOOL_DEFS,
     createAwaitShellToolDef,
+    createDiagnosticsToolDef,
     createGlobToolDef,
     createGrepToolDef,
     createImageGenToolDef,
@@ -49,7 +50,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
     "write_plan",
     "web_search",
     "web_fetch",
-    "task"
+    "task",
+    "diagnostics"
 ]);
 
 export interface ConversationPermissionContext {
@@ -234,6 +236,10 @@ export function buildConversationTools(
                     getParentAbortSignal:
                         ctx.getParentAbortSignal ?? (() => undefined)
                 }) as ToolDefinition;
+            case "diagnostics":
+                return createDiagnosticsToolDef(
+                    ctx.workspacePath
+                ) as ToolDefinition;
             default:
                 return rawDef;
         }
