@@ -1,3 +1,5 @@
+mod terminals;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(windows)]
@@ -7,6 +9,7 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use terminals::TerminalsState;
 
 // Store the child process to kill it when app closes
 struct SidecarState {
@@ -195,15 +198,24 @@ pub fn run() {
             initializing: Arc::new(Mutex::new(false)),
             server_info: Arc::new(Mutex::new(None)),
         })
+        .manage(TerminalsState::default())
         .invoke_handler(tauri::generate_handler![
             start_server,
             stop_server,
-            set_unread_badge
+            set_unread_badge,
+            terminals::terminal_open,
+            terminals::terminal_write,
+            terminals::terminal_resize,
+            terminals::terminal_close,
+            terminals::terminal_list_alive
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                let state = window.app_handle().state::<SidecarState>();
-                kill_existing_server(&state);
+                let app = window.app_handle();
+                let server_state = app.state::<SidecarState>();
+                kill_existing_server(&server_state);
+                let term_state = app.state::<TerminalsState>();
+                terminals::kill_all(&term_state);
             }
         })
         .run(tauri::generate_context!())
