@@ -4,7 +4,7 @@
     "scripts": {
         "build": "bun run build.ts",
         "dev": "bun run build.ts --dev",
-        "start:server": "bun run --watch src/index.ts serve --port 4727 --hostname 127.0.0.1"
+        "start:server": "bun run --watch src/index.ts serve --port 4728 --hostname 127.0.0.1"
     },
     "peerDependencies": {
         "typescript": "^5.9.3"

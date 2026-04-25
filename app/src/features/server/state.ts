@@ -1,6 +1,7 @@
 import type { ServerConnectionState, ServerListener } from "@/typings/server";
+import { SERVER_BASE_URL } from "@/lib/server-url";
 
-export const SERVER_HEALTH_URL = "http://127.0.0.1:4727/health";
+export const SERVER_HEALTH_URL = `${SERVER_BASE_URL}/health`;
 
 export const listeners = new Set<ServerListener>();
 

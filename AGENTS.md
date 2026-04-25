@@ -35,7 +35,10 @@ graph LR
 ### Tauri (`app/src-tauri/`)
 - Tauri 2
 - Plugins: shell, http, opener, dialog, notification
-- Rust side manages sidecar process lifecycle (`start_server`, `stop_server`)
+- **Two-port split** between dev and prod (intentional — dev and prod can run side by side without clashing):
+  - **Release builds** — Rust host auto-spawns the sidecar (Bun-compiled server) on `127.0.0.1:4727` during `Builder::setup` and kills it on window close.
+  - **Debug builds** (`tauri dev`, used by both `bun run prod` and `bun run local:dev`) — the sidecar is NOT auto-spawned. The developer runs `bun run start:server` from `server/` in a separate terminal on `127.0.0.1:4728` so server changes hot-reload under `bun --watch`.
+- The frontend picks the right port via `import.meta.env.DEV` in `app/src/lib/server-url.ts` (single source of truth — `SERVER_BASE_URL`). `VITE_API_URL` still overrides everything if explicitly set.
 
 ### Server (`server/`)
 - Bun runtime
@@ -65,7 +68,7 @@ From `app/`:
 
 ### Server
 From `server/`:
-- `bun run start:server` — run HTTP server on `127.0.0.1:4727` with watch
+- `bun run start:server` — run HTTP server on `127.0.0.1:4728` with watch (the dev port; prod sidecar uses 4727 — see **Tauri sidecar lifecycle**).
 - `bun run build` — compile sidecar binary to `app/src-tauri/binaries/sidecar-x86_64-pc-windows-msvc.exe`
 - `bun run dev` — watch build variant
 
@@ -83,7 +86,7 @@ From `server/`:
 - If `SERVER_PASSWORD` is set, Basic auth is required (`app:<password>`).
 
 ### Frontend connection monitor
-- `app/src/features/server/*` polls `http://127.0.0.1:4727/health` every 3s.
+- `app/src/features/server/*` polls `${SERVER_BASE_URL}/health` every 3s, where `SERVER_BASE_URL` (in `app/src/lib/server-url.ts`) resolves to `http://127.0.0.1:4728` in Vite dev (`import.meta.env.DEV`) or `http://127.0.0.1:4727` in built bundles. `VITE_API_URL` overrides both.
 - `waitForServerConnection()` is a global gate used by `app/src/lib/api.ts` before HTTP requests.
 
 ### Global settings
@@ -209,8 +212,11 @@ From `server/`:
 - Frontend (unchanged shape): `app/src/features/stats/` (types + API client + `useGlobalStats` hook) and `app/src/components/stats/` (`StatsPanel`, `StatCard`, `UsageHeatmap`). The panel is a single compact card rendered on the `/` route above the chat input with one segmented-tab row: `Overview`/`Models` (content toggle). Overview shows a 4×2 tile grid: Sessions · Messages · Total tokens · Active days / Current streak · Longest streak · Peak hour · Favorite model. Models view replaces the tiles with a ranked bar-chart list by model usage. The heatmap always renders the full 210-day window below the tiles with a blue 5-tier scale on `dark-800` cells. A playful footer compares total-token usage to familiar reference texts (Gatsby, Harry Potter, Bible, etc.). Counts user messages only.
 
 ### Tauri sidecar lifecycle
-- Rust code (`app/src-tauri/src/lib.rs`) can spawn sidecar with random free port and random password via env.
-- On window close, sidecar child process is killed and every interactive terminal PTY is killed (see **Terminals (sidebar)**).
+- `app/src-tauri/src/lib.rs` owns the sidecar child handle (`SidecarState { child: Arc<Mutex<Option<CommandChild>>> }`) and only spawns the sidecar in **release builds** (`#[cfg(not(debug_assertions))]`). Spawn happens during `Builder::setup` with fixed args `serve --port 4727 --hostname 127.0.0.1`. The frontend, also in release mode, resolves `SERVER_BASE_URL` to `http://127.0.0.1:4727` via `app/src/lib/server-url.ts` so both sides agree. No password is generated — `SERVER_PASSWORD` is only enforced if explicitly set in `server/.env`. `stdout`/`stderr` from the sidecar are forwarded to the host process via `[SIDECAR]` / `[SIDECAR ERR]` log prefixes through `tauri::async_runtime::spawn` reading the `CommandEvent` stream.
+- Spawn errors (e.g. port 4727 already in use) are logged but do NOT crash the app — the frontend's existing health monitor (`probeHealth` polling every 3s) will still find whatever else is listening on 4727.
+- In **debug builds** (`tauri dev` — both `bun run prod` and `bun run local:dev`) `spawn_sidecar` is `cfg`-compiled out entirely; no sidecar is started by Rust. The developer keeps `bun run start:server` running in a separate terminal on **port 4728** so server-side changes hot-reload via `bun --watch`. The dev frontend bundle resolves `SERVER_BASE_URL` to `http://127.0.0.1:4728` via the same `import.meta.env.DEV` switch in `server-url.ts`. The two-port split (4727 prod / 4728 dev) is intentional so a developer can run the built/installed app and a `bun run start:server` simultaneously without clashing.
+- On window close (`WindowEvent::CloseRequested`) the sidecar child process is killed via `kill_existing_server` (`child.kill()` on the stored handle) and every interactive terminal PTY is killed via `terminals::kill_all` (see **Terminals (sidebar)**).
+- There is no Tauri command to start/stop the sidecar from the frontend — the lifecycle is owned entirely by Rust and tied to the app process.
 
 ### Terminals (sidebar)
 - Real interactive PTYs live in Rust via `portable-pty` (`portable-pty = "0.9"` in `app/src-tauri/Cargo.toml`). The user-facing terminal stack is **separate from** the agent's `shell` tool runtime in `server/src/modules/conversations/shell/*` — they share no code; the server-side runtime is still a non-PTY `child_process.spawn` used only for the AI agent's `shell` tool.
@@ -253,12 +259,15 @@ From `server/`:
 
 ---
 
-## Known integration caveat (verify before changing)
-There are currently two server access patterns in code:
-1. Frontend monitor/API default to fixed `127.0.0.1:4727` (optional auth via Vite env), and
-2. Tauri Rust sidecar launcher can use a random port + generated password.
+## Server access pattern (two ports, dev vs prod)
+The frontend, server, and Rust host all agree on a single base URL — but the port differs by build mode so dev and prod can run side by side:
 
-When touching networking/startup/auth, explicitly decide which mode is canonical and keep all layers aligned.
+- **Production / built app** — `http://127.0.0.1:4727`. Rust auto-spawns the sidecar there (see **Tauri sidecar lifecycle**), and the release frontend bundle resolves `SERVER_BASE_URL` to that URL via `app/src/lib/server-url.ts` (`import.meta.env.DEV === false`).
+- **Local development** — `http://127.0.0.1:4728`. The developer runs `bun run start:server` from `server/` (script hard-codes 4728), and the Vite-served frontend resolves `SERVER_BASE_URL` to that URL (`import.meta.env.DEV === true`).
+
+`VITE_API_URL` still overrides everything if explicitly set (e.g. pointing at a remote/staging server).
+
+Auth via `Authorization: Basic app:<password>` is only enforced when `SERVER_PASSWORD` is set in `server/.env`; the sidecar is launched without it by default. If you re-introduce auth, set `SERVER_PASSWORD` in `server/.env` (the build script bakes it into the compiled sidecar) AND set `VITE_API_PASSWORD` for the frontend so both sides match.
 
 ---
 

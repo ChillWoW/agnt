@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { useServerConnection } from "@/features/server";
+import { SERVER_BASE_URL } from "@/lib/server-url";
 import { useAuthStore } from "./auth-store";
-
-const SERVER_URL = "http://127.0.0.1:4727";
 
 export function AuthBootstrap() {
     const connection = useServerConnection();
@@ -13,7 +12,7 @@ export function AuthBootstrap() {
             return;
         }
 
-        void ensureLoaded(SERVER_URL);
+        void ensureLoaded(SERVER_BASE_URL);
     }, [connection.status, ensureLoaded]);
 
     return null;

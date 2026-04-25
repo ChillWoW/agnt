@@ -1,4 +1,5 @@
 import { waitForServerConnection } from "@/features/server";
+import { SERVER_BASE_URL } from "@/lib/server-url";
 
 type ApiPrimitive = string | number | boolean;
 type ApiQueryValue =
@@ -12,8 +13,6 @@ type ApiQueryValue =
 type ApiQuery = Record<string, ApiQueryValue>;
 type ApiParseAs = "json" | "text" | "blob" | "response";
 type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-
-const SERVER_BASE_URL = "http://127.0.0.1:4727";
 
 export interface ApiRequestOptions<TBody = unknown>
     extends Omit<RequestInit, "body" | "method"> {
@@ -37,10 +36,7 @@ export class ApiError extends Error {
 }
 
 export function resolveBaseUrl(baseUrl?: string) {
-    return (baseUrl ?? import.meta.env.VITE_API_URL ?? SERVER_BASE_URL).replace(
-        /\/$/,
-        ""
-    );
+    return (baseUrl ?? SERVER_BASE_URL).replace(/\/$/, "");
 }
 
 export function resolveAuthHeaders(): Record<string, string> {
