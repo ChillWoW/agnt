@@ -121,6 +121,7 @@ export interface Conversation {
     subagent_type?: SubagentType | null;
     subagent_name?: string | null;
     hidden?: boolean;
+    archived_at?: string | null;
 }
 
 export interface SubagentStartedEvent {

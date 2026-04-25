@@ -20,11 +20,11 @@ export function BinaryMatrix({ className }: { className?: string }) {
 
         const tick = () => {
             setPattern(generatePattern());
-            const delay = 300 + Math.random() * 200;
+            const delay = 200 + Math.random() * 200;
             timeoutId = setTimeout(tick, delay);
         };
 
-        const initialDelay = 300 + Math.random() * 200;
+        const initialDelay = 200 + Math.random() * 200;
         timeoutId = setTimeout(tick, initialDelay);
 
         return () => clearTimeout(timeoutId);

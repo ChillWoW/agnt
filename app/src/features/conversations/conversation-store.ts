@@ -31,6 +31,7 @@ import type {
 
 interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
+    archivedByWorkspace: Record<string, Conversation[]>;
     conversationsById: Record<string, ConversationWithMessages>;
     activeConversationId: string | null;
     isLoadingList: boolean;
@@ -52,6 +53,7 @@ interface ConversationStoreState {
     bumpContextRefresh: (conversationId: string) => void;
 
     loadConversations: (workspaceId: string) => Promise<void>;
+    loadArchivedConversations: (workspaceId: string) => Promise<void>;
     loadConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     loadSubagents: (workspaceId: string, parentConversationId: string) => Promise<void>;
     observeConversation: (
@@ -72,6 +74,8 @@ interface ConversationStoreState {
         mentions?: conversationApi.MessageMention[]
     ) => Promise<void>;
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    archiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    unarchiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     deleteConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     clearActiveConversation: () => void;
 }
@@ -1254,6 +1258,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
 
     return {
         conversationsByWorkspace: {},
+        archivedByWorkspace: {},
         conversationsById: {},
         activeConversationId: null,
         isLoadingList: false,
@@ -1344,6 +1349,26 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                 }));
             } finally {
                 if (!hadCached) set({ isLoadingList: false });
+            }
+        },
+
+        loadArchivedConversations: async (workspaceId: string) => {
+            try {
+                const { conversations } =
+                    await conversationApi.fetchArchivedConversations(
+                        workspaceId
+                    );
+                set((state) => ({
+                    archivedByWorkspace: {
+                        ...state.archivedByWorkspace,
+                        [workspaceId]: conversations
+                    }
+                }));
+            } catch (error) {
+                console.error(
+                    "[conversation-store] loadArchivedConversations failed",
+                    error
+                );
             }
         },
 
@@ -1590,6 +1615,191 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             );
         },
 
+        archiveConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            // Snapshot the conversation row from the active list so we can
+            // optimistically move it into the archived bucket. Fall back to
+            // a synthesized stub if (somehow) it's not in the active list
+            // anymore — the optimistic move stays consistent and the API
+            // call is the source of truth on `archived_at`.
+            const state = get();
+            const active =
+                state.conversationsByWorkspace[workspaceId] ?? [];
+            const target = active.find((c) => c.id === conversationId);
+            const archivedNow = new Date().toISOString();
+            const optimisticArchivedRow: Conversation = target
+                ? { ...target, archived_at: archivedNow }
+                : {
+                      id: conversationId,
+                      title: "Archived conversation",
+                      created_at: archivedNow,
+                      updated_at: archivedNow,
+                      archived_at: archivedNow
+                  };
+
+            set((s) => {
+                const existingActive =
+                    s.conversationsByWorkspace[workspaceId] ?? [];
+                const existingArchived =
+                    s.archivedByWorkspace[workspaceId] ?? [];
+                return {
+                    conversationsByWorkspace: {
+                        ...s.conversationsByWorkspace,
+                        [workspaceId]: existingActive.filter(
+                            (c) => c.id !== conversationId
+                        )
+                    },
+                    archivedByWorkspace: {
+                        ...s.archivedByWorkspace,
+                        [workspaceId]: [
+                            optimisticArchivedRow,
+                            ...existingArchived.filter(
+                                (c) => c.id !== conversationId
+                            )
+                        ]
+                    },
+                    activeConversationId:
+                        s.activeConversationId === conversationId
+                            ? null
+                            : s.activeConversationId
+                };
+            });
+
+            try {
+                const { archived_at } =
+                    await conversationApi.archiveConversation(
+                        workspaceId,
+                        conversationId
+                    );
+                set((s) => {
+                    const existingArchived =
+                        s.archivedByWorkspace[workspaceId] ?? [];
+                    return {
+                        archivedByWorkspace: {
+                            ...s.archivedByWorkspace,
+                            [workspaceId]: existingArchived.map((c) =>
+                                c.id === conversationId
+                                    ? { ...c, archived_at }
+                                    : c
+                            )
+                        }
+                    };
+                });
+            } catch (error) {
+                // Revert on failure — restore the row to the active list
+                // and drop it from the archived bucket.
+                set((s) => {
+                    const existingActive =
+                        s.conversationsByWorkspace[workspaceId] ?? [];
+                    const existingArchived =
+                        s.archivedByWorkspace[workspaceId] ?? [];
+                    const restored: Conversation = {
+                        ...optimisticArchivedRow,
+                        archived_at: null
+                    };
+                    return {
+                        conversationsByWorkspace: {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: [
+                                restored,
+                                ...existingActive.filter(
+                                    (c) => c.id !== conversationId
+                                )
+                            ]
+                        },
+                        archivedByWorkspace: {
+                            ...s.archivedByWorkspace,
+                            [workspaceId]: existingArchived.filter(
+                                (c) => c.id !== conversationId
+                            )
+                        }
+                    };
+                });
+                throw error;
+            }
+        },
+
+        unarchiveConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            const state = get();
+            const archived =
+                state.archivedByWorkspace[workspaceId] ?? [];
+            const target = archived.find((c) => c.id === conversationId);
+            if (!target) {
+                // Nothing to unarchive in our local cache. Still hit the
+                // server to be safe — the list reload below will reconcile.
+                await conversationApi.unarchiveConversation(
+                    workspaceId,
+                    conversationId
+                );
+                return;
+            }
+            const optimisticActiveRow: Conversation = {
+                ...target,
+                archived_at: null
+            };
+
+            set((s) => {
+                const existingActive =
+                    s.conversationsByWorkspace[workspaceId] ?? [];
+                const existingArchived =
+                    s.archivedByWorkspace[workspaceId] ?? [];
+                return {
+                    archivedByWorkspace: {
+                        ...s.archivedByWorkspace,
+                        [workspaceId]: existingArchived.filter(
+                            (c) => c.id !== conversationId
+                        )
+                    },
+                    conversationsByWorkspace: {
+                        ...s.conversationsByWorkspace,
+                        [workspaceId]: [
+                            optimisticActiveRow,
+                            ...existingActive.filter(
+                                (c) => c.id !== conversationId
+                            )
+                        ]
+                    }
+                };
+            });
+
+            try {
+                await conversationApi.unarchiveConversation(
+                    workspaceId,
+                    conversationId
+                );
+            } catch (error) {
+                set((s) => {
+                    const existingActive =
+                        s.conversationsByWorkspace[workspaceId] ?? [];
+                    const existingArchived =
+                        s.archivedByWorkspace[workspaceId] ?? [];
+                    return {
+                        conversationsByWorkspace: {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: existingActive.filter(
+                                (c) => c.id !== conversationId
+                            )
+                        },
+                        archivedByWorkspace: {
+                            ...s.archivedByWorkspace,
+                            [workspaceId]: [
+                                target,
+                                ...existingArchived.filter(
+                                    (c) => c.id !== conversationId
+                                )
+                            ]
+                        }
+                    };
+                });
+                throw error;
+            }
+        },
+
         deleteConversation: async (
             workspaceId: string,
             conversationId: string
@@ -1605,13 +1815,21 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             );
 
             set((state) => {
-                const existing =
+                const existingActive =
                     state.conversationsByWorkspace[workspaceId] ?? [];
+                const existingArchived =
+                    state.archivedByWorkspace[workspaceId] ?? [];
 
                 return {
                     conversationsByWorkspace: {
                         ...state.conversationsByWorkspace,
-                        [workspaceId]: existing.filter(
+                        [workspaceId]: existingActive.filter(
+                            (c) => c.id !== conversationId
+                        )
+                    },
+                    archivedByWorkspace: {
+                        ...state.archivedByWorkspace,
+                        [workspaceId]: existingArchived.filter(
                             (c) => c.id !== conversationId
                         )
                     },

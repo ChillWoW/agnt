@@ -1,11 +1,14 @@
 import { Elysia } from "elysia";
 import {
     listConversations,
+    listArchivedConversations,
     listSubagents,
     getConversation,
     createConversation,
     addMessage,
     deleteConversation,
+    archiveConversation,
+    unarchiveConversation,
     updateConversation
 } from "./conversations.service";
 import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
@@ -95,6 +98,21 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to create conversation"
+            };
+        }
+    })
+    .get("/:id/conversations/archived", ({ params, set }) => {
+        try {
+            return {
+                conversations: listArchivedConversations(params.id)
+            };
+        } catch (error) {
+            set.status = 500;
+            return {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to list archived conversations"
             };
         }
     })
@@ -229,6 +247,43 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
+    .post(
+        "/:id/conversations/:conversationId/archive",
+        ({ params, set }) => {
+            try {
+                const { archived_at } = archiveConversation(
+                    params.id,
+                    params.conversationId
+                );
+                return { success: true, archived_at };
+            } catch (error) {
+                set.status = 404;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to archive conversation"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/unarchive",
+        ({ params, set }) => {
+            try {
+                unarchiveConversation(params.id, params.conversationId);
+                return { success: true };
+            } catch (error) {
+                set.status = 404;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to unarchive conversation"
+                };
+            }
+        }
+    )
     .patch("/:id/conversations/:conversationId", async ({ params, body, set }) => {
         try {
             const { title } = body as { title?: string };

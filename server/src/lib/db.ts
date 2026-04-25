@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     parent_conversation_id TEXT,
     subagent_type TEXT,
     subagent_name TEXT,
-    hidden INTEGER NOT NULL DEFAULT 0
+    hidden INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -172,11 +173,15 @@ function runMigrations(db: Database): void {
         "hidden",
         "INTEGER NOT NULL DEFAULT 0"
     );
+    addColumnIfMissing(db, "conversations", "archived_at", "TEXT");
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id, created_at);"
     );
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_conversations_visible ON conversations(hidden, parent_conversation_id, updated_at DESC);"
+    );
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_archived ON conversations(hidden, parent_conversation_id, archived_at, updated_at DESC);"
     );
 
     db.exec(

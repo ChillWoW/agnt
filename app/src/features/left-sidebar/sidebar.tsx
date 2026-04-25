@@ -9,6 +9,8 @@ import {
     CaretRightIcon,
     ChatTeardropDotsIcon,
     TrashIcon,
+    ArchiveIcon,
+    ArrowCounterClockwiseIcon,
     PlusIcon,
     DotsThreeIcon,
     XIcon,
@@ -16,7 +18,18 @@ import {
     ShieldWarningIcon,
     GearSixIcon
 } from "@phosphor-icons/react";
-import { Menu, Tooltip } from "@/components/ui";
+import {
+    Menu,
+    Tooltip,
+    Modal,
+    ModalContent,
+    ModalTitle,
+    ModalDescription,
+    ModalClose,
+    Popover,
+    PopoverTrigger,
+    PopoverContent
+} from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LeftSidebarButton } from "./left-sidebar-button";
 import { BinaryMatrix } from "./binary-matrix";
@@ -60,9 +73,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const pendingPermissions = usePermissionStore(
         (s) => s.pendingByConversationId
     );
-    const pendingQuestions = useQuestionStore(
-        (s) => s.pendingByConversationId
-    );
+    const pendingQuestions = useQuestionStore((s) => s.pendingByConversationId);
 
     useEffect(() => {
         void useConversationStore.getState().loadConversations(workspaceId);
@@ -128,21 +139,346 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                             />
                         )}
                         <span className="truncate flex-1">{conv.title}</span>
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                void useConversationStore
-                                    .getState()
-                                    .deleteConversation(workspaceId, conv.id);
-                            }}
-                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-red-400 p-0.5"
-                        >
-                            {/* TODO: Change to archiving system */}
-                            <TrashIcon className="size-3" />
-                        </button>
+                        <Tooltip content="Archive" side="top">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void useConversationStore
+                                        .getState()
+                                        .archiveConversation(
+                                            workspaceId,
+                                            conv.id
+                                        );
+                                }}
+                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
+                            >
+                                <ArchiveIcon className="size-3" />
+                            </button>
+                        </Tooltip>
                     </div>
                 );
             })}
+        </div>
+    );
+}
+
+const EMPTY_ARCHIVED: import("@/features/conversations").Conversation[] = [];
+
+function ConfirmDeleteDialog({
+    open,
+    onOpenChange,
+    title,
+    onConfirm
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    title: string;
+    onConfirm: () => void;
+}) {
+    return (
+        <Modal open={open} onOpenChange={onOpenChange}>
+            <ModalContent className="p-5">
+                <ModalTitle>Delete permanently?</ModalTitle>
+                <ModalDescription>
+                    &quot;{title}&quot; will be erased. This cannot be undone.
+                </ModalDescription>
+                <div className="mt-5 flex justify-end gap-2">
+                    <ModalClose className="text-sm">Cancel</ModalClose>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            onConfirm();
+                            onOpenChange(false);
+                        }}
+                        className="inline-flex items-center justify-center rounded-md bg-red-500/90 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-500"
+                    >
+                        Delete
+                    </button>
+                </div>
+            </ModalContent>
+        </Modal>
+    );
+}
+
+function WorkspaceArchivedList({
+    workspaceId,
+    onPickDelete,
+    onClose
+}: {
+    workspaceId: string;
+    onPickDelete: (conversationId: string) => void;
+    onClose: () => void;
+}) {
+    const navigate = useNavigate();
+    const archived = useConversationStore(
+        (s) => s.archivedByWorkspace[workspaceId] ?? EMPTY_ARCHIVED
+    );
+    const activeConversationId = useConversationStore(
+        (s) => s.activeConversationId
+    );
+
+    useEffect(() => {
+        void useConversationStore
+            .getState()
+            .loadArchivedConversations(workspaceId);
+    }, [workspaceId]);
+
+    if (archived.length === 0) {
+        return (
+            <p className="px-2 py-3 text-center text-[11px] text-dark-400">
+                No archived conversations.
+            </p>
+        );
+    }
+
+    return (
+        <div className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+            {archived.map((conv) => {
+                const isActive = activeConversationId === conv.id;
+                return (
+                    <div
+                        key={conv.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                            void navigate({
+                                to: "/conversations/$conversationId",
+                                params: { conversationId: conv.id }
+                            });
+                            onClose();
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                void navigate({
+                                    to: "/conversations/$conversationId",
+                                    params: { conversationId: conv.id }
+                                });
+                                onClose();
+                            }
+                        }}
+                        className={cn(
+                            "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
+                            isActive
+                                ? "bg-dark-800 text-dark-50"
+                                : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                        )}
+                    >
+                        <MinusIcon className="size-3 shrink-0 text-dark-400" />
+                        <span className="truncate flex-1">{conv.title}</span>
+                        <Tooltip content="Restore" side="top">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void useConversationStore
+                                        .getState()
+                                        .unarchiveConversation(
+                                            workspaceId,
+                                            conv.id
+                                        );
+                                }}
+                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-200 hover:text-dark-50 p-0.5"
+                            >
+                                <ArrowCounterClockwiseIcon className="size-3" />
+                            </button>
+                        </Tooltip>
+                        <Tooltip content="Delete permanently" side="top">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPickDelete(conv.id);
+                                }}
+                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-200 hover:text-red-400 p-0.5"
+                            >
+                                <TrashIcon className="size-3" />
+                            </button>
+                        </Tooltip>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function WorkspaceRow({
+    ws,
+    isActive,
+    isExpanded,
+    isDragging,
+    isDropBefore,
+    isDropAfter,
+    onToggleExpanded,
+    onSetActive,
+    onRemove,
+    onDragStart,
+    onDragOver,
+    onDrop,
+    onDragEnd
+}: {
+    ws: { id: string; name: string };
+    isActive: boolean;
+    isExpanded: boolean;
+    isDragging: boolean;
+    isDropBefore: boolean;
+    isDropAfter: boolean;
+    onToggleExpanded: (id: string) => void;
+    onSetActive: (id: string) => void;
+    onRemove: (id: string) => void;
+    onDragStart: (id: string) => void;
+    onDragOver: (e: React.DragEvent, id: string) => void;
+    onDrop: (e: React.DragEvent, id: string) => void;
+    onDragEnd: () => void;
+}) {
+    const navigate = useNavigate();
+    const [archivedOpen, setArchivedOpen] = useState(false);
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+    const archived = useConversationStore(
+        (s) => s.archivedByWorkspace[ws.id] ?? EMPTY_ARCHIVED
+    );
+    const pendingDelete = pendingDeleteId
+        ? archived.find((c) => c.id === pendingDeleteId)
+        : null;
+
+    return (
+        <div
+            className={cn(
+                "flex flex-col transition-opacity",
+                isDragging && "opacity-40"
+            )}
+            draggable
+            onDragStart={() => onDragStart(ws.id)}
+            onDragOver={(e) => onDragOver(e, ws.id)}
+            onDrop={(e) => onDrop(e, ws.id)}
+            onDragEnd={onDragEnd}
+        >
+            {isDropBefore && (
+                <div className="h-0.5 rounded-full bg-dark-400 mx-1 mb-0.5" />
+            )}
+            <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
+                <button
+                    onClick={() => onToggleExpanded(ws.id)}
+                    className={cn(
+                        "flex items-center gap-1 min-w-0 flex-1 text-left",
+                        isActive
+                            ? "text-dark-50"
+                            : "text-dark-200 hover:text-dark-50"
+                    )}
+                >
+                    <CaretRightIcon
+                        className={cn(
+                            "size-2.5 shrink-0 transition-transform duration-100",
+                            isExpanded && "rotate-90"
+                        )}
+                        weight="bold"
+                    />
+                    <span className="truncate font-medium">{ws.name}</span>
+                </button>
+
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <Tooltip content="New Agent" side="top">
+                        <button
+                            onClick={() => {
+                                void onSetActive(ws.id);
+                                void navigate({ to: "/" });
+                            }}
+                            className="text-dark-200 hover:text-dark-100"
+                        >
+                            <PlusIcon className="size-3.5" />
+                        </button>
+                    </Tooltip>
+
+                    <Popover open={archivedOpen} onOpenChange={setArchivedOpen}>
+                        <Menu>
+                            <Menu.Trigger className="text-dark-200 hover:text-dark-100">
+                                <DotsThreeIcon
+                                    className="size-3.5"
+                                    weight="bold"
+                                />
+                            </Menu.Trigger>
+                            <Menu.Content side="bottom" align="start">
+                                <Menu.Item
+                                    icon={<ArchiveIcon className="size-3.5" />}
+                                    onClick={() => {
+                                        void useConversationStore
+                                            .getState()
+                                            .loadArchivedConversations(ws.id);
+                                        setArchivedOpen(true);
+                                    }}
+                                >
+                                    View archived
+                                </Menu.Item>
+                                <Menu.Item
+                                    destructive
+                                    icon={<XIcon className="size-3.5" />}
+                                    onClick={() => onRemove(ws.id)}
+                                >
+                                    Close workspace
+                                </Menu.Item>
+                            </Menu.Content>
+                        </Menu>
+
+                        {/* Zero-size anchor next to the dot-menu so the
+                            popover positions to the right of the row. */}
+                        <PopoverTrigger
+                            tabIndex={-1}
+                            aria-hidden
+                            render={<span />}
+                            style={{
+                                width: 0,
+                                height: 0,
+                                opacity: 0,
+                                pointerEvents: "none",
+                                display: "inline-block",
+                                overflow: "hidden"
+                            }}
+                        />
+                        <PopoverContent
+                            side="right"
+                            align="start"
+                            sideOffset={8}
+                            className="w-72 p-1.5"
+                        >
+                            <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1.5">
+                                <p className="truncate text-[11px] font-semibold uppercase text-dark-300">
+                                    Archived in {ws.name}
+                                </p>
+                                <span className="shrink-0 text-[10px] text-dark-300">
+                                    {archived.length}
+                                </span>
+                            </div>
+                            <WorkspaceArchivedList
+                                workspaceId={ws.id}
+                                onPickDelete={(id) => setPendingDeleteId(id)}
+                                onClose={() => setArchivedOpen(false)}
+                            />
+                        </PopoverContent>
+                    </Popover>
+                </div>
+            </div>
+
+            {isExpanded && (
+                <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
+                    <WorkspaceConversations workspaceId={ws.id} />
+                </div>
+            )}
+            {isDropAfter && (
+                <div className="h-0.5 rounded-full bg-dark-400 mx-1 mt-0.5" />
+            )}
+
+            <ConfirmDeleteDialog
+                open={pendingDeleteId !== null}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDeleteId(null);
+                }}
+                title={pendingDelete?.title ?? ""}
+                onConfirm={() => {
+                    if (!pendingDeleteId) return;
+                    void useConversationStore
+                        .getState()
+                        .deleteConversation(ws.id, pendingDeleteId);
+                    setPendingDeleteId(null);
+                }}
+            />
         </div>
     );
 }
@@ -157,7 +493,6 @@ function WorkspaceSidebarList() {
         id: string;
         position: "before" | "after";
     } | null>(null);
-    const navigate = useNavigate();
 
     useEffect(() => {
         if (activeWorkspaceId) {
@@ -242,87 +577,22 @@ function WorkspaceSidebarList() {
                     dragOver?.id === ws.id && dragOver.position === "after";
 
                 return (
-                    <div
+                    <WorkspaceRow
                         key={ws.id}
-                        className={cn(
-                            "flex flex-col transition-opacity",
-                            isDragging && "opacity-40"
-                        )}
-                        draggable
-                        onDragStart={() => handleDragStart(ws.id)}
-                        onDragOver={(e) => handleDragOver(e, ws.id)}
-                        onDrop={(e) => handleDrop(e, ws.id)}
+                        ws={ws}
+                        isActive={isActive}
+                        isExpanded={isExpanded}
+                        isDragging={isDragging}
+                        isDropBefore={isDropBefore}
+                        isDropAfter={isDropAfter}
+                        onToggleExpanded={toggleExpanded}
+                        onSetActive={setActive}
+                        onRemove={remove}
+                        onDragStart={handleDragStart}
+                        onDragOver={handleDragOver}
+                        onDrop={handleDrop}
                         onDragEnd={handleDragEnd}
-                    >
-                        {isDropBefore && (
-                            <div className="h-0.5 rounded-full bg-dark-400 mx-1 mb-0.5" />
-                        )}
-                        <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
-                            <button
-                                onClick={() => toggleExpanded(ws.id)}
-                                className={cn(
-                                    "flex items-center gap-1 min-w-0 flex-1 text-left",
-                                    isActive
-                                        ? "text-dark-50"
-                                        : "text-dark-200 hover:text-dark-50"
-                                )}
-                            >
-                                <CaretRightIcon
-                                    className={cn(
-                                        "size-2.5 shrink-0 transition-transform duration-100",
-                                        isExpanded && "rotate-90"
-                                    )}
-                                    weight="bold"
-                                />
-                                <span className="truncate font-medium">
-                                    {ws.name}
-                                </span>
-                            </button>
-
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                <Tooltip content="New Agent" side="top">
-                                    <button
-                                        onClick={() => {
-                                            void setActive(ws.id);
-                                            void navigate({ to: "/" });
-                                        }}
-                                        className="text-dark-200 hover:text-dark-100"
-                                    >
-                                        <PlusIcon className="size-3.5" />
-                                    </button>
-                                </Tooltip>
-
-                                <Menu>
-                                    <Menu.Trigger className="text-dark-200 hover:text-dark-100">
-                                        <DotsThreeIcon
-                                            className="size-3.5"
-                                            weight="bold"
-                                        />
-                                    </Menu.Trigger>
-                                    <Menu.Content side="bottom" align="start">
-                                        <Menu.Item
-                                            destructive
-                                            icon={
-                                                <XIcon className="size-3.5" />
-                                            }
-                                            onClick={() => void remove(ws.id)}
-                                        >
-                                            Close workspace
-                                        </Menu.Item>
-                                    </Menu.Content>
-                                </Menu>
-                            </div>
-                        </div>
-
-                        {isExpanded && (
-                            <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
-                                <WorkspaceConversations workspaceId={ws.id} />
-                            </div>
-                        )}
-                        {isDropAfter && (
-                            <div className="h-0.5 rounded-full bg-dark-400 mx-1 mt-0.5" />
-                        )}
-                    </div>
+                    />
                 );
             })}
         </div>
@@ -405,10 +675,9 @@ export function LeftSidebar() {
     const toggleSettingsPanel = () => {
         if (settingsOpen) {
             closeSettingsPanel();
-            return;
+        } else {
+            openSettings();
         }
-
-        openSettings();
     };
 
     return (

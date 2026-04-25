@@ -75,6 +75,30 @@ export function deleteConversation(workspaceId: string, conversationId: string) 
     );
 }
 
+export function archiveConversation(
+    workspaceId: string,
+    conversationId: string
+) {
+    return api.post<{ success: boolean; archived_at: string }>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/archive`
+    );
+}
+
+export function unarchiveConversation(
+    workspaceId: string,
+    conversationId: string
+) {
+    return api.post<{ success: boolean }>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/unarchive`
+    );
+}
+
+export function fetchArchivedConversations(workspaceId: string) {
+    return api.get<{ conversations: Conversation[] }>(
+        `/workspaces/${workspaceId}/conversations/archived`
+    );
+}
+
 export function fetchSubagents(workspaceId: string, parentConversationId: string) {
     return api.get<{ subagents: Conversation[] }>(
         `/workspaces/${workspaceId}/conversations/${parentConversationId}/subagents`

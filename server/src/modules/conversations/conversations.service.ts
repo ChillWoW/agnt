@@ -74,6 +74,7 @@ interface ConversationRow {
     subagent_type: string | null;
     subagent_name: string | null;
     hidden: number;
+    archived_at: string | null;
 }
 
 function conversationFromRow(row: ConversationRow): Conversation {
@@ -85,18 +86,29 @@ function conversationFromRow(row: ConversationRow): Conversation {
         parent_conversation_id: row.parent_conversation_id,
         subagent_type: (row.subagent_type ?? null) as Conversation["subagent_type"],
         subagent_name: row.subagent_name,
-        hidden: row.hidden === 1
+        hidden: row.hidden === 1,
+        archived_at: row.archived_at
     };
 }
 
 const CONVERSATION_SELECT =
-    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden FROM conversations";
+    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden, archived_at FROM conversations";
 
 export function listConversations(workspaceId: string): Conversation[] {
     const db = getWorkspaceDb(workspaceId);
     const rows = db
         .query(
-            `${CONVERSATION_SELECT} WHERE hidden = 0 AND parent_conversation_id IS NULL ORDER BY updated_at DESC`
+            `${CONVERSATION_SELECT} WHERE hidden = 0 AND parent_conversation_id IS NULL AND archived_at IS NULL ORDER BY updated_at DESC`
+        )
+        .all() as ConversationRow[];
+    return rows.map(conversationFromRow);
+}
+
+export function listArchivedConversations(workspaceId: string): Conversation[] {
+    const db = getWorkspaceDb(workspaceId);
+    const rows = db
+        .query(
+            `${CONVERSATION_SELECT} WHERE hidden = 0 AND parent_conversation_id IS NULL AND archived_at IS NOT NULL ORDER BY archived_at DESC`
         )
         .all() as ConversationRow[];
     return rows.map(conversationFromRow);
@@ -298,6 +310,7 @@ export function createConversation(
         subagent_type: null,
         subagent_name: null,
         hidden: false,
+        archived_at: null,
         messages: [
             {
                 id: messageId,
@@ -357,6 +370,7 @@ export function createSubagentConversation(
         subagent_type: params.subagentType,
         subagent_name: params.subagentName,
         hidden: true,
+        archived_at: null,
         messages: [
             {
                 id: messageId,
@@ -436,6 +450,47 @@ export function deleteConversation(workspaceId: string, conversationId: string):
     });
 
     tx();
+}
+
+export function archiveConversation(
+    workspaceId: string,
+    conversationId: string
+): { archived_at: string } {
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+
+    if (!existing) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    const now = new Date().toISOString();
+    db.query(
+        "UPDATE conversations SET archived_at = ? WHERE id = ?"
+    ).run(now, conversationId);
+
+    return { archived_at: now };
+}
+
+export function unarchiveConversation(
+    workspaceId: string,
+    conversationId: string
+): void {
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+
+    if (!existing) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    db.query(
+        "UPDATE conversations SET archived_at = NULL WHERE id = ?"
+    ).run(conversationId);
 }
 
 export function updateConversation(

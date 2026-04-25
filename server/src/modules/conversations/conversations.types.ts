@@ -90,7 +90,8 @@ export const conversationSchema = z.object({
     parent_conversation_id: z.string().uuid().nullable().optional(),
     subagent_type: subagentTypeSchema.nullable().optional(),
     subagent_name: z.string().nullable().optional(),
-    hidden: z.boolean().optional()
+    hidden: z.boolean().optional(),
+    archived_at: z.string().nullable().optional()
 });
 
 export const conversationWithMessagesSchema = conversationSchema.extend({
