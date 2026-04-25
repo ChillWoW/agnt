@@ -820,6 +820,65 @@ async function runStreamTextIntoController({
         );
     }
 
+    // Let the client render the model label in the assistant message footer
+    // as soon as it's resolved (instead of waiting for `finish` / `abort`).
+    controller.enqueue(
+        sseEvent("assistant-model", {
+            messageId: assistantMsgId,
+            modelId: modelName
+        })
+    );
+
+    // Generation duration tracking. Measures wall-clock spent in the
+    // streamText run, but *excludes* periods where the stream is blocked
+    // waiting for the user (pending permission prompts or agent questions).
+    // The accumulated paused time is a union across both blocker sources:
+    // we only run the pause clock while at least one blocker is pending,
+    // and stop it once every blocker has resolved. Persisted to
+    // `messages.generation_duration_ms` on both `finish` and `abort`.
+    const genStartMs = Date.now();
+    let pendingBlockerCount = 0;
+    let pauseStartedAtMs: number | null = null;
+    let accumulatedPausedMs = 0;
+
+    function beginBlocker(): void {
+        pendingBlockerCount += 1;
+        if (pendingBlockerCount === 1) {
+            pauseStartedAtMs = Date.now();
+        }
+    }
+
+    function endBlocker(): void {
+        if (pendingBlockerCount === 0) return;
+        pendingBlockerCount -= 1;
+        if (pendingBlockerCount === 0 && pauseStartedAtMs !== null) {
+            accumulatedPausedMs += Date.now() - pauseStartedAtMs;
+            pauseStartedAtMs = null;
+        }
+    }
+
+    function computeGenerationDurationMs(): number {
+        let paused = accumulatedPausedMs;
+        if (pauseStartedAtMs !== null) {
+            paused += Date.now() - pauseStartedAtMs;
+        }
+        return Math.max(0, Date.now() - genStartMs - paused);
+    }
+
+    function persistGenerationDuration(durationMs: number): void {
+        try {
+            db.query(
+                "UPDATE messages SET generation_duration_ms = ? WHERE id = ?"
+            ).run(durationMs, assistantMsgId);
+        } catch (error) {
+            logger.error(
+                "[stream] Failed to record generation_duration_ms",
+                { assistantMsgId },
+                error
+            );
+        }
+    }
+
     let fullText = "";
     const reasoningParts: StreamReasoningPart[] = [];
     let currentReasoningPart: StreamReasoningPart | null = null;
@@ -891,6 +950,7 @@ async function runStreamTextIntoController({
         conversationId,
         (event) => {
             if (event.type === "requested") {
+                beginBlocker();
                 controller.enqueue(
                     sseEvent("permission-required", {
                         id: event.request.id,
@@ -903,6 +963,7 @@ async function runStreamTextIntoController({
                 return;
             }
 
+            endBlocker();
             controller.enqueue(
                 sseEvent("permission-resolved", {
                     id: event.requestId,
@@ -959,6 +1020,7 @@ async function runStreamTextIntoController({
         conversationId,
         (event) => {
             if (event.type === "requested") {
+                beginBlocker();
                 controller.enqueue(
                     sseEvent("questions-required", {
                         id: event.request.id,
@@ -970,6 +1032,7 @@ async function runStreamTextIntoController({
                 return;
             }
 
+            endBlocker();
             controller.enqueue(
                 sseEvent("questions-resolved", {
                     id: event.requestId,
@@ -1493,11 +1556,15 @@ async function runStreamTextIntoController({
                     fullText,
                     reasoningParts
                 );
+                const abortDurationMs = computeGenerationDurationMs();
+                persistGenerationDuration(abortDurationMs);
                 controller.enqueue(
                     sseEvent("abort", {
                         reason: part.reason ?? "aborted",
                         content: fullText,
-                        assistantMessageId: assistantMsgId
+                        assistantMessageId: assistantMsgId,
+                        modelId: modelName,
+                        generationDurationMs: abortDurationMs
                     })
                 );
                 return;
@@ -1531,12 +1598,17 @@ async function runStreamTextIntoController({
             conversationId
         );
 
+        const finishDurationMs = computeGenerationDurationMs();
+        persistGenerationDuration(finishDurationMs);
+
         controller.enqueue(
             sseEvent("finish", {
                 reason: "stop",
                 content: fullText,
                 assistantMessageId: assistantMsgId,
-                usage: lastUsage
+                usage: lastUsage,
+                modelId: modelName,
+                generationDurationMs: finishDurationMs
             })
         );
     } catch (error) {
@@ -1563,6 +1635,7 @@ async function runStreamTextIntoController({
                 fullText,
                 reasoningParts
             );
+            persistGenerationDuration(computeGenerationDurationMs());
             return;
         }
 

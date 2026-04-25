@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS messages (
     total_tokens INTEGER,
     compacted INTEGER NOT NULL DEFAULT 0,
     summary_of_until TEXT,
-    model_id TEXT
+    model_id TEXT,
+    generation_duration_ms INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS state_entries (
@@ -158,6 +159,7 @@ function runMigrations(db: Database): void {
     );
     addColumnIfMissing(db, "messages", "summary_of_until", "TEXT");
     addColumnIfMissing(db, "messages", "model_id", "TEXT");
+    addColumnIfMissing(db, "messages", "generation_duration_ms", "INTEGER");
 
     addColumnIfMissing(db, "attachments", "estimated_tokens", "INTEGER");
 

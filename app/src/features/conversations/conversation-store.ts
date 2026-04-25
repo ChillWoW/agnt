@@ -274,6 +274,18 @@ function handleConversationSseEvent(
                 break;
             }
 
+            case "assistant-model": {
+                const messageId = data.messageId as string;
+                const modelId = (data.modelId as string | undefined) ?? null;
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.map((m) =>
+                        m.id === messageId ? { ...m, model_id: modelId } : m
+                    )
+                }));
+                break;
+            }
+
             case "delta": {
                 const delta = data.content as string;
                 updateConversation((prev) => {
@@ -799,6 +811,12 @@ function handleConversationSseEvent(
                 const assistantMessageId = data.assistantMessageId as
                     | string
                     | undefined;
+                const finishedModelId =
+                    (data.modelId as string | undefined) ?? null;
+                const finishedDurationMs =
+                    typeof data.generationDurationMs === "number"
+                        ? (data.generationDurationMs as number)
+                        : null;
                 // Suppress the finish notification only when the user is
                 // actively watching this conversation — i.e. the window is
                 // focused AND this conversation is the active one. In every
@@ -845,6 +863,20 @@ function handleConversationSseEvent(
                                           output_tokens: usage.outputTokens,
                                           reasoning_tokens: usage.reasoningTokens,
                                           total_tokens: usage.totalTokens
+                                      }
+                                    : {}),
+                                ...(assistantMessageId &&
+                                m.id === assistantMessageId
+                                    ? {
+                                          ...(finishedModelId
+                                              ? { model_id: finishedModelId }
+                                              : {}),
+                                          ...(finishedDurationMs !== null
+                                              ? {
+                                                    generation_duration_ms:
+                                                        finishedDurationMs
+                                                }
+                                              : {})
                                       }
                                     : {})
                             };
@@ -916,6 +948,15 @@ function handleConversationSseEvent(
                 setOutcome("aborted");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
+                const abortedModelId =
+                    (data.modelId as string | undefined) ?? null;
+                const abortedDurationMs =
+                    typeof data.generationDurationMs === "number"
+                        ? (data.generationDurationMs as number)
+                        : null;
+                const abortedAssistantMessageId = data.assistantMessageId as
+                    | string
+                    | undefined;
                 updateConversation((prev) => {
                     const lastStreamingAssistantIndex = [...prev.messages]
                         .map((message, index) => ({ message, index }))
@@ -939,6 +980,9 @@ function handleConversationSseEvent(
                         }
 
                         const nowIso = new Date().toISOString();
+                        const shouldApplyAbortMetadata =
+                            !abortedAssistantMessageId ||
+                            message.id === abortedAssistantMessageId;
                         return [
                             {
                                 ...message,
@@ -952,7 +996,17 @@ function handleConversationSseEvent(
                                     message.reasoning_started_at &&
                                     !message.reasoning_ended_at
                                         ? nowIso
-                                        : message.reasoning_ended_at
+                                        : message.reasoning_ended_at,
+                                ...(shouldApplyAbortMetadata && abortedModelId
+                                    ? { model_id: abortedModelId }
+                                    : {}),
+                                ...(shouldApplyAbortMetadata &&
+                                abortedDurationMs !== null
+                                    ? {
+                                          generation_duration_ms:
+                                              abortedDurationMs
+                                      }
+                                    : {})
                             }
                         ];
                     });

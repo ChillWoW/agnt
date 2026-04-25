@@ -142,11 +142,13 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         total_tokens: number | null;
         compacted: number;
         summary_of_until: string | null;
+        model_id: string | null;
+        generation_duration_ms: number | null;
     }
 
     const rows = db
         .query(
-            "SELECT id, conversation_id, role, content, reasoning_content, reasoning_started_at, reasoning_ended_at, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            "SELECT id, conversation_id, role, content, reasoning_content, reasoning_started_at, reasoning_ended_at, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until, model_id, generation_duration_ms FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
         )
         .all(conversationId) as MessageRow[];
 
@@ -168,7 +170,9 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         reasoning_tokens: row.reasoning_tokens,
         total_tokens: row.total_tokens,
         compacted: row.compacted === 1,
-        summary_of_until: row.summary_of_until
+        summary_of_until: row.summary_of_until,
+        model_id: row.model_id,
+        generation_duration_ms: row.generation_duration_ms
     }));
 
     if (messages.length === 0) {

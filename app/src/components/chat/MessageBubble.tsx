@@ -11,6 +11,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 import { MessageAttachments } from "./MessageAttachments";
+import { MessageFooter } from "./MessageFooter";
 import { MessageText } from "./MessageText";
 
 interface MessageBubbleProps {
@@ -160,7 +161,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     "min-w-0 text-xs leading-relaxed",
                     isUser
                         ? "max-w-[85%] rounded-md border border-dark-700 bg-dark-850 px-2.5 py-0.5 text-dark-50"
-                        : "w-full text-dark-50"
+                        : "group/message w-full text-dark-50"
                 )}
             >
                 {hasAttachments && workspaceId && (
@@ -218,6 +219,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         </div>
                     )
                 ) : null}
+
+                {!isUser && <MessageFooter message={message} />}
             </div>
         </div>
     );

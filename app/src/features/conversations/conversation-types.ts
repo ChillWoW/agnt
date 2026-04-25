@@ -94,6 +94,15 @@ export interface Message {
     total_tokens?: number | null;
     compacted?: boolean;
     summary_of_until?: string | null;
+    model_id?: string | null;
+    /**
+     * Total wall-clock time the assistant spent actively generating this
+     * message, in milliseconds. Excludes periods where the stream was
+     * blocked waiting on a permission prompt or question. Populated by the
+     * server on `finish` / `abort`. For in-flight messages, the client
+     * derives a live counter from `created_at` (see `MessageFooter`).
+     */
+    generation_duration_ms?: number | null;
 }
 
 export type SubagentType =
