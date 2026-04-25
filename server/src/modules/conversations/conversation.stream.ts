@@ -1097,7 +1097,12 @@ async function runStreamTextIntoController({
 
     try {
         const codex = await createCodexClient();
-        const prompt = buildConversationPrompt(workspaceId, conversationId, agenticMode);
+        const prompt = buildConversationPrompt({
+            workspaceId,
+            conversationId,
+            agenticMode,
+            modelName
+        });
         const skills = prompt.skills.skills;
         const subagentPromptAddition = subagentOverrides
             ? getSubagentTypeConfig(subagentOverrides.subagentType)

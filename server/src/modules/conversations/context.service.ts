@@ -242,9 +242,21 @@ export function computeContextSummary(
         }
     }
 
-    const prompt = buildConversationPrompt(workspaceId, conversationId);
+    const prompt = buildConversationPrompt({
+        workspaceId,
+        conversationId,
+        modelName: model.id
+    });
     const systemInstructionsTokens = countTokens(
-        prompt.baseInstructions + prompt.workspaceBlock + prompt.warningBlock
+        prompt.identityBlock +
+            prompt.communicationBlock +
+            prompt.modeBlock +
+            prompt.toolUseBlock +
+            prompt.fileEditingBlock +
+            prompt.longRunningCommandsBlock +
+            prompt.gitSafetyBlock +
+            prompt.environmentBlock +
+            prompt.warningBlock
     );
     const repoInstructionsTokens = countTokens(prompt.repoInstructions.promptBlock);
     const todosTokens = countTokens(prompt.todosBlock);
