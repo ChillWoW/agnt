@@ -639,6 +639,20 @@ export async function getAuthState(): Promise<AuthState> {
     return toAuthState(await getStoredAuth());
 }
 
+/**
+ * Read the stored Codex account id (the JWT `chatgpt_account_id` claim that
+ * was extracted at OAuth time). Returned as the value to send in the
+ * `ChatGPT-Account-Id` header on Codex backend requests. Mirrors
+ * `BearerAuthProvider::add_auth_headers` in
+ * `codex-rs/model-provider/src/bearer_auth_provider.rs`. Required for proper
+ * billing attribution to the user's Plus/Team plan — without it, requests
+ * tend to fall into a more expensive (or lower-limit) rate bucket.
+ */
+export async function getStoredAccountId(): Promise<string | null> {
+    const auth = await getStoredAuth();
+    return auth?.accountId ?? null;
+}
+
 export async function disconnectAuth(): Promise<AuthState> {
     logger.log("[auth] Disconnecting Codex auth");
     await writeStoredAuth(null);

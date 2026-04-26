@@ -194,7 +194,7 @@ export async function compactConversation(
         modelId
     });
 
-    const codex = await createCodexClient();
+    const codex = await createCodexClient({ conversationId });
 
     const summarizedText = toSummarize.map(renderForSummary).join("\n\n");
 

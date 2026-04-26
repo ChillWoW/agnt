@@ -7,6 +7,7 @@ import {
     recordStatSession,
     recordStatUserMessage
 } from "../stats/stats.recorder";
+import { closeSession as closeCodexWsSession } from "./codex-ws-session";
 import { DEFAULT_CONVERSATION_TITLE } from "./conversation.constants";
 import type {
     Conversation,
@@ -450,6 +451,11 @@ export function deleteConversation(workspaceId: string, conversationId: string):
     });
 
     tx();
+
+    // Tear down any persistent Codex WebSocket session for this conversation
+    // so we don't leak the socket (and its incremental baseline) after the
+    // conversation row is gone.
+    closeCodexWsSession(conversationId);
 }
 
 export function archiveConversation(

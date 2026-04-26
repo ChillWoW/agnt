@@ -9,7 +9,7 @@ type SdkToolResultOutput = SdkToolResultPart["output"];
 import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { getWorkspace } from "../workspaces/workspaces.service";
-import { createCodexClient } from "./codex-client";
+import { createCodexWsModel } from "./codex-websocket-provider";
 import {
     buildStreamResponse,
     sseEvent,
@@ -1096,7 +1096,18 @@ async function runStreamTextIntoController({
           });
 
     try {
-        const codex = await createCodexClient();
+        // Streaming runs over a per-conversation WebSocket session that
+        // sends incremental input + `previous_response_id` instead of the
+        // full history every turn — matching the official Codex CLI's
+        // billing posture. The session falls back transparently to HTTP if
+        // the WS handshake fails. See codex-websocket-provider.ts.
+        const model = await createCodexWsModel({
+            conversationId,
+            modelName,
+            isSubagent: Boolean(subagentOverrides),
+            parentConversationId:
+                subagentOverrides?.parentConversationId ?? null
+        });
         const prompt = buildConversationPrompt({
             workspaceId,
             conversationId,
@@ -1219,7 +1230,7 @@ async function runStreamTextIntoController({
                 : modelMessages;
 
         const result = streamText({
-            model: codex.responses(modelName),
+            model,
             messages: modelMessagesWithTodos,
             tools,
             stopWhen: stepCountIs(Infinity),
