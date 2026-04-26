@@ -1,10 +1,45 @@
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@300.woff2") format("woff2"); font-weight: 300; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
-@font-face { font-family: "Phantom"; src: url("/fonts/Phantom@900.woff2") format("woff2"); font-weight: 900; font-display: swap; }
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@300.woff2") format("woff2");
+    font-weight: 300;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@400.woff2") format("woff2");
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@500.woff2") format("woff2");
+    font-weight: 500;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@600.woff2") format("woff2");
+    font-weight: 600;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@700.woff2") format("woff2");
+    font-weight: 700;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@800.woff2") format("woff2");
+    font-weight: 800;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Phantom";
+    src: url("/fonts/Phantom@900.woff2") format("woff2");
+    font-weight: 900;
+    font-display: swap;
+}
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -180,11 +215,11 @@ body,
     padding: 0 4px;
     margin: 0 1px;
     border-radius: 4px;
-    background-color: var(--color-dark-700);
-    color: var(--color-dark-50);
+    background-color: color-mix(in srgb, #7ea8d8 12%, var(--color-dark-700));
+    color: #7ea8d8;
     font-size: 0.8125rem;
     line-height: 1.4;
-    border: 1px solid var(--color-dark-600);
+    border: 1px solid color-mix(in srgb, #7ea8d8 25%, var(--color-dark-600));
     white-space: nowrap;
 }
 
@@ -201,9 +236,24 @@ body,
     padding: 0 4px;
     margin: 0 1px;
     border-radius: 4px;
-    background-color: var(--color-dark-800);
-    color: var(--color-dark-50);
-    border: 1px solid var(--color-dark-600);
+    background-color: color-mix(in srgb, #7ea8d8 10%, var(--color-dark-800));
+    color: #7ea8d8;
+    border: 1px solid color-mix(in srgb, #7ea8d8 22%, var(--color-dark-700));
     font-size: 0.8125rem;
     white-space: nowrap;
+}
+
+/*
+ * Slash-command token styling. Sits in the same lane as `.mention-chip`,
+ * but it's a Mark (plain editable text), not a Node — so no padding,
+ * border, or chrome — just a neon-yellow recolor + slight bump in weight.
+ *
+ * The mark is used in two places:
+ *  - Inside the live editor (Tiptap) on the inserted `/<command>` run.
+ *  - Inside rendered user-message bubbles, where MessageText.tsx wraps
+ *    the same leading-token text in `.slash-command-token`.
+ */
+.slash-command-token {
+    color: #5fbfca;
+    font-weight: 500;
 }

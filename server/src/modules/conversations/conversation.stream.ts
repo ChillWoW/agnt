@@ -80,6 +80,12 @@ import {
     parseMentionsFromContent
 } from "./mentions";
 import type { MessageMention, SubagentType } from "./conversations.types";
+import {
+    buildActiveSkillsBlock,
+    findSkill,
+    listSkillFiles,
+    type Skill
+} from "../skills/skills.service";
 export { DEFAULT_MODEL };
 
 const DEFAULT_SUBAGENT_MODEL = "gpt-5.4-mini";
@@ -1003,6 +1009,37 @@ function trimOversizedToolResultsForStep(
     return cloned;
 }
 
+/**
+ * Read the `use_skill_names` JSON column off the most recently-created user
+ * message in this conversation. Used by `streamReplyToLastMessage` to recover
+ * the slash-command skills the user requested when they sent the message
+ * (the create-conversation -> /reply path doesn't pass them as args).
+ *
+ * Returns an empty array when the column is NULL, malformed, or contains
+ * something other than a string array.
+ */
+function readSkillNamesFromLatestUserMessage(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string
+): string[] {
+    interface Row {
+        use_skill_names: string | null;
+    }
+    const row = db
+        .query(
+            "SELECT use_skill_names FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1"
+        )
+        .get(conversationId) as Row | null;
+    if (!row || !row.use_skill_names) return [];
+    try {
+        const parsed = JSON.parse(row.use_skill_names);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((x): x is string => typeof x === "string");
+    } catch {
+        return [];
+    }
+}
+
 async function runStreamTextIntoController({
     controller,
     workspaceId,
@@ -1011,7 +1048,8 @@ async function runStreamTextIntoController({
     assistantCreatedAt,
     modelMessages,
     abortSignal,
-    subagentOverrides
+    subagentOverrides,
+    useSkillNames
 }: {
     controller: SseStreamController;
     workspaceId: string;
@@ -1021,6 +1059,14 @@ async function runStreamTextIntoController({
     modelMessages: ModelMessage[];
     abortSignal?: AbortSignal;
     subagentOverrides?: SubagentOverrides;
+    /**
+     * Optional list of skill names the user requested for THIS turn via a
+     * leading `/<skill-name>` slash command. The matched skills' `SKILL.md`
+     * bodies are appended as a single trailing `role: "system"` message
+     * after `modelMessages`. Cache-safe — see the caching comment around
+     * `instructions` below.
+     */
+    useSkillNames?: string[];
 }): Promise<void> {
     const db = getWorkspaceDb(workspaceId);
     const { modelName, reasoningEffort, fastMode, permissionMode, agenticMode } =
@@ -1458,7 +1504,7 @@ async function runStreamTextIntoController({
         // identical from one turn to the next; the todos list can change
         // every turn without busting the cache of the big system prompt,
         // repo instructions, skills catalog, and earlier chat history.
-        const modelMessagesWithTodos =
+        let modelMessagesWithTodos =
             prompt.todosBlock.length > 0
                 ? [
                       ...modelMessages,
@@ -1468,6 +1514,110 @@ async function runStreamTextIntoController({
                       }
                   ]
                 : modelMessages;
+
+        // Resolve the slash-command-requested skills against the workspace's
+        // discovered skills catalog and append their full SKILL.md bodies
+        // as a SECOND trailing `role: "system"` message. Like the todos
+        // block, this is intentionally NOT folded into the cached
+        // `instructions` blob — it's per-turn data and would otherwise
+        // break the conversation-level prompt cache the moment the user
+        // toggles between different `/<skill>` commands across turns.
+        const requestedSkills: Skill[] = (useSkillNames ?? [])
+            .map((name) => findSkill(name, skills))
+            .filter((s): s is Skill => Boolean(s));
+        if (requestedSkills.length > 0) {
+            const activeSkillsBlock = buildActiveSkillsBlock(requestedSkills);
+            if (activeSkillsBlock.length > 0) {
+                modelMessagesWithTodos = [
+                    ...modelMessagesWithTodos,
+                    {
+                        role: "system" as const,
+                        content: activeSkillsBlock
+                    }
+                ];
+            }
+            logger.log("[stream] Injected active skills for turn", {
+                conversationId,
+                requested: useSkillNames,
+                resolved: requestedSkills.map((s) => s.name)
+            });
+
+            // Surface the auto-loaded skills in the chat UI by emitting a
+            // synthetic `use_skill` tool invocation per skill before the
+            // assistant text streams in. The DB row + SSE pair mirror what
+            // the LLM itself would produce if it had called `use_skill`,
+            // so the existing ToolCallCard renderer picks them up without
+            // any frontend changes. We mark the row `success` immediately
+            // — there's nothing to await; the playbook is already in the
+            // system prompt above.
+            for (const skill of requestedSkills) {
+                const invocationId = crypto.randomUUID();
+                const messageSeq = allocateMessageSeq();
+                const createdAt = new Date().toISOString();
+                const toolCallId = `slash-${invocationId}`;
+
+                let files: string[] = [];
+                try {
+                    files = await listSkillFiles(skill);
+                } catch (error) {
+                    logger.error(
+                        "[stream] Failed to list files for slash-loaded skill",
+                        { skill: skill.name },
+                        error
+                    );
+                }
+
+                const input = { name: skill.name };
+                const output = {
+                    ok: true as const,
+                    name: skill.name,
+                    description: skill.description,
+                    source: skill.source,
+                    directory: skill.directory,
+                    content: skill.content,
+                    files
+                };
+
+                db.query(
+                    "INSERT INTO tool_invocations (id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq) VALUES (?, ?, 'use_skill', ?, ?, NULL, 'success', ?, ?)"
+                ).run(
+                    invocationId,
+                    assistantMsgId,
+                    safeStringify(input),
+                    safeStringify(output),
+                    createdAt,
+                    messageSeq
+                );
+
+                controller.enqueue(
+                    sseEvent("tool-call", {
+                        id: invocationId,
+                        messageId: assistantMsgId,
+                        toolCallId,
+                        toolName: "use_skill",
+                        input,
+                        status: "success" as const,
+                        createdAt,
+                        messageSeq
+                    })
+                );
+                controller.enqueue(
+                    sseEvent("tool-result", {
+                        messageId: assistantMsgId,
+                        toolCallId,
+                        toolName: "use_skill",
+                        output,
+                        error: null,
+                        status: "success" as const
+                    })
+                );
+            }
+        } else if (useSkillNames && useSkillNames.length > 0) {
+            logger.log(
+                "[stream] No skills resolved for slash-command request",
+                { conversationId, requested: useSkillNames }
+            );
+        }
 
         const result = streamText({
             model,
@@ -2163,6 +2313,16 @@ export async function streamReplyToLastMessage(
 
         const modelMessages = buildModelMessages(workspaceId, history);
 
+        // Pull `use_skill_names` from the latest user message so slash-command
+        // skills the user requested at conversation creation (home flow:
+        // create -> /reply) carry into this reply. The column is JSON-encoded
+        // and may be NULL for pre-feature rows or messages that didn't use
+        // a slash command.
+        const useSkillNames = readSkillNamesFromLatestUserMessage(
+            db,
+            conversationId
+        );
+
         const assistantMsgId = crypto.randomUUID();
         const assistantCreatedAt = new Date().toISOString();
 
@@ -2197,7 +2357,8 @@ export async function streamReplyToLastMessage(
             assistantMsgId,
             assistantCreatedAt,
             modelMessages,
-            abortSignal
+            abortSignal,
+            useSkillNames
         });
     });
 }
@@ -2208,14 +2369,16 @@ export async function streamConversationReply(
     userContent: string,
     abortSignal?: AbortSignal,
     attachmentIds: string[] = [],
-    mentions: MessageMention[] = []
+    mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
 ): Promise<Response> {
     logger.log("[stream] streamConversationReply start", {
         workspaceId,
         conversationId,
         userContentLength: userContent.length,
         attachmentCount: attachmentIds.length,
-        mentionCount: mentions.length
+        mentionCount: mentions.length,
+        useSkillNames
     });
 
     const db = getWorkspaceDb(workspaceId);
@@ -2244,10 +2407,23 @@ export async function streamConversationReply(
         //    feedback before the (potentially slow) summarization call.
         const userMsgId = crypto.randomUUID();
         const userCreatedAt = new Date().toISOString();
+        // Persist requested-skill names on the user row so a future re-stream
+        // (e.g. resumed-after-crash flows that read history from disk) can
+        // recover them. The current path has them in scope already, so the
+        // INSERT is mostly belt-and-braces.
+        const skillNamesJson =
+            useSkillNames.length > 0 ? JSON.stringify(useSkillNames) : null;
 
         db.query(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
-        ).run(userMsgId, conversationId, "user", userContent, userCreatedAt);
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted, use_skill_names) VALUES (?, ?, ?, ?, ?, 0, ?)"
+        ).run(
+            userMsgId,
+            conversationId,
+            "user",
+            userContent,
+            userCreatedAt,
+            skillNamesJson
+        );
 
         db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
             userCreatedAt,
@@ -2355,7 +2531,8 @@ export async function streamConversationReply(
             assistantMsgId,
             assistantCreatedAt,
             modelMessages,
-            abortSignal
+            abortSignal,
+            useSkillNames
         });
     });
 }

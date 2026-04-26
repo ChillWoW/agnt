@@ -259,6 +259,52 @@ function escapeXmlAttribute(value: string): string {
         .replace(/>/g, "&gt;");
 }
 
+function escapeXmlText(value: string): string {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+/**
+ * Build a turn-only system block containing the FULL `SKILL.md` body for each
+ * skill the user explicitly requested for this turn (via a leading slash
+ * command in the chat input, e.g. `/find-skills`). The frontend strips that
+ * leading token and forwards the names as `useSkillNames`; the stream layer
+ * resolves them against the workspace's discovered skills and feeds the
+ * matched bodies into this block.
+ *
+ * IMPORTANT: This block is appended as a trailing `role: "system"` message
+ * to the per-turn `modelMessages` — NOT folded into the cached `instructions`
+ * field — so the conversation's prompt cache prefix (system prompt + repo
+ * instructions + skills catalog + chat history) stays bit-identical from one
+ * turn to the next. See `conversation.stream.ts` for the full caching note.
+ *
+ * Returns `""` for an empty input list so callers can cheaply skip the
+ * trailing-system-message append.
+ */
+export function buildActiveSkillsBlock(skills: Skill[]): string {
+    if (skills.length === 0) return "";
+
+    const blocks = skills
+        .map((skill) => {
+            const name = escapeXmlAttribute(skill.name);
+            const source = escapeXmlAttribute(skill.source);
+            const body = escapeXmlText(skill.content);
+            return `<skill name="${name}" source="${source}">\n${body}\n</skill>`;
+        })
+        .join("\n\n");
+
+    return (
+        `## Active Skills\n` +
+        `The user explicitly requested the playbooks below for this turn ` +
+        `(via a leading \`/<skill-name>\` slash command in the chat input). ` +
+        `Apply each playbook as if you had loaded it via \`use_skill\` ` +
+        `yourself — follow its instructions for the rest of this turn.\n\n` +
+        `<active_skills>\n${blocks}\n</active_skills>`
+    );
+}
+
 /**
  * Build the block that lists every available skill's name + description for
  * the system prompt. The agent reads this to decide when to call `use_skill`.

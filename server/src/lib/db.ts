@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS messages (
     compacted INTEGER NOT NULL DEFAULT 0,
     summary_of_until TEXT,
     model_id TEXT,
-    generation_duration_ms INTEGER
+    generation_duration_ms INTEGER,
+    use_skill_names TEXT
 );
 
 CREATE TABLE IF NOT EXISTS state_entries (
@@ -161,6 +162,14 @@ function runMigrations(db: Database): void {
     addColumnIfMissing(db, "messages", "summary_of_until", "TEXT");
     addColumnIfMissing(db, "messages", "model_id", "TEXT");
     addColumnIfMissing(db, "messages", "generation_duration_ms", "INTEGER");
+    // JSON-encoded array of skill names that should be auto-loaded into the
+    // system prompt for the turn that processes this user message. Written
+    // by the conversation create + message-stream routes when the user
+    // started their message with a `/skill-name` slash command. Read by
+    // `streamReplyToLastMessage` (home flow: create-then-reply via /reply)
+    // so the names survive the round-trip from createConversation to the
+    // first stream. Always NULL on assistant/system rows.
+    addColumnIfMissing(db, "messages", "use_skill_names", "TEXT");
 
     addColumnIfMissing(db, "attachments", "estimated_tokens", "INTEGER");
 

@@ -19,10 +19,21 @@ import {
     isMentionPopupActive,
     isMentionPopupOpen
 } from "./MentionSuggestion";
+import { SlashCommandMark } from "./SlashCommandMark";
+import {
+    isSlashPopupActive,
+    isSlashPopupOpen,
+    SlashSuggestionExtension,
+    type SlashSelectDecision
+} from "./SlashSuggestion";
 import {
     prefetchWorkspaceTree,
     type MentionEntryType
 } from "@/features/workspaces";
+import {
+    prefetchSlashCommands,
+    type SlashCommand
+} from "@/features/slash-commands";
 
 export interface SerializedMention {
     path: string;
@@ -32,6 +43,15 @@ export interface SerializedMention {
 export interface SerializedEditor {
     text: string;
     mentions: SerializedMention[];
+    /**
+     * Names (without the leading `/`) of every slash-marked token currently
+     * in the editor doc. These are emitted by the popover-select path only
+     * and reflect what the user picked. The marked text is **excluded**
+     * from `text` so the message body doesn't carry the slash command
+     * verbatim — `ChatInput` strips one adjacent whitespace per skip so we
+     * don't leave double-spaces.
+     */
+    slashCommandNames: string[];
 }
 
 export interface MentionEditorHandle {
@@ -41,6 +61,13 @@ export interface MentionEditorHandle {
     isEmpty: () => boolean;
     getDocJSON: () => unknown | null;
     setDocJSON: (json: unknown) => void;
+    /**
+     * Replace the editor content with a single paragraph containing the
+     * given plain text (no mentions, no marks). Used by `ChatInput` when
+     * stripping a leading mode command — the rest of the message stays
+     * editable while the slash token disappears.
+     */
+    setPlainText: (text: string) => void;
 }
 
 interface MentionEditorProps {
@@ -51,13 +78,27 @@ interface MentionEditorProps {
     onSubmit: () => void;
     onChange?: (serialized: SerializedEditor) => void;
     onPasteFiles?: (files: FileList) => void;
+    /**
+     * Fired the moment the user picks an entry from the slash-command
+     * popover. Return `"consumed"` to suppress the default inline-token
+     * insert (used for mode commands which switch mode immediately).
+     * Return `"insert"` (or omit) to fall through to the default
+     * skill-command insertion that leaves a marked `/<name>` token in the
+     * editor for the user to send with the rest of their message.
+     */
+    onSlashCommand?: (cmd: SlashCommand) => SlashSelectDecision;
     className?: string;
 }
 
 function serializeEditor(editor: Editor): SerializedEditor {
     const mentions: SerializedMention[] = [];
+    const slashCommandNames: string[] = [];
     let text = "";
     let firstBlock = true;
+    // After we skip a slash-marked token, suppress one leading whitespace
+    // from the next text emit so the message body doesn't carry a stray
+    // double-space where the token used to be.
+    let suppressLeadingWhitespace = false;
 
     editor.state.doc.forEach((block) => {
         if (!firstBlock) text += "\n";
@@ -83,23 +124,50 @@ function serializeEditor(editor: Editor): SerializedEditor {
                         type: mentionType
                     });
                 }
+                suppressLeadingWhitespace = false;
                 return;
             }
             if (node.type.name === "hardBreak") {
                 text += "\n";
+                suppressLeadingWhitespace = false;
                 return;
             }
             if (node.isText) {
-                text += node.text ?? "";
+                const isSlash = node.marks.some(
+                    (m) => m.type.name === "slashCommand"
+                );
+                if (isSlash) {
+                    const match = (node.text ?? "").match(
+                        /^\s*\/([a-zA-Z][\w-]*)/
+                    );
+                    if (match) {
+                        slashCommandNames.push(match[1].toLowerCase());
+                    }
+                    // Strip ONE adjacent space — prefer the space the
+                    // suggestion plugin auto-inserts after the marked
+                    // token (handled below by `suppressLeadingWhitespace`)
+                    // so we don't double-strip when the user typed a
+                    // space before the slash too. Touch `text` only if
+                    // there's no following text-node to consume.
+                    suppressLeadingWhitespace = true;
+                    return;
+                }
+                let chunk = node.text ?? "";
+                if (suppressLeadingWhitespace && chunk.startsWith(" ")) {
+                    chunk = chunk.slice(1);
+                }
+                suppressLeadingWhitespace = false;
+                text += chunk;
                 return;
             }
             node.forEach(walk);
         };
 
         block.forEach(walk);
+        suppressLeadingWhitespace = false;
     });
 
-    return { text, mentions };
+    return { text, mentions, slashCommandNames };
 }
 
 export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>(
@@ -112,6 +180,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
             onSubmit,
             onChange,
             onPasteFiles,
+            onSlashCommand,
             className
         },
         ref
@@ -120,6 +189,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         const onSubmitRef = useRef(onSubmit);
         const onChangeRef = useRef(onChange);
         const onPasteFilesRef = useRef(onPasteFiles);
+        const onSlashCommandRef = useRef(onSlashCommand);
         // The initial content is captured once when the editor instance is
         // built — subsequent prop changes don't re-seed the editor (we use
         // the imperative `setDocJSON` handle for that).
@@ -129,8 +199,11 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
             workspaceIdRef.current = workspaceId ?? null;
             // Warm the root-tree cache so the very first @ press is
             // instantaneous instead of waiting on a network round-trip.
+            // Same idea for slash commands so the skill list is ready by
+            // the time the user types `/`.
             if (workspaceId) {
                 prefetchWorkspaceTree(workspaceId, "");
+                prefetchSlashCommands(workspaceId);
             }
         }, [workspaceId]);
 
@@ -146,6 +219,10 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
             onPasteFilesRef.current = onPasteFiles;
         }, [onPasteFiles]);
 
+        useEffect(() => {
+            onSlashCommandRef.current = onSlashCommand;
+        }, [onSlashCommand]);
+
         const extensions = useMemo(
             () => [
                 Document,
@@ -154,6 +231,12 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                 HardBreak,
                 UndoRedo,
                 Placeholder.configure({ placeholder }),
+                SlashCommandMark,
+                SlashSuggestionExtension.configure({
+                    getWorkspaceId: () => workspaceIdRef.current,
+                    onSelectCommand: (cmd) =>
+                        onSlashCommandRef.current?.(cmd) ?? "insert"
+                }),
                 MentionExtension.configure({
                     HTMLAttributes: { class: "mention-chip" },
                     deleteTriggerWithBackspace: true,
@@ -207,13 +290,15 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                 },
                 handleKeyDown: (view, event) => {
                     // ProseMirror checks view-level handleKeyDown BEFORE
-                    // plugin-level ones, so we have to explicitly defer to the
-                    // mention suggestion plugin while its popup is open.
-                    // Otherwise Enter would submit the form instead of
-                    // selecting the highlighted entry.
+                    // plugin-level ones, so we have to explicitly defer to
+                    // the mention/slash suggestion plugins while either popup
+                    // is open. Otherwise Enter would submit the form instead
+                    // of selecting the highlighted entry.
                     const popupActive =
                         isMentionPopupOpen() ||
-                        isMentionPopupActive(view.state);
+                        isMentionPopupActive(view.state) ||
+                        isSlashPopupOpen() ||
+                        isSlashPopupActive(view.state);
 
                     if (
                         popupActive &&
@@ -270,7 +355,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                 serialize: () =>
                     editor
                         ? serializeEditor(editor)
-                        : { text: "", mentions: [] },
+                        : { text: "", mentions: [], slashCommandNames: [] },
                 isEmpty: () => editor?.isEmpty ?? true,
                 getDocJSON: () => editor?.getJSON() ?? null,
                 setDocJSON: (json) => {
@@ -288,6 +373,23 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                         >[0],
                         { emitUpdate: false }
                     );
+                },
+                setPlainText: (text) => {
+                    if (!editor) return;
+                    if (!text || text.length === 0) {
+                        editor.commands.clearContent(true);
+                        return;
+                    }
+                    editor.commands.setContent({
+                        type: "doc",
+                        content: [
+                            {
+                                type: "paragraph",
+                                content: [{ type: "text", text }]
+                            }
+                        ]
+                    });
+                    editor.commands.focus("end");
                 }
             }),
             [editor]

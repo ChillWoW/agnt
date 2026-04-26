@@ -261,13 +261,21 @@ export function createConversation(
     workspaceId: string,
     firstMessage: string,
     attachmentIds: string[] = [],
-    _mentions: MessageMention[] = []
+    _mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
 ): ConversationWithMessages {
     const db = getWorkspaceDb(workspaceId);
 
     const conversationId = crypto.randomUUID();
     const messageId = crypto.randomUUID();
     const now = new Date().toISOString();
+    // The home flow goes `createConversation` -> `/reply` -> stream, and the
+    // `/reply` endpoint takes no body — so we persist requested skill names
+    // on the user message row itself. The stream layer reads them back from
+    // the latest user message in `streamReplyToLastMessage`. NULL means
+    // "no slash command was used"; an empty string means the same.
+    const skillNamesJson =
+        useSkillNames.length > 0 ? JSON.stringify(useSkillNames) : null;
 
     const tx = db.transaction(() => {
         db.query(
@@ -275,8 +283,15 @@ export function createConversation(
         ).run(conversationId, DEFAULT_CONVERSATION_TITLE, now, now);
 
         db.query(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-        ).run(messageId, conversationId, "user", firstMessage, now);
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, use_skill_names) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(
+            messageId,
+            conversationId,
+            "user",
+            firstMessage,
+            now,
+            skillNamesJson
+        );
     });
 
     tx();

@@ -74,14 +74,16 @@ interface ConversationStoreState {
         workspaceId: string,
         message: string,
         attachmentIds?: string[],
-        mentions?: conversationApi.MessageMention[]
+        mentions?: conversationApi.MessageMention[],
+        useSkillNames?: string[]
     ) => Promise<ConversationWithMessages>;
     sendMessage: (
         workspaceId: string,
         conversationId: string,
         content: string,
         attachmentIds?: string[],
-        mentions?: conversationApi.MessageMention[]
+        mentions?: conversationApi.MessageMention[],
+        useSkillNames?: string[]
     ) => Promise<void>;
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     archiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -1657,13 +1659,15 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             workspaceId: string,
             message: string,
             attachmentIds: string[] = [],
-            mentions: conversationApi.MessageMention[] = []
+            mentions: conversationApi.MessageMention[] = [],
+            useSkillNames: string[] = []
         ) => {
             const conversation = await conversationApi.createConversation(
                 workspaceId,
                 message,
                 attachmentIds,
-                mentions
+                mentions,
+                useSkillNames
             );
 
             set((state) => {
@@ -1690,7 +1694,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             conversationId: string,
             content: string,
             attachmentIds: string[] = [],
-            mentions: conversationApi.MessageMention[] = []
+            mentions: conversationApi.MessageMention[] = [],
+            useSkillNames: string[] = []
         ) => {
             await runConversationStream(conversationId, (signal) =>
                 conversationApi.streamMessage(
@@ -1699,7 +1704,8 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     content,
                     signal,
                     attachmentIds,
-                    mentions
+                    mentions,
+                    useSkillNames
                 )
             );
         },

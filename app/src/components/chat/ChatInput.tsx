@@ -42,16 +42,26 @@ import { QuestionCard } from "./QuestionCard";
 import { TodosCard } from "./TodosCard";
 import {
     isMentionPopupOpen,
+    isSlashPopupOpen,
     MentionEditor,
     type MentionEditorHandle,
     type SerializedMention
 } from "./editor";
+import type { SlashSelectDecision } from "./editor/SlashSuggestion";
+import {
+    extractLeadingSlashCommand,
+    readCachedSlashCommands,
+    type SlashCommand
+} from "@/features/slash-commands";
+import { useAgenticMode } from "@/features/plans";
+import { usePermissionMode } from "@/features/permissions";
 
 interface ChatInputProps {
     onSend?: (
         value: string,
         attachmentIds: string[],
-        mentions: SerializedMention[]
+        mentions: SerializedMention[],
+        useSkillNames?: string[]
     ) => void;
     onStop?: () => void;
     isStreaming?: boolean;
@@ -70,6 +80,12 @@ export function ChatInput({
 }: ChatInputProps) {
     const [draftText, setDraftText] = useState("");
     const [isEmpty, setIsEmpty] = useState(true);
+    // The serializer drops slash-marked tokens from `draftText` so the
+    // message body never carries them. That means a draft consisting of
+    // only `/<skillname>` would otherwise look "empty" to `canSend`. This
+    // mirror flag tracks whether the editor still has any slash-marked
+    // skill token so the send button stays enabled in that case.
+    const [hasSlashMarks, setHasSlashMarks] = useState(false);
     const [dragActive, setDragActive] = useState(false);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const dragCounterRef = useRef(0);
@@ -150,54 +166,194 @@ export function ChatInput({
     const pendingQuestions = questionQueue?.[0];
     const questionCount = questionQueue?.length ?? 0;
 
+    const { setAgenticMode } = useAgenticMode({
+        workspaceId,
+        conversationId
+    });
+    const { setPermissionMode } = usePermissionMode({
+        workspaceId,
+        conversationId
+    });
+
+    /**
+     * Fired the moment the user picks an entry from the slash-command
+     * popover. Mode commands switch the corresponding mode on the spot
+     * (no Enter required) and report `"consumed"` so the suggestion
+     * plugin just deletes the typed `/<query>` range without inserting a
+     * marked token. Skill commands fall through to `"insert"` so the
+     * marked `/<name>` token lands in the editor for the user to send
+     * with the rest of their message.
+     */
+    const handleSlashSelect = useCallback(
+        (cmd: SlashCommand): SlashSelectDecision => {
+            if (cmd.kind === "mode" && cmd.mode) {
+                if (cmd.mode.kind === "agentic") {
+                    void setAgenticMode(cmd.mode.value);
+                } else {
+                    void setPermissionMode(cmd.mode.value);
+                }
+                return "consumed";
+            }
+            return "insert";
+        },
+        [setAgenticMode, setPermissionMode]
+    );
+
     const hasPending = pending.length > 0;
     const hasText = !isEmpty && draftText.trim().length > 0;
+    // Slash mode commands (`/agent`, `/plan`, `/ask`, `/bypass`) typed
+    // directly (without using the popover) act as a local UI toggle on
+    // Enter. Detect that case so the send button / Enter path can run
+    // even when the only thing in the draft is the slash text.
+    const looksLikeLeadingSlash =
+        hasText && /^\s*\/[a-zA-Z][\w-]*/.test(draftText);
     const canSend =
         !!workspaceId &&
         !isUploading &&
-        (hasText || pending.some((p) => p.status === "ready"));
+        (hasText ||
+            pending.some((p) => p.status === "ready") ||
+            looksLikeLeadingSlash ||
+            hasSlashMarks);
+
+    const resetEditorState = useCallback(() => {
+        editorRef.current?.clear();
+        setDraftText("");
+        setIsEmpty(true);
+        setHasSlashMarks(false);
+        if (saveTimerRef.current !== null) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+        }
+        pendingSnapshotRef.current = null;
+        if (slot) {
+            clearDraft(slot);
+        }
+    }, [slot]);
 
     const handleSend = useCallback(
         (event?: FormEvent<HTMLFormElement>) => {
             event?.preventDefault();
 
             if (!canSend) return;
-            // The user is mid-mention-selection — swallow the submit so Enter
-            // picks the highlighted entry instead of sending the message.
-            if (isMentionPopupOpen()) return;
+            // The user is mid-mention/slash-selection — swallow the submit
+            // so Enter picks the highlighted entry instead of sending.
+            if (isMentionPopupOpen() || isSlashPopupOpen()) return;
 
             const serialized = editorRef.current?.serialize() ?? {
                 text: "",
-                mentions: []
+                mentions: [],
+                slashCommandNames: []
             };
-            const content = serialized.text.trim();
+            // `serialized.text` already excludes any slash-marked tokens
+            // (the editor strips them during serialization, see
+            // `serializeEditor` in `MentionEditor.tsx`); skill names are
+            // surfaced via `slashCommandNames` instead.
+            const cleanedText = serialized.text;
             const mentions = serialized.mentions;
+            const cmds = readCachedSlashCommands(workspaceId);
+
+            // Primary slash-command source: the marked tokens picked from
+            // the popover. Mode commands never appear here — they're
+            // intercepted in `handleSlashSelect` and fire immediately on
+            // selection — so any name we see in this list is a skill.
+            const skillNamesFromMarks = serialized.slashCommandNames
+                .map((n) => n.toLowerCase())
+                .filter((name) =>
+                    cmds.some(
+                        (c) =>
+                            c.kind === "skill" &&
+                            c.name.toLowerCase() === name
+                    )
+                );
+
+            // Fallback for typed-but-not-popover paths: the user typed
+            // `/agent` (or `/plan`, etc.) at the start of the message
+            // without clicking the popover, then hit Enter. This branch
+            // catches mode commands typed verbatim and applies the same
+            // immediate-toggle-then-bail behavior the popover provides.
+            // Skill commands fall through to the regular send path.
+            let textForSend = cleanedText;
+            if (skillNamesFromMarks.length === 0) {
+                const { command, rest } =
+                    extractLeadingSlashCommand(cleanedText);
+                const matched = command
+                    ? cmds.find(
+                          (c) => c.name.toLowerCase() === command
+                      )
+                    : null;
+
+                if (matched && matched.kind === "mode" && matched.mode) {
+                    if (matched.mode.kind === "agentic") {
+                        void setAgenticMode(matched.mode.value);
+                    } else {
+                        void setPermissionMode(matched.mode.value);
+                    }
+                    if (rest.length === 0) {
+                        resetEditorState();
+                    } else {
+                        editorRef.current?.setPlainText(rest);
+                        setDraftText(rest);
+                        setIsEmpty(false);
+                    }
+                    return;
+                }
+
+                if (matched && matched.kind === "skill") {
+                    skillNamesFromMarks.push(matched.name.toLowerCase());
+                    textForSend = rest;
+                }
+            }
+
+            const useSkillNames = Array.from(new Set(skillNamesFromMarks));
+            const content = textForSend.trim();
+
+            // Skill-only message guard: if the popover-marked path picked
+            // up a skill but the rest of the message is empty, we still
+            // need SOMETHING to send to the server. Bail early — the user
+            // probably meant to keep typing.
+            if (
+                content.length === 0 &&
+                useSkillNames.length === 0 &&
+                pending.every((p) => p.status !== "ready")
+            ) {
+                return;
+            }
 
             const attachmentIds = takeReadyIds();
 
-            editorRef.current?.clear();
-            setDraftText("");
-            setIsEmpty(true);
-            if (saveTimerRef.current !== null) {
-                window.clearTimeout(saveTimerRef.current);
-                saveTimerRef.current = null;
-            }
-            pendingSnapshotRef.current = null;
-            if (slot) {
-                clearDraft(slot);
-            }
+            resetEditorState();
             clearPending();
-            onSend?.(content, attachmentIds, mentions);
+            onSend?.(
+                content,
+                attachmentIds,
+                mentions,
+                useSkillNames.length > 0 ? useSkillNames : undefined
+            );
         },
-        [canSend, clearPending, onSend, slot, takeReadyIds]
+        [
+            canSend,
+            clearPending,
+            onSend,
+            pending,
+            resetEditorState,
+            setAgenticMode,
+            setPermissionMode,
+            takeReadyIds,
+            workspaceId
+        ]
     );
 
     const handleEditorChange = useCallback(
-        (serialized: { text: string; mentions: SerializedMention[] }) => {
+        (serialized: {
+            text: string;
+            mentions: SerializedMention[];
+            slashCommandNames: string[];
+        }) => {
             setDraftText(serialized.text);
             setIsEmpty(
                 editorRef.current?.isEmpty() ?? serialized.text.length === 0
             );
+            setHasSlashMarks(serialized.slashCommandNames.length > 0);
 
             if (!slot) return;
             const editor = editorRef.current;
@@ -246,18 +402,26 @@ export function ChatInput({
             editor.clear();
             setDraftText("");
             setIsEmpty(true);
+            setHasSlashMarks(false);
             return;
         }
 
         const snapshot = getDraft(slot);
         if (snapshot && snapshot.docJSON) {
             editor.setDocJSON(snapshot.docJSON);
-            setDraftText(snapshot.plainText);
-            setIsEmpty(snapshot.plainText.trim().length === 0);
+            // The persisted snapshot's plain text excluded slash-marked
+            // tokens at save time, but the docJSON still carries them as
+            // marks — so re-serialize after hydrate to recover the live
+            // slash-marks flag for the send button.
+            const refreshed = editor.serialize();
+            setDraftText(refreshed.text);
+            setIsEmpty(editor.isEmpty());
+            setHasSlashMarks(refreshed.slashCommandNames.length > 0);
         } else {
             editor.clear();
             setDraftText("");
             setIsEmpty(true);
+            setHasSlashMarks(false);
         }
     }, [flushSaveTimer, slot, slotKey]);
 
@@ -392,6 +556,7 @@ export function ChatInput({
                                     onSubmit={handleEditorSubmit}
                                     onChange={handleEditorChange}
                                     onPasteFiles={handlePasteFiles}
+                                    onSlashCommand={handleSlashSelect}
                                 />
                             </div>
 

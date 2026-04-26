@@ -34,7 +34,8 @@ function HomeRoute() {
     const handleSend = async (
         message: string,
         attachmentIds: string[],
-        mentions: { path: string; type: "file" | "directory" }[]
+        mentions: { path: string; type: "file" | "directory" }[],
+        useSkillNames?: string[]
     ) => {
         if (!activeWorkspaceId) return;
 
@@ -46,7 +47,8 @@ function HomeRoute() {
             activeWorkspaceId,
             message,
             attachmentIds,
-            mentions
+            mentions,
+            useSkillNames
         );
 
         // Carry the permission mode shown on `/` into the new conversation as
@@ -128,8 +130,13 @@ function HomeRoute() {
                         </div>
                     )}
                     <ChatInput
-                        onSend={(msg, attachmentIds, mentions) =>
-                            void handleSend(msg, attachmentIds, mentions)
+                        onSend={(msg, attachmentIds, mentions, useSkillNames) =>
+                            void handleSend(
+                                msg,
+                                attachmentIds,
+                                mentions,
+                                useSkillNames
+                            )
                         }
                         workspaceId={activeWorkspaceId}
                         placeholder={

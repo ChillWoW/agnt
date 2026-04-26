@@ -6,12 +6,7 @@ import {
     useRef,
     useState
 } from "react";
-import {
-    ArrowElbowDownLeftIcon,
-    CaretRightIcon,
-    FileIcon,
-    FolderIcon
-} from "@phosphor-icons/react";
+import { CaretRightIcon, FileIcon, FolderIcon } from "@phosphor-icons/react";
 import {
     fetchWorkspaceSearch,
     fetchWorkspaceTree,
@@ -111,7 +106,9 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                 return readCachedSearch(workspaceId, query);
             }
             const tree = readCachedTree(workspaceId, cursorPath);
-            return tree ? filterTree(tree, filter).slice(0, MAX_RESULTS) : undefined;
+            return tree
+                ? filterTree(tree, filter).slice(0, MAX_RESULTS)
+                : undefined;
         }, [workspaceId, query, shouldSearch, cursorPath, filter]);
 
         const [entries, setEntries] = useState<MentionEntry[]>(cached ?? []);
@@ -238,9 +235,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                 onKeyDown: ({ event }) => {
                     if (event.key === "ArrowDown") {
                         if (entries.length === 0) return false;
-                        setSelectedIndex(
-                            (prev) => (prev + 1) % entries.length
-                        );
+                        setSelectedIndex((prev) => (prev + 1) % entries.length);
                         return true;
                     }
                     if (event.key === "ArrowUp") {
@@ -266,9 +261,9 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
         );
 
         const showLoading = loading && entries.length === 0;
-        const showEmpty = !loading && !error && entries.length === 0;
-        const selectedEntry = entries[selectedIndex];
-        const selectedIsDir = selectedEntry?.type === "directory";
+        const showEmpty = !error && entries.length === 0;
+
+        if (showEmpty) return null;
 
         return (
             <div
@@ -311,7 +306,7 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                     </div>
                 )}
 
-                <div className="max-h-72 overflow-y-auto hide-scrollbar p-1">
+                <div className="max-h-80 overflow-y-auto hide-scrollbar p-1">
                     {showLoading ? (
                         <div className="flex flex-col gap-1 p-1">
                             {Array.from({ length: 5 }).map((_, i) => (
@@ -379,12 +374,12 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                                         "group relative flex w-full items-center gap-2 rounded-sm py-1.5 pr-2 pl-2.5 text-left text-xs",
                                         "transition-colors duration-75",
                                         isSelected
-                                            ? "bg-dark-700/60 text-dark-50"
+                                            ? "bg-dark-800 text-dark-50"
                                             : "text-dark-100"
                                     )}
                                 >
                                     {isSelected && (
-                                        <span className="absolute inset-y-1 left-0 w-0.5 rounded-r-full bg-dark-50/70" />
+                                        <span className="absolute inset-y-1 left-0 w-0.5 rounded-r-full bg-dark-50" />
                                     )}
                                     <Icon
                                         className={cn(
@@ -428,41 +423,6 @@ export const MentionList = forwardRef<MentionListHandle, MentionListProps>(
                         })
                     )}
                 </div>
-
-                {entries.length > 0 && (
-                    <div className="flex items-center justify-between gap-3 border-t border-dark-700/80 bg-dark-900/40 px-2.5 py-1 text-[10px] text-dark-300">
-                        <div className="flex items-center gap-2">
-                            <span className="flex items-center gap-1">
-                                <kbd className="flex h-3.5 min-w-3.5 items-center justify-center rounded-[3px] border border-dark-600 bg-dark-800 px-1 text-[9px] text-dark-200">
-                                    ↑
-                                </kbd>
-                                <kbd className="flex h-3.5 min-w-3.5 items-center justify-center rounded-[3px] border border-dark-600 bg-dark-800 px-1 text-[9px] text-dark-200">
-                                    ↓
-                                </kbd>
-                                <span>navigate</span>
-                            </span>
-                            <span className="flex items-center gap-1">
-                                <kbd className="flex h-3.5 min-w-3.5 items-center justify-center rounded-[3px] border border-dark-600 bg-dark-800 px-1 text-[9px] text-dark-200">
-                                    <ArrowElbowDownLeftIcon
-                                        className="size-2.5"
-                                        weight="bold"
-                                    />
-                                </kbd>
-                                <span>
-                                    {selectedIsDir ? "insert folder" : "insert"}
-                                </span>
-                            </span>
-                        </div>
-                        {selectedIsDir && (
-                            <span className="flex items-center gap-1">
-                                <kbd className="flex h-3.5 min-w-3.5 items-center justify-center rounded-[3px] border border-dark-600 bg-dark-800 px-1 text-[9px] text-dark-200">
-                                    /
-                                </kbd>
-                                <span>open</span>
-                            </span>
-                        )}
-                    </div>
-                )}
             </div>
         );
     }

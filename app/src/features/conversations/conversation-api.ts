@@ -20,11 +20,12 @@ export function createConversation(
     workspaceId: string,
     message: string,
     attachmentIds: string[] = [],
-    mentions: MessageMention[] = []
+    mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
 ) {
     return api.post<ConversationWithMessages>(
         `/workspaces/${workspaceId}/conversations`,
-        { body: { message, attachmentIds, mentions } }
+        { body: { message, attachmentIds, mentions, useSkillNames } }
     );
 }
 
@@ -46,12 +47,13 @@ export function streamMessage(
     content: string,
     signal?: AbortSignal,
     attachmentIds: string[] = [],
-    mentions: MessageMention[] = []
+    mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
 ): Promise<Response> {
     return api.post<Response>(
         `/workspaces/${workspaceId}/conversations/${conversationId}/stream`,
         {
-            body: { content, attachmentIds, mentions },
+            body: { content, attachmentIds, mentions, useSkillNames },
             parseAs: "response",
             signal
         }

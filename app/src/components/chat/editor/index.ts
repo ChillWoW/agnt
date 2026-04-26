@@ -5,3 +5,4 @@ export {
     type SerializedMention
 } from "./MentionEditor";
 export { isMentionPopupOpen } from "./MentionSuggestion";
+export { isSlashPopupOpen } from "./SlashSuggestion";

@@ -112,7 +112,8 @@ function ConversationRoute() {
     const handleSend = (
         content: string,
         attachmentIds: string[],
-        mentions: { path: string; type: "file" | "directory" }[]
+        mentions: { path: string; type: "file" | "directory" }[],
+        useSkillNames?: string[]
     ) => {
         if (!activeWorkspaceId || !conversation) return;
         void sendMessage(
@@ -120,7 +121,8 @@ function ConversationRoute() {
             conversation.id,
             content,
             attachmentIds,
-            mentions
+            mentions,
+            useSkillNames
         );
     };
 

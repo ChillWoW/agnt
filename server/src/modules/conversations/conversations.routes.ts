@@ -60,17 +60,52 @@ function sanitizeMentions(raw: unknown): MessageMention[] {
     return out;
 }
 
+/**
+ * Maximum number of skills the frontend is allowed to inject for one turn.
+ * v1 only forwards the leading slash command, so this is really a "1 + a
+ * little headroom" cap to keep payloads small even if a future version
+ * supports multiple skills per turn.
+ */
+const MAX_SKILL_NAMES_PER_TURN = 4;
+const SKILL_NAME_PATTERN = /^[a-zA-Z][\w-]*$/;
+
+/**
+ * Sanitize the `useSkillNames` request field: each entry must be a non-empty
+ * string matching `^[a-zA-Z][\w-]*$` (matches the same shape `discoverSkills`
+ * accepts as a name and the leading-slash parser produces). Lower-cased,
+ * trimmed, deduped, capped at `MAX_SKILL_NAMES_PER_TURN`.
+ */
+function sanitizeSkillNames(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+        if (typeof item !== "string") continue;
+        const trimmed = item.trim();
+        if (trimmed.length === 0) continue;
+        if (!SKILL_NAME_PATTERN.test(trimmed)) continue;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(key);
+        if (out.length >= MAX_SKILL_NAMES_PER_TURN) break;
+    }
+    return out;
+}
+
 const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     .get("/:id/conversations", ({ params }) => {
         return listConversations(params.id);
     })
     .post("/:id/conversations", async ({ params, body, set }) => {
         try {
-            const { message, attachmentIds, mentions } = body as {
-                message: string;
-                attachmentIds?: unknown;
-                mentions?: unknown;
-            };
+            const { message, attachmentIds, mentions, useSkillNames } =
+                body as {
+                    message: string;
+                    attachmentIds?: unknown;
+                    mentions?: unknown;
+                    useSkillNames?: unknown;
+                };
 
             if (!message || typeof message !== "string") {
                 set.status = 400;
@@ -84,12 +119,14 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                 : [];
 
             const parsedMentions = sanitizeMentions(mentions);
+            const parsedSkillNames = sanitizeSkillNames(useSkillNames);
 
             return createConversation(
                 params.id,
                 message,
                 ids,
-                parsedMentions
+                parsedMentions,
+                parsedSkillNames
             );
         } catch (error) {
             set.status = 400;
@@ -300,11 +337,13 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
     })
     .post("/:id/conversations/:conversationId/stream", async ({ params, body, request, set }) => {
         try {
-            const { content, attachmentIds, mentions } = body as {
-                content: string;
-                attachmentIds?: unknown;
-                mentions?: unknown;
-            };
+            const { content, attachmentIds, mentions, useSkillNames } =
+                body as {
+                    content: string;
+                    attachmentIds?: unknown;
+                    mentions?: unknown;
+                    useSkillNames?: unknown;
+                };
 
             if (!content || typeof content !== "string") {
                 set.status = 400;
@@ -318,6 +357,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                 : [];
 
             const parsedMentions = sanitizeMentions(mentions);
+            const parsedSkillNames = sanitizeSkillNames(useSkillNames);
 
             return streamConversationReply(
                 params.id,
@@ -325,7 +365,8 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                 content,
                 request.signal,
                 ids,
-                parsedMentions
+                parsedMentions,
+                parsedSkillNames
             );
         } catch (error) {
             set.status =
