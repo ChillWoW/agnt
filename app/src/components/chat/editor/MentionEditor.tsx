@@ -19,7 +19,10 @@ import {
     isMentionPopupActive,
     isMentionPopupOpen
 } from "./MentionSuggestion";
-import type { MentionEntryType } from "@/features/workspaces";
+import {
+    prefetchWorkspaceTree,
+    type MentionEntryType
+} from "@/features/workspaces";
 
 export interface SerializedMention {
     path: string;
@@ -116,6 +119,11 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
 
         useEffect(() => {
             workspaceIdRef.current = workspaceId ?? null;
+            // Warm the root-tree cache so the very first @ press is
+            // instantaneous instead of waiting on a network round-trip.
+            if (workspaceId) {
+                prefetchWorkspaceTree(workspaceId, "");
+            }
         }, [workspaceId]);
 
         useEffect(() => {

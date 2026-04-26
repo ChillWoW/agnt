@@ -3,6 +3,9 @@ export { fetchRepoInstructions } from "./workspace-api";
 export {
     fetchWorkspaceTree,
     fetchWorkspaceSearch,
+    readCachedTree,
+    readCachedSearch,
+    prefetchWorkspaceTree,
     type MentionEntry,
     type MentionEntryType
 } from "./mention-search";
