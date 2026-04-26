@@ -42,6 +42,14 @@ interface ConversationStoreState {
     contextByConversationId: Record<string, ContextSummary>;
     contextRefreshTokens: Record<string, number>;
     subagentsByParentId: Record<string, Conversation[]>;
+    /**
+     * Per-conversation flag set to true while the server is running
+     * auto-compaction (between `compaction-started` and one of `compacted`,
+     * `compaction-skipped`, or `compaction-error`). The chat surface uses
+     * this to render a transient "Summarizing chat context…" indicator so
+     * the user has feedback during the 5–10s LLM call.
+     */
+    compactingByConversationId: Record<string, true>;
 
     setActiveConversation: (conversationId: string | null) => void;
     markConversationRead: (conversationId: string) => void;
@@ -51,6 +59,7 @@ interface ConversationStoreState {
         summary: ContextSummary
     ) => void;
     bumpContextRefresh: (conversationId: string) => void;
+    setCompacting: (conversationId: string, compacting: boolean) => void;
 
     loadConversations: (workspaceId: string) => Promise<void>;
     loadArchivedConversations: (workspaceId: string) => Promise<void>;
@@ -811,6 +820,9 @@ function handleConversationSseEvent(
                 setOutcome("finished");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
                 const usage = (data.usage ?? null) as UsageSseEvent | null;
                 const assistantMessageId = data.assistantMessageId as
                     | string
@@ -904,7 +916,64 @@ function handleConversationSseEvent(
                 break;
             }
 
+            case "compaction-started": {
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, true);
+                break;
+            }
+
+            case "compaction-skipped": {
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
+                break;
+            }
+
+            case "compaction-error": {
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
+                // Error is logged server-side; no destructive UI state to
+                // unwind here. The stream will continue without compaction
+                // and the model may itself error out if it overflows the
+                // context window — that error path already surfaces via the
+                // existing `error` SSE handler.
+                const errMessage =
+                    typeof data.error === "string"
+                        ? (data.error as string)
+                        : "unknown";
+                console.warn(
+                    "[conversation-store] Compaction failed:",
+                    errMessage
+                );
+                break;
+            }
+
+            case "mid-turn-trim": {
+                // Server emitted a one-shot notice that it had to trim
+                // oversized tool-result outputs in-flight to keep the
+                // current assistant turn under the model's context
+                // window. Pure FYI for the client — log for debugging
+                // and let the existing breadcrumb handlers surface a
+                // visual hint where appropriate.
+                const trimmedCount =
+                    typeof data.trimmed_count === "number"
+                        ? (data.trimmed_count as number)
+                        : 0;
+                console.info(
+                    "[conversation-store] mid-turn tool-result trim:",
+                    trimmedCount,
+                    "result(s) trimmed in conversation",
+                    conversationId
+                );
+                break;
+            }
+
             case "compacted": {
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
                 const evt = data as unknown as CompactedSseEvent;
                 const summarizedSet = new Set(evt.summarizedMessageIds);
                 updateConversation((prev) => {
@@ -952,6 +1021,9 @@ function handleConversationSseEvent(
                 setOutcome("aborted");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
                 const abortedModelId =
                     (data.modelId as string | undefined) ?? null;
                 const abortedDurationMs =
@@ -1024,6 +1096,9 @@ function handleConversationSseEvent(
                 setOutcome("errored");
                 usePermissionStore.getState().clearPending(conversationId);
                 useQuestionStore.getState().clearPending(conversationId);
+                useConversationStore
+                    .getState()
+                    .setCompacting(conversationId, false);
                 updateConversation((prev) => ({
                     ...prev,
                     messages: prev.messages.filter(
@@ -1269,6 +1344,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         contextByConversationId: {},
         contextRefreshTokens: {},
         subagentsByParentId: {},
+        compactingByConversationId: {},
 
         setContextSummary: (
             conversationId: string,
@@ -1290,6 +1366,31 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                         (state.contextRefreshTokens[conversationId] ?? 0) + 1
                 }
             }));
+        },
+
+        setCompacting: (conversationId: string, compacting: boolean) => {
+            set((state) => {
+                if (compacting) {
+                    if (state.compactingByConversationId[conversationId]) {
+                        return {};
+                    }
+                    return {
+                        compactingByConversationId: {
+                            ...state.compactingByConversationId,
+                            [conversationId]: true
+                        }
+                    };
+                }
+                if (!state.compactingByConversationId[conversationId]) {
+                    return {};
+                }
+                return {
+                    compactingByConversationId: omitKey(
+                        state.compactingByConversationId,
+                        conversationId
+                    )
+                };
+            });
         },
 
         setActiveConversation: (conversationId: string | null) => {

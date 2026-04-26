@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { ArchiveIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, CaretRightIcon } from "@phosphor-icons/react";
 import type { Message } from "@/features/conversations/conversation-types";
+import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
+import { useConversationStore } from "@/features/conversations";
 import { MessageBubble } from "./MessageBubble";
 
 const SCROLL_THRESHOLD = 80;
 
 interface MessageListProps {
     messages: Message[];
+    conversationId?: string;
     scrollButtonRef?: React.RefObject<HTMLDivElement | null>;
     scrollToBottomRef?: React.RefObject<(() => void) | null>;
 }
 
-export function MessageList({ messages, scrollButtonRef, scrollToBottomRef }: MessageListProps) {
+export function MessageList({
+    messages,
+    conversationId,
+    scrollButtonRef,
+    scrollToBottomRef
+}: MessageListProps) {
+    const isCompacting = useConversationStore((state) =>
+        conversationId
+            ? Boolean(state.compactingByConversationId[conversationId])
+            : false
+    );
     const scrollRef = useRef<HTMLDivElement>(null);
     const isAtBottom = useRef(true);
     const showScrollButton = useRef(false);
@@ -85,12 +98,17 @@ export function MessageList({ messages, scrollButtonRef, scrollToBottomRef }: Me
         if (isAtBottom.current) {
             snapToBottom();
         }
-    }, [messages, snapToBottom]);
+    }, [messages, isCompacting, snapToBottom]);
 
     const renderedItems = useMemo(() => {
         const items: Array<
             | { kind: "message"; message: Message }
-            | { kind: "banner"; id: string; count: number }
+            | {
+                  kind: "compaction";
+                  id: string;
+                  count: number;
+                  message: Message;
+              }
         > = [];
 
         let pendingCompactedCount = 0;
@@ -101,17 +119,15 @@ export function MessageList({ messages, scrollButtonRef, scrollToBottomRef }: Me
                 continue;
             }
 
-            if (
-                message.role === "system" &&
-                message.summary_of_until &&
-                pendingCompactedCount > 0
-            ) {
+            if (message.role === "system" && message.summary_of_until) {
                 items.push({
-                    kind: "banner",
-                    id: `banner-${message.id}`,
-                    count: pendingCompactedCount
+                    kind: "compaction",
+                    id: `compaction-${message.id}`,
+                    count: pendingCompactedCount,
+                    message
                 });
                 pendingCompactedCount = 0;
+                continue;
             }
 
             items.push({ kind: "message", message });
@@ -125,66 +141,97 @@ export function MessageList({ messages, scrollButtonRef, scrollToBottomRef }: Me
             <div ref={scrollRef} className="h-full overflow-y-auto">
                 <div className="mx-auto max-w-3xl px-4 py-6">
                     {renderedItems.map((item) => {
-                        if (item.kind === "banner") {
+                        if (item.kind === "compaction") {
                             return (
-                                <CompactionBanner
+                                <CompactionMarker
                                     key={item.id}
                                     count={item.count}
-                                />
-                            );
-                        }
-                        const message = item.message;
-                        if (
-                            message.role === "system" &&
-                            message.summary_of_until
-                        ) {
-                            return (
-                                <CompactionSummary
-                                    key={message.id}
-                                    message={message}
+                                    message={item.message}
                                 />
                             );
                         }
                         return (
                             <MessageBubble
-                                key={message.id}
-                                message={message}
+                                key={item.message.id}
+                                message={item.message}
                             />
                         );
                     })}
+                    {isCompacting && <CompactionInProgress />}
                 </div>
             </div>
         </div>
     );
 }
 
-function CompactionBanner({ count }: { count: number }) {
+function CompactionInProgress() {
     return (
-        <div className="my-4 flex items-center gap-2 text-[11px] uppercase tracking-wide text-dark-300">
+        <div className="my-6 flex items-center gap-2 text-[11px] uppercase tracking-wide text-dark-300">
             <div className="h-px flex-1 bg-dark-700" />
-            <ArchiveIcon className="size-3.5" weight="bold" />
-            <span>
-                Compacted {count} older {count === 1 ? "message" : "messages"}{" "}
-                into a summary
-            </span>
+            <div className="flex items-center gap-1.5">
+                <ArchiveIcon
+                    className="size-3.5 animate-pulse"
+                    weight="bold"
+                />
+                <span>Summarizing chat context…</span>
+            </div>
             <div className="h-px flex-1 bg-dark-700" />
         </div>
     );
 }
 
-function CompactionSummary({ message }: { message: Message }) {
+const COMPACTION_PRELUDE_RE = /^\[Compacted summary of \d+ earlier messages\]\s*\n+/;
+
+function stripCompactionPrelude(content: string): string {
+    return content.replace(COMPACTION_PRELUDE_RE, "");
+}
+
+function CompactionMarker({
+    count,
+    message
+}: {
+    count: number;
+    message: Message;
+}) {
+    const summaryBody = useMemo(
+        () => stripCompactionPrelude(message.content).trim(),
+        [message.content]
+    );
+    const hasBody = summaryBody.length > 0;
+
     return (
-        <details className="mb-4 rounded-md border border-dark-700 bg-dark-900 text-xs text-dark-100">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-dark-200 transition-colors hover:text-dark-50">
-                <ArchiveIcon className="size-3.5" weight="bold" />
-                <span>Conversation summary</span>
-                <span className="ml-auto text-[11px] text-dark-300">
-                    click to expand
-                </span>
+        <details className="group/compact my-6">
+            <summary
+                className={
+                    "flex list-none items-center gap-2 text-[11px] uppercase tracking-wide text-dark-300 transition-colors " +
+                    (hasBody
+                        ? "cursor-pointer hover:text-dark-100"
+                        : "cursor-default")
+                }
+            >
+                <div className="h-px flex-1 bg-dark-700" />
+                <div className="flex items-center gap-1.5">
+                    {hasBody && (
+                        <CaretRightIcon
+                            className="size-3 transition-transform group-open/compact:rotate-90"
+                            weight="bold"
+                        />
+                    )}
+                    <ArchiveIcon className="size-3.5" weight="bold" />
+                    <span>Chat context summarized</span>
+                    {count > 0 && (
+                        <span className="font-normal normal-case tracking-normal text-dark-400">
+                            · {count} older {count === 1 ? "message" : "messages"}
+                        </span>
+                    )}
+                </div>
+                <div className="h-px flex-1 bg-dark-700" />
             </summary>
-            <div className="whitespace-pre-wrap border-t border-dark-800 px-3 py-2 text-dark-100">
-                {message.content}
-            </div>
+            {hasBody && (
+                <div className="mt-3 rounded-md border border-dark-700 bg-dark-900 px-3 py-2 text-xs text-dark-100">
+                    <MarkdownRenderer content={summaryBody} />
+                </div>
+            )}
         </details>
     );
 }

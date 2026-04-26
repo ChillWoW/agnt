@@ -234,6 +234,7 @@ function ConversationRoute() {
             >
                 <MessageList
                     messages={visibleMessages}
+                    conversationId={conversation.id}
                     scrollButtonRef={scrollButtonRef}
                     scrollToBottomRef={scrollToBottomRef}
                 />

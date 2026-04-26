@@ -55,6 +55,7 @@ interface MessageTokensRow {
     reasoning_tokens: number | null;
     compacted: number;
     created_at: string;
+    summary_of_until: string | null;
 }
 
 interface ToolInvocationOutputRow {
@@ -163,7 +164,7 @@ export function computeContextSummary(
 
     const rows = db
         .query(
-            "SELECT id, role, content, reasoning_tokens, compacted, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            "SELECT id, role, content, reasoning_tokens, compacted, created_at, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
         )
         .all(conversationId) as MessageTokensRow[];
 
@@ -181,7 +182,10 @@ export function computeContextSummary(
         if (typeof row.reasoning_tokens === "number") {
             reasoningTokens += row.reasoning_tokens;
         }
-        if (row.role === "system" && row.content.length > 0) {
+        // Only count actual compaction summary rows, not arbitrary system
+        // messages. The `summary_of_until` field is set exclusively by
+        // compactConversation so it's the authoritative marker.
+        if (row.role === "system" && row.summary_of_until) {
             hasCompactSummary = true;
         }
     }

@@ -1,6 +1,7 @@
 import {
     stepCountIs,
     streamText,
+    type ModelMessage as SdkModelMessage,
     type ToolCallPart as SdkToolCallPart,
     type ToolResultPart as SdkToolResultPart
 } from "ai";
@@ -50,7 +51,10 @@ import {
     registerToolInvocationContext,
     unregisterToolInvocationContext
 } from "./shell/tool-context";
-import { compactConversation } from "./compact.service";
+import {
+    compactConversation,
+    isCompactTrimmedOutput
+} from "./compact.service";
 import { COMPACT_THRESHOLD, computeContextSummary } from "./context.service";
 import { countTokens } from "../../lib/tokenizer";
 import { subscribeToPlanUpdates } from "./plans";
@@ -73,7 +77,6 @@ import { buildConversationPrompt } from "./conversation.prompt";
 import { generateConversationTitleIfNeeded } from "./conversation-title";
 import {
     buildMentionsInstructionBlock,
-    estimateMentionsBlockTokens,
     parseMentionsFromContent
 } from "./mentions";
 import type { MessageMention, SubagentType } from "./conversations.types";
@@ -417,6 +420,15 @@ function toolResultOutputFromInvocation(
     const output = invocation.output;
     if (output === null || output === undefined) {
         return { type: "text", value: "" };
+    }
+
+    // If the output_json was trimmed during compaction (see
+    // `compact.service.ts` -> `buildTrimmedOutputSentinel`), short-circuit:
+    // the model just sees the placeholder text and the tool-specific
+    // `toModelOutput` is not invoked (it would crash on the sentinel shape
+    // anyway since it's not the tool's expected output schema).
+    if (isCompactTrimmedOutput(output)) {
+        return { type: "text", value: output.placeholder };
     }
 
     // Apply the tool's toModelOutput on replay so the stored raw JSON
@@ -777,6 +789,220 @@ function safeStringify(value: unknown): string {
     }
 }
 
+/**
+ * Mid-turn context-window trimming.
+ *
+ * `compactConversation` only runs *between* user turns: it summarizes
+ * messages already persisted in the DB. But a single assistant turn can
+ * accumulate hundreds of kilobytes of tool output (read_file, grep, etc.)
+ * inside `streamText`'s tool loop, and those live entirely in memory
+ * until the turn finishes. Without intervention, the loop happily keeps
+ * sending the entire growing transcript to the model on every step until
+ * we cross the model's hard context limit and crash the turn.
+ *
+ * The helper below is wired into `streamText`'s `prepareStep` callback.
+ * On each step it estimates the token budget of the messages array and,
+ * if we're over budget, replaces the oldest oversized tool-result
+ * outputs with a short placeholder ("[Output truncated mid-turn …]").
+ * Trimming preserves `toolCallId`/`toolName` so the SDK still pairs the
+ * tool-call with its result — the model just sees a shorter result.
+ *
+ * The closure-scoped `Set<string>` of trimmed `toolCallId`s makes the
+ * trim sticky: once a tool-result is shrunk on step N, it stays shrunk
+ * for steps N+1, N+2, … so we don't re-grow into overflow.
+ */
+
+/**
+ * Tool-results smaller than this character count are never trimmed.
+ * Small results (search hits, brief errors) are usually still useful as
+ * context, and trimming them yields little token savings.
+ */
+const TOOL_RESULT_TRIM_AT_CHARS = 4000;
+
+/** Coarse chars→tokens ratio for fast budget estimation. */
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+
+function estimateMessageChars(msg: SdkModelMessage): number {
+    const content = msg.content as unknown;
+    if (typeof content === "string") return content.length;
+    if (!Array.isArray(content)) return 0;
+    let total = 0;
+    for (const part of content) {
+        if (!part || typeof part !== "object") continue;
+        const p = part as unknown as Record<string, unknown>;
+        if (typeof p.text === "string") total += p.text.length;
+        if (p.type === "tool-result") {
+            const out = p.output as { type?: string; value?: unknown };
+            if (out?.type === "text" && typeof out.value === "string") {
+                total += out.value.length;
+            } else if (out?.type === "json") {
+                try {
+                    total += JSON.stringify(out.value ?? "").length;
+                } catch {
+                    // ignore unstringifiable
+                }
+            }
+        }
+        if (p.type === "tool-call" && typeof p.input !== "undefined") {
+            try {
+                total += JSON.stringify(p.input).length;
+            } catch {
+                // ignore
+            }
+        }
+    }
+    return total;
+}
+
+function makeTrimmedToolResultPart(
+    part: SdkToolResultPart,
+    originalChars: number
+): SdkToolResultPart {
+    const placeholder: SdkToolResultOutput = {
+        type: "text",
+        value: `[Output trimmed mid-turn to fit context window. Original length: ${originalChars} chars. Re-run the tool if you still need this content.]`
+    };
+    return {
+        ...part,
+        output: placeholder
+    };
+}
+
+function trimOversizedToolResultsForStep(
+    messages: SdkModelMessage[],
+    options: {
+        budgetTokens: number;
+        trimmedToolCallIds: Set<string>;
+        onNewTrim?: (info: { newCount: number; totalCount: number }) => void;
+    }
+): SdkModelMessage[] | undefined {
+    const { budgetTokens, trimmedToolCallIds, onNewTrim } = options;
+
+    const initialChars = messages.reduce(
+        (sum, msg) => sum + estimateMessageChars(msg),
+        0
+    );
+    const estTokens = Math.ceil(initialChars / CHARS_PER_TOKEN_ESTIMATE);
+
+    // No trimming ever needed AND nothing previously trimmed → fast-path.
+    if (estTokens <= budgetTokens && trimmedToolCallIds.size === 0) {
+        return undefined;
+    }
+
+    // Collect every trim-eligible tool-result, oldest first. Each entry
+    // carries its (msgIdx, partIdx) so we can rewrite the right part of
+    // the cloned messages array below.
+    type Eligible = {
+        msgIdx: number;
+        partIdx: number;
+        toolCallId: string;
+        outputChars: number;
+    };
+    const eligible: Eligible[] = [];
+    messages.forEach((msg, i) => {
+        if (msg.role !== "tool") return;
+        const content = msg.content;
+        if (!Array.isArray(content)) return;
+        content.forEach((rawPart, j) => {
+            const part = rawPart as unknown as Record<string, unknown>;
+            if (part?.type !== "tool-result") return;
+            const toolCallId =
+                typeof part.toolCallId === "string" ? part.toolCallId : "";
+            if (!toolCallId) return;
+            const out = part.output as { type?: string; value?: unknown };
+            let outputChars = 0;
+            if (out?.type === "text" && typeof out.value === "string") {
+                outputChars = out.value.length;
+            } else if (out?.type === "json") {
+                try {
+                    outputChars = JSON.stringify(out.value ?? "").length;
+                } catch {
+                    return;
+                }
+            } else {
+                return;
+            }
+            if (
+                outputChars < TOOL_RESULT_TRIM_AT_CHARS &&
+                !trimmedToolCallIds.has(toolCallId)
+            ) {
+                return;
+            }
+            eligible.push({
+                msgIdx: i,
+                partIdx: j,
+                toolCallId,
+                outputChars
+            });
+        });
+    });
+
+    if (eligible.length === 0) return undefined;
+
+    // Clone tool messages whose content arrays we need to mutate.
+    const cloned: SdkModelMessage[] = messages.map((msg) => {
+        if (msg.role !== "tool" || !Array.isArray(msg.content)) return msg;
+        return {
+            ...msg,
+            content: [...msg.content]
+        } as SdkModelMessage;
+    });
+
+    let savedChars = 0;
+    let newTrims = 0;
+
+    // Pass 1: re-apply every previously-trimmed tool-result. The SDK
+    // builds `stepInputMessages` fresh each step from the original
+    // (untrimmed) response messages it tracks internally, so we have
+    // to re-trim every step or the trims would silently regrow.
+    for (const entry of eligible) {
+        if (!trimmedToolCallIds.has(entry.toolCallId)) continue;
+        const msg = cloned[entry.msgIdx]!;
+        const content = msg.content as unknown[];
+        const part = content[entry.partIdx] as SdkToolResultPart;
+        if (part?.type !== "tool-result") continue;
+        const trimmed = makeTrimmedToolResultPart(part, entry.outputChars);
+        content[entry.partIdx] = trimmed;
+        const newChars = (
+            (trimmed.output as { type: string; value: string }).value || ""
+        ).length;
+        savedChars += entry.outputChars - newChars;
+    }
+
+    // Pass 2: if still over budget, walk oldest-first and trim more.
+    let remaining = initialChars - savedChars;
+    let runningTokens = Math.ceil(remaining / CHARS_PER_TOKEN_ESTIMATE);
+    if (runningTokens > budgetTokens) {
+        for (const entry of eligible) {
+            if (runningTokens <= budgetTokens) break;
+            if (trimmedToolCallIds.has(entry.toolCallId)) continue;
+            const msg = cloned[entry.msgIdx]!;
+            const content = msg.content as unknown[];
+            const part = content[entry.partIdx] as SdkToolResultPart;
+            if (part?.type !== "tool-result") continue;
+            const trimmed = makeTrimmedToolResultPart(part, entry.outputChars);
+            content[entry.partIdx] = trimmed;
+            trimmedToolCallIds.add(entry.toolCallId);
+            newTrims += 1;
+            const newChars = (
+                (trimmed.output as { type: string; value: string }).value || ""
+            ).length;
+            const delta = entry.outputChars - newChars;
+            savedChars += delta;
+            remaining -= delta;
+            runningTokens = Math.ceil(remaining / CHARS_PER_TOKEN_ESTIMATE);
+        }
+    }
+
+    if (newTrims > 0 && onNewTrim) {
+        onNewTrim({ newCount: newTrims, totalCount: trimmedToolCallIds.size });
+    }
+
+    if (newTrims === 0 && savedChars === 0) return undefined;
+
+    return cloned;
+}
+
 async function runStreamTextIntoController({
     controller,
     workspaceId,
@@ -803,6 +1029,20 @@ async function runStreamTextIntoController({
             conversationId,
             subagentOverrides
         );
+
+    // Mid-turn trim budget. We use the resolved model's context window
+    // and trim oversized tool-result outputs whenever the in-flight
+    // tool loop's messages would exceed COMPACT_THRESHOLD of it. Closure
+    // state below keeps the trim sticky across steps. See the comment
+    // above `trimOversizedToolResultsForStep` for the rationale.
+    const resolvedModelEntry = getModelById(modelName);
+    const midTurnContextWindow = resolvedModelEntry?.contextWindow ?? 0;
+    const midTurnBudgetTokens =
+        midTurnContextWindow > 0
+            ? Math.floor(midTurnContextWindow * COMPACT_THRESHOLD)
+            : 0;
+    const trimmedToolCallIds = new Set<string>();
+    let midTurnTrimEventEmitted = false;
 
     // Persist the resolved model on the assistant placeholder row so the
     // global stats aggregator can count "favorite model" per-turn. Placeholder
@@ -1237,6 +1477,43 @@ async function runStreamTextIntoController({
             abortSignal,
             providerOptions: {
                 openai: openaiOptions
+            },
+            // Mid-turn trim. Runs before EACH LLM step inside the tool
+            // loop. If the in-flight messages would exceed our token
+            // budget (COMPACT_THRESHOLD * model.contextWindow), we
+            // replace the oldest oversized tool-result outputs with a
+            // short placeholder. The trim is sticky via the closure-
+            // scoped Set so prior trims persist across steps. We only
+            // emit `mid-turn-trim-started` to the frontend the first
+            // time it kicks in this turn — subsequent steps just keep
+            // re-applying silently.
+            prepareStep: ({ messages }) => {
+                if (midTurnBudgetTokens <= 0) return undefined;
+                const trimmed = trimOversizedToolResultsForStep(messages, {
+                    budgetTokens: midTurnBudgetTokens,
+                    trimmedToolCallIds,
+                    onNewTrim: ({ newCount, totalCount }) => {
+                        logger.log("[stream] Mid-turn tool-result trim", {
+                            conversationId,
+                            assistantMsgId,
+                            newCount,
+                            totalCount,
+                            budgetTokens: midTurnBudgetTokens
+                        });
+                        if (!midTurnTrimEventEmitted) {
+                            midTurnTrimEventEmitted = true;
+                            controller.enqueue(
+                                sseEvent("mid-turn-trim", {
+                                    conversation_id: conversationId,
+                                    message_id: assistantMsgId,
+                                    trimmed_count: totalCount
+                                })
+                            );
+                        }
+                    }
+                });
+                if (!trimmed) return undefined;
+                return { messages: trimmed };
             },
             onFinish: ({ usage }) => {
                 const input =
@@ -1730,6 +2007,101 @@ function startTitleGenerationForController({
 }
 
 /**
+ * Decide whether the conversation needs auto-compaction and, if so, run
+ * `compactConversation` while emitting `compaction-started` /
+ * `compacted` / `compaction-skipped` / `compaction-error` SSE events on
+ * the given stream controller. Used by both `streamConversationReply`
+ * (incoming user message) and `streamReplyToLastMessage` (first reply on
+ * a freshly created conversation).
+ *
+ * `extraTokens` accounts for tokens that aren't yet in the DB — e.g. the
+ * pending user message content + attachments in `streamConversationReply`'s
+ * pre-stream check. When the user message is already persisted (the
+ * `/reply` route) pass 0.
+ *
+ * Always returns void; callers query the DB after this resolves to pick
+ * up the post-compaction state.
+ */
+async function runAutoCompactionForStream(
+    workspaceId: string,
+    conversationId: string,
+    controller: SseStreamController,
+    extraTokens: number = 0
+): Promise<void> {
+    let shouldCompact = false;
+    try {
+        const ctx = computeContextSummary(workspaceId, conversationId);
+        if (ctx.contextWindow > 0) {
+            const projected = ctx.usedTokens + extraTokens;
+            if (projected / ctx.contextWindow > COMPACT_THRESHOLD) {
+                shouldCompact = true;
+                logger.log("[stream] Auto-compact threshold hit", {
+                    used: ctx.usedTokens,
+                    extra: extraTokens,
+                    projected,
+                    window: ctx.contextWindow,
+                    threshold: COMPACT_THRESHOLD
+                });
+            }
+        }
+    } catch (error) {
+        logger.error(
+            "[stream] Pre-stream compaction check failed (continuing without compaction)",
+            error
+        );
+    }
+
+    if (!shouldCompact) return;
+
+    controller.enqueue(
+        sseEvent("compaction-started", {
+            conversation_id: conversationId
+        })
+    );
+    try {
+        const outcome = await compactConversation(workspaceId, conversationId);
+        if (outcome.summaryMessageId) {
+            controller.enqueue(
+                sseEvent("compacted", {
+                    conversation_id: conversationId,
+                    summaryMessageId: outcome.summaryMessageId,
+                    summarizedMessageIds: outcome.summarizedMessageIds,
+                    summarizedCount: outcome.summarizedCount,
+                    usedTokensAfter: outcome.usedTokensAfter,
+                    summaryContent: outcome.summaryContent,
+                    summaryCreatedAt: outcome.summaryCreatedAt,
+                    summaryOfUntil: outcome.summaryOfUntil
+                })
+            );
+        } else {
+            controller.enqueue(
+                sseEvent("compaction-skipped", {
+                    conversation_id: conversationId,
+                    reason:
+                        "reason" in outcome
+                            ? outcome.reason
+                            : "Nothing to summarize"
+                })
+            );
+        }
+    } catch (error) {
+        logger.error(
+            "[stream] Auto-compact failed (continuing without compaction)",
+            error
+        );
+        controller.enqueue(
+            sseEvent("compaction-error", {
+                conversation_id: conversationId,
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "Compaction failed"
+            })
+        );
+    }
+}
+
+/**
  * Generate a reply to the existing conversation without adding a new user message.
  * Used after conversation creation where the first user message is already persisted.
  */
@@ -1754,28 +2126,6 @@ export async function streamReplyToLastMessage(
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
-    const history = db
-        .query(
-            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
-        )
-        .all(conversationId) as Message[];
-
-    logger.log("[stream] Loaded", history.length, "messages for context");
-
-    const modelMessages = buildModelMessages(workspaceId, history);
-
-    const assistantMsgId = crypto.randomUUID();
-    const assistantCreatedAt = new Date().toISOString();
-
-    db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
-    ).run(assistantMsgId, conversationId, "assistant", "", assistantCreatedAt);
-
-    logger.log(
-        "[stream] Created assistant placeholder message:",
-        assistantMsgId
-    );
-
     return buildStreamResponse(async (rawController) => {
         const controller = wrapControllerWithBroadcast(
             rawController,
@@ -1786,6 +2136,50 @@ export async function streamReplyToLastMessage(
             conversationId,
             controller
         });
+
+        // Run auto-compaction BEFORE loading the history / building model
+        // messages so the model sees the compacted state. The user message
+        // is already persisted by `createConversation`, so `extraTokens` is
+        // 0 (everything is in the DB already). This is the same flow
+        // `streamConversationReply` uses, just without the incoming-user-
+        // content delta. Without this, the very first reply on a fresh
+        // conversation could overflow the context window before any
+        // compaction ever ran (the `/reply` route bypassed compaction
+        // entirely until 2026-04-26).
+        await runAutoCompactionForStream(
+            workspaceId,
+            conversationId,
+            controller,
+            0
+        );
+
+        const history = db
+            .query(
+                "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+            )
+            .all(conversationId) as Message[];
+
+        logger.log("[stream] Loaded", history.length, "messages for context");
+
+        const modelMessages = buildModelMessages(workspaceId, history);
+
+        const assistantMsgId = crypto.randomUUID();
+        const assistantCreatedAt = new Date().toISOString();
+
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
+        ).run(
+            assistantMsgId,
+            conversationId,
+            "assistant",
+            "",
+            assistantCreatedAt
+        );
+
+        logger.log(
+            "[stream] Created assistant placeholder message:",
+            assistantMsgId
+        );
 
         controller.enqueue(
             sseEvent("assistant-start", {
@@ -1835,142 +2229,6 @@ export async function streamConversationReply(
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
-    let compactionEvent: {
-        summaryMessageId: string;
-        summarizedMessageIds: string[];
-        summarizedCount: number;
-        usedTokensAfter: number;
-        summaryContent: string;
-        summaryCreatedAt: string;
-        summaryOfUntil: string;
-    } | null = null;
-
-    try {
-        const currentContext = computeContextSummary(
-            workspaceId,
-            conversationId
-        );
-        const attachmentTokens =
-            attachmentIds.length > 0
-                ? (db
-                      .query(
-                          `SELECT COALESCE(SUM(estimated_tokens), 0) AS total FROM attachments WHERE id IN (${attachmentIds
-                              .map(() => "?")
-                              .join(",")})`
-                      )
-                      .get(...attachmentIds) as { total: number })
-                : { total: 0 };
-        const effectiveMentions =
-            mentions.length > 0
-                ? mentions
-                : parseMentionsFromContent(userContent);
-        const projected =
-            currentContext.usedTokens +
-            countTokens(userContent) +
-            attachmentTokens.total +
-            estimateMentionsBlockTokens(effectiveMentions);
-        if (
-            currentContext.contextWindow > 0 &&
-            projected / currentContext.contextWindow > COMPACT_THRESHOLD
-        ) {
-            logger.log("[stream] Auto-compact threshold hit", {
-                projected,
-                window: currentContext.contextWindow,
-                threshold: COMPACT_THRESHOLD
-            });
-            const outcome = await compactConversation(
-                workspaceId,
-                conversationId
-            );
-            if (outcome.summaryMessageId) {
-                compactionEvent = {
-                    summaryMessageId: outcome.summaryMessageId,
-                    summarizedMessageIds: outcome.summarizedMessageIds,
-                    summarizedCount: outcome.summarizedCount,
-                    usedTokensAfter: outcome.usedTokensAfter,
-                    summaryContent: outcome.summaryContent,
-                    summaryCreatedAt: outcome.summaryCreatedAt,
-                    summaryOfUntil: outcome.summaryOfUntil
-                };
-            }
-        }
-    } catch (error) {
-        logger.error(
-            "[stream] Auto-compact check failed (continuing without compaction)",
-            error
-        );
-    }
-
-    const history = db
-        .query(
-            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
-        )
-        .all(conversationId) as Message[];
-
-    logger.log(
-        "[stream] Loaded",
-        history.length,
-        "existing messages for context"
-    );
-
-    const userMsgId = crypto.randomUUID();
-    const now = new Date().toISOString();
-
-    db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
-    ).run(userMsgId, conversationId, "user", userContent, now);
-
-    db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
-        now,
-        conversationId
-    );
-
-    // Lifetime user-message count lives in the append-only stats ledger so
-    // it is not affected by later conversation deletion.
-    recordStatUserMessage({
-        workspaceId,
-        conversationId,
-        messageId: userMsgId,
-        createdAt: now
-    });
-
-    const linkedAttachments =
-        attachmentIds.length > 0
-            ? linkAttachmentsToMessage(
-                  workspaceId,
-                  attachmentIds,
-                  conversationId,
-                  userMsgId
-              )
-            : [];
-
-    logger.log(
-        "[stream] Persisted user message:",
-        userMsgId,
-        "attachments:",
-        linkedAttachments.length
-    );
-
-    const modelMessages = buildModelMessages(workspaceId, [
-        ...history,
-        {
-            id: userMsgId,
-            conversation_id: conversationId,
-            role: "user",
-            content: userContent,
-            created_at: now
-        }
-    ]);
-
-    const assistantMsgId = crypto.randomUUID();
-    const assistantCreatedAt = new Date().toISOString();
-
-    db.query(
-        "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
-    ).run(assistantMsgId, conversationId, "assistant", "", assistantCreatedAt);
-
-    logger.log("[stream] Created assistant placeholder:", assistantMsgId);
-
     return buildStreamResponse(async (rawController) => {
         const controller = wrapControllerWithBroadcast(
             rawController,
@@ -1982,14 +2240,43 @@ export async function streamConversationReply(
             controller
         });
 
-        if (compactionEvent) {
-            controller.enqueue(
-                sseEvent("compacted", {
-                    conversation_id: conversationId,
-                    ...compactionEvent
-                })
-            );
-        }
+        // 1) Persist + emit the user message immediately so the UI shows
+        //    feedback before the (potentially slow) summarization call.
+        const userMsgId = crypto.randomUUID();
+        const userCreatedAt = new Date().toISOString();
+
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
+        ).run(userMsgId, conversationId, "user", userContent, userCreatedAt);
+
+        db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(
+            userCreatedAt,
+            conversationId
+        );
+
+        recordStatUserMessage({
+            workspaceId,
+            conversationId,
+            messageId: userMsgId,
+            createdAt: userCreatedAt
+        });
+
+        const linkedAttachments =
+            attachmentIds.length > 0
+                ? linkAttachmentsToMessage(
+                      workspaceId,
+                      attachmentIds,
+                      conversationId,
+                      userMsgId
+                  )
+                : [];
+
+        logger.log(
+            "[stream] Persisted user message:",
+            userMsgId,
+            "attachments:",
+            linkedAttachments.length
+        );
 
         controller.enqueue(
             sseEvent("user-message", {
@@ -1997,10 +2284,60 @@ export async function streamConversationReply(
                 role: "user" as const,
                 content: userContent,
                 conversation_id: conversationId,
-                created_at: now,
+                created_at: userCreatedAt,
                 attachments: linkedAttachments
             })
         );
+
+        // 2) Run compaction if needed. The just-inserted user message is
+        //    automatically part of the kept window (it is the latest row),
+        //    so it never gets summarized away. The helper emits the SSE
+        //    progress markers (`compaction-started` →
+        //    `compacted`/`compaction-skipped`/`compaction-error`) so the
+        //    frontend renders the "Chat context summarized" marker the
+        //    moment the summary is ready. `extraTokens` was 0-here, but
+        //    the user message is now in the DB so it's already counted
+        //    by `computeContextSummary` inside the helper.
+        await runAutoCompactionForStream(
+            workspaceId,
+            conversationId,
+            controller,
+            0
+        );
+
+        // 3) Build the model context AFTER compaction so the prompt reflects
+        //    the new (smaller) conversation state. Filtering on `compacted=0`
+        //    drops the rows that were just marked compacted and keeps the
+        //    summary system row that compactConversation inserted.
+        const history = db
+            .query(
+                "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+            )
+            .all(conversationId) as Message[];
+
+        logger.log(
+            "[stream] Loaded",
+            history.length,
+            "existing messages for context"
+        );
+
+        const modelMessages = buildModelMessages(workspaceId, history);
+
+        // 4) Insert the assistant placeholder and emit assistant-start.
+        const assistantMsgId = crypto.randomUUID();
+        const assistantCreatedAt = new Date().toISOString();
+
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted) VALUES (?, ?, ?, ?, ?, 0)"
+        ).run(
+            assistantMsgId,
+            conversationId,
+            "assistant",
+            "",
+            assistantCreatedAt
+        );
+
+        logger.log("[stream] Created assistant placeholder:", assistantMsgId);
 
         controller.enqueue(
             sseEvent("assistant-start", {
