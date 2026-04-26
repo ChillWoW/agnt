@@ -30,91 +30,92 @@ export function DiagnosticsSettings() {
     const masterOff = !settings.enabled;
 
     return (
-        <div className="mx-auto w-full max-w-xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="Diagnostics"
-                description="Run TypeScript language-server diagnostics against files the assistant edits. Results appear inline under write, str_replace, and apply_patch tool cards and are fed back to the assistant so it can self-correct."
+                description="Run TypeScript language-server checks against files the assistant edits. Results appear under each edit and are fed back so the assistant can self-correct."
             />
 
-            <div className="flex flex-col gap-6">
-                <SettingGroup>
-                    <SettingRow
-                        icon={<BugIcon size={16} weight="duotone" />}
-                        label="Enable diagnostics"
-                        description="Master switch. Spawns typescript-language-server on demand per workspace."
-                    >
-                        <Switch
-                            checked={settings.enabled}
-                            onCheckedChange={(enabled) =>
-                                void update({ enabled })
-                            }
-                        />
-                    </SettingRow>
-                    <SettingRow
-                        icon={<LightningIcon size={16} weight="duotone" />}
-                        label="Auto-run after edits"
-                        description="Run diagnostics against changed files after write, str_replace, and apply_patch."
-                    >
-                        <Switch
+            <SettingGroup>
+                <SettingRow
+                    icon={<BugIcon size={16} weight="duotone" />}
+                    label="Enable diagnostics"
+                    description="Spawns typescript-language-server on demand per workspace."
+                >
+                    <Switch
+                        checked={settings.enabled}
+                        onCheckedChange={(enabled) =>
+                            void update({ enabled })
+                        }
+                    />
+                </SettingRow>
+                <SettingRow
+                    icon={<LightningIcon size={16} weight="duotone" />}
+                    label="Auto-run after edits"
+                    description="Check changed files after write, str_replace, and apply_patch."
+                >
+                    <Switch
+                        disabled={masterOff}
+                        checked={settings.autoRunOnEdits}
+                        onCheckedChange={(autoRunOnEdits) =>
+                            void update({ autoRunOnEdits })
+                        }
+                    />
+                </SettingRow>
+                <SettingRow
+                    icon={<FunnelIcon size={16} weight="duotone" />}
+                    label="Minimum severity"
+                    description="Diagnostics below this level are hidden from the assistant and the UI."
+                >
+                    <div className="w-56">
+                        <Select
                             disabled={masterOff}
-                            checked={settings.autoRunOnEdits}
-                            onCheckedChange={(autoRunOnEdits) =>
-                                void update({ autoRunOnEdits })
+                            value={settings.minSeverity}
+                            onValueChange={(value) =>
+                                void update({
+                                    minSeverity: value as DiagnosticsSeverity
+                                })
                             }
+                        >
+                            {SEVERITY_OPTIONS.map((opt) => (
+                                <Select.Item
+                                    key={opt.value}
+                                    value={opt.value}
+                                >
+                                    {opt.label}
+                                </Select.Item>
+                            ))}
+                        </Select>
+                    </div>
+                </SettingRow>
+                <SettingRow
+                    icon={<TimerIcon size={16} weight="duotone" />}
+                    label="Wait timeout"
+                    description="How long to wait for the language server to publish results before returning. 200–10000 ms."
+                >
+                    <div className="w-32">
+                        <Input
+                            type="number"
+                            min={200}
+                            max={10000}
+                            step={100}
+                            disabled={masterOff}
+                            value={String(settings.waitMs)}
+                            suffix={
+                                <span className="text-[11px] text-dark-300">
+                                    ms
+                                </span>
+                            }
+                            onChange={(event) => {
+                                const nextValue = clampWaitMs(
+                                    (event.target as HTMLInputElement).value
+                                );
+                                void update({ waitMs: nextValue });
+                            }}
                         />
-                    </SettingRow>
-                    <SettingRow
-                        icon={<FunnelIcon size={16} weight="duotone" />}
-                        label="Minimum severity"
-                        description="Diagnostics below this level are hidden from the assistant and the UI."
-                    >
-                        <div className="w-56">
-                            <Select
-                                disabled={masterOff}
-                                value={settings.minSeverity}
-                                onValueChange={(value) =>
-                                    void update({
-                                        minSeverity:
-                                            value as DiagnosticsSeverity
-                                    })
-                                }
-                            >
-                                {SEVERITY_OPTIONS.map((opt) => (
-                                    <Select.Item
-                                        key={opt.value}
-                                        value={opt.value}
-                                    >
-                                        {opt.label}
-                                    </Select.Item>
-                                ))}
-                            </Select>
-                        </div>
-                    </SettingRow>
-                    <SettingRow
-                        icon={<TimerIcon size={16} weight="duotone" />}
-                        label="Wait timeout (ms)"
-                        description="How long to wait for the language server to publish diagnostics for an edited file before returning whatever it already had. 200–10000."
-                    >
-                        <div className="w-32">
-                            <Input
-                                type="number"
-                                min={200}
-                                max={10000}
-                                step={100}
-                                disabled={masterOff}
-                                value={String(settings.waitMs)}
-                                onChange={(event) => {
-                                    const nextValue = clampWaitMs(
-                                        (event.target as HTMLInputElement)
-                                            .value
-                                    );
-                                    void update({ waitMs: nextValue });
-                                }}
-                            />
-                        </div>
-                    </SettingRow>
-                </SettingGroup>
-            </div>
+                    </div>
+                </SettingRow>
+            </SettingGroup>
         </div>
     );
 }

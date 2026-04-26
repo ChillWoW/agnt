@@ -1,20 +1,21 @@
 import {
     BellIcon,
-    MusicNoteIcon,
     MonitorIcon,
+    PlayIcon,
     SpeakerHighIcon
 } from "@phosphor-icons/react";
 import { useSettingsCategory } from "@/features/settings";
 import { playSound, type NotificationKind } from "@/features/notifications";
 import { SettingHeader } from "./SettingHeader";
+import { SettingSection } from "./SettingSection";
 import { SettingGroup } from "./SettingGroup";
 import { SettingRow } from "./SettingRow";
-import { Switch, Button } from "@/components/ui";
+import { Switch } from "@/components/ui";
 
-const SOUND_PREVIEWS: { kind: NotificationKind; label: string }[] = [
-    { kind: "finish", label: "Assistant finished" },
-    { kind: "permission", label: "Permission required" },
-    { kind: "question", label: "Question asked" }
+const SOUND_PREVIEWS: { kind: NotificationKind; label: string; hint: string }[] = [
+    { kind: "finish", label: "Assistant finished", hint: "Plays when a turn ends." },
+    { kind: "permission", label: "Permission required", hint: "Plays when a tool needs approval." },
+    { kind: "question", label: "Question asked", hint: "Plays when the assistant asks you something." }
 ];
 
 export function NotificationsSettings() {
@@ -23,13 +24,13 @@ export function NotificationsSettings() {
     const masterOff = !settings.enabled;
 
     return (
-        <div className="mx-auto w-full max-w-xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="Notifications"
-                description="Play a sound and show a system notification when the assistant finishes, needs permission, or asks a question. Fires only when the app window is not focused."
+                description="Sounds and OS notifications fire only when the app window is unfocused."
             />
 
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-8">
                 <SettingGroup>
                     <SettingRow
                         icon={<BellIcon size={16} weight="duotone" />}
@@ -46,7 +47,7 @@ export function NotificationsSettings() {
                     <SettingRow
                         icon={<SpeakerHighIcon size={16} weight="duotone" />}
                         label="Play sounds"
-                        description="Short distinct sound per event type."
+                        description="A short distinct sound for each event type."
                     >
                         <Switch
                             disabled={masterOff}
@@ -71,29 +72,36 @@ export function NotificationsSettings() {
                     </SettingRow>
                 </SettingGroup>
 
-                <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-[11px] font-medium text-dark-300 uppercase tracking-wide">
-                        <MusicNoteIcon size={12} weight="duotone" />
-                        Preview sounds
-                    </div>
+                <SettingSection
+                    title="Preview sounds"
+                    description="Listen to each cue without waiting for an event."
+                >
                     <SettingGroup>
                         {SOUND_PREVIEWS.map((preview) => (
-                            <SettingRow
+                            <div
                                 key={preview.kind}
-                                label={preview.label}
-                                description={`Plays ${preview.kind}.wav`}
+                                className="flex items-center justify-between gap-6 px-5 py-4"
                             >
-                                <Button
-                                    size="sm"
-                                    variant="secondary"
+                                <div className="flex min-w-0 flex-col gap-1">
+                                    <span className="text-sm font-medium text-dark-50">
+                                        {preview.label}
+                                    </span>
+                                    <span className="text-[13px] text-dark-300">
+                                        {preview.hint}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
                                     onClick={() => playSound(preview.kind)}
+                                    className="flex size-8 shrink-0 items-center justify-center rounded-md border border-dark-700 bg-dark-850 text-dark-100 transition-colors hover:border-dark-600 hover:bg-dark-800 hover:text-dark-50"
+                                    aria-label={`Play ${preview.label}`}
                                 >
-                                    Play
-                                </Button>
-                            </SettingRow>
+                                    <PlayIcon size={12} weight="fill" />
+                                </button>
+                            </div>
                         ))}
                     </SettingGroup>
-                </div>
+                </SettingSection>
             </div>
         </div>
     );

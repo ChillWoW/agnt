@@ -10,7 +10,7 @@ export function SettingGroup({ children, className }: SettingGroupProps) {
     return (
         <div
             className={cn(
-                "flex flex-col divide-y divide-dark-700 rounded-md border border-dark-700 bg-dark-900",
+                "flex flex-col divide-y divide-dark-800 rounded-lg border border-dark-700 bg-dark-900",
                 className
             )}
         >

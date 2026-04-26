@@ -5,11 +5,15 @@ interface SettingHeaderProps {
 
 export function SettingHeader({ title, description }: SettingHeaderProps) {
     return (
-        <div className="mb-6">
-            <h2 className="text-base font-semibold text-dark-50">{title}</h2>
+        <header className="mb-10">
+            <h1 className="text-2xl font-medium tracking-tight text-dark-50">
+                {title}
+            </h1>
             {description && (
-                <p className="mt-1 text-[13px] text-dark-300">{description}</p>
+                <p className="mt-2 max-w-prose text-sm leading-relaxed text-dark-300">
+                    {description}
+                </p>
             )}
-        </div>
+        </header>
     );
 }

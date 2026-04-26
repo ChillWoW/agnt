@@ -9,28 +9,27 @@ import {
     type ToolPermissionDecision
 } from "@/typings/settings";
 import { SettingHeader } from "./SettingHeader";
+import { SettingSection } from "./SettingSection";
+import { SettingGroup } from "./SettingGroup";
 import { cn } from "@/lib/cn";
 
 const DECISIONS: ToolPermissionDecision[] = ["ask", "allow", "deny"];
 
 const DECISION_CONFIG: Record<
     ToolPermissionDecision,
-    { label: string; activeClass: string; borderClass: string }
+    { label: string; activeClass: string }
 > = {
     ask: {
         label: "Ask",
-        activeClass: "bg-amber-500/15 text-amber-300 border-amber-500/40",
-        borderClass: "border-l-amber-500/50"
+        activeClass: "bg-amber-950 text-amber-300 border-amber-900"
     },
     allow: {
         label: "Allow",
-        activeClass: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
-        borderClass: "border-l-emerald-500/50"
+        activeClass: "bg-emerald-950 text-emerald-300 border-emerald-900"
     },
     deny: {
         label: "Deny",
-        activeClass: "bg-red-500/15 text-red-300 border-red-500/40",
-        borderClass: "border-l-red-500/50"
+        activeClass: "bg-red-950 text-red-300 border-red-900"
     }
 };
 
@@ -50,7 +49,8 @@ const TOOL_CATEGORY_CONFIG: Record<
 > = {
     "read-research": {
         label: "Read & research",
-        description: "Inspect files, search the workspace, and load reusable skills."
+        description:
+            "Inspect files, search the workspace, and load reusable skills."
     },
     "edit-files": {
         label: "Edit & files",
@@ -58,7 +58,8 @@ const TOOL_CATEGORY_CONFIG: Record<
     },
     execution: {
         label: "Execution",
-        description: "Run commands and wait for longer-running tasks to finish."
+        description:
+            "Run commands and wait for longer-running tasks to finish."
     },
     planning: {
         label: "Planning",
@@ -74,7 +75,8 @@ const TOOL_CATEGORY_CONFIG: Record<
     },
     mcp: {
         label: "MCP",
-        description: "Tools provided by external Model Context Protocol servers configured for this workspace."
+        description:
+            "Tools provided by external Model Context Protocol servers."
     },
     other: {
         label: "Other",
@@ -162,7 +164,7 @@ function PermissionPills({
     onChange: (d: ToolPermissionDecision) => void;
 }) {
     return (
-        <div className="flex items-center gap-0.5 rounded-md border border-dark-600 bg-dark-900 p-0.5">
+        <div className="flex items-center gap-0.5 rounded-md border border-dark-700 bg-dark-850 p-0.5">
             {DECISIONS.map((decision) => {
                 const config = DECISION_CONFIG[decision];
                 const isActive = current === decision;
@@ -172,10 +174,10 @@ function PermissionPills({
                         type="button"
                         onClick={() => onChange(decision)}
                         className={cn(
-                            "rounded px-2.5 py-1 text-[11px] font-medium leading-none transition-all duration-150 border",
+                            "rounded px-2.5 py-1 text-[11px] font-medium leading-none border transition-colors",
                             isActive
                                 ? config.activeClass
-                                : "border-transparent text-dark-400 hover:text-dark-200 hover:bg-dark-700"
+                                : "border-transparent text-dark-300 hover:text-dark-100 hover:bg-dark-800"
                         )}
                     >
                         {config.label}
@@ -263,53 +265,43 @@ export function ToolPermissionsSettings() {
     };
 
     return (
-        <div className="mx-auto w-full max-w-xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="Tool permissions"
-                description="Set whether each tool requires approval before running. Bypass permissions mode ignores these settings."
+                description="Control whether each tool runs automatically, requires approval, or is blocked. Bypass mode ignores everything here."
             />
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-8">
                 {isLoading && (
-                    <div className="flex flex-col divide-y divide-dark-700 rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
+                    <SettingGroup>
                         {Array.from({ length: 5 }).map((_, i) => (
                             <div
                                 key={i}
-                                className="flex items-center justify-between gap-4 px-4 py-3"
+                                className="flex items-center justify-between gap-4 px-5 py-4"
                             >
-                                <div className="flex flex-col gap-1.5">
-                                    <div className="h-3 w-24 rounded bg-dark-700 animate-pulse" />
-                                    <div className="h-2.5 w-40 rounded bg-dark-800 animate-pulse" />
+                                <div className="flex flex-col gap-2">
+                                    <div className="h-3 w-32 rounded bg-dark-800 animate-pulse" />
+                                    <div className="h-2.5 w-48 rounded bg-dark-800 animate-pulse" />
                                 </div>
-                                <div className="h-7 w-[116px] rounded-md bg-dark-800 animate-pulse" />
+                                <div className="h-7 w-[120px] rounded-md bg-dark-800 animate-pulse" />
                             </div>
                         ))}
-                    </div>
+                    </SettingGroup>
                 )}
 
                 {!isLoading &&
                     toolGroups.map((group) => (
-                        <section
+                        <SettingSection
                             key={group.category}
-                            className="overflow-hidden rounded-md border border-dark-700 bg-dark-900"
+                            title={group.config.label}
+                            description={group.config.description}
+                            aside={
+                                <span className="rounded-full border border-dark-700 bg-dark-850 px-2 py-0.5 text-[10px] font-medium text-dark-300">
+                                    {group.tools.length}
+                                </span>
+                            }
                         >
-                            <div className="border-b border-dark-700 bg-dark-950/60 px-4 py-3">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-dark-200">
-                                            {group.config.label}
-                                        </h3>
-                                        <p className="mt-1 text-[11px] leading-relaxed text-dark-400">
-                                            {group.config.description}
-                                        </p>
-                                    </div>
-                                    <span className="rounded-full border border-dark-700 bg-dark-900 px-2 py-1 text-[10px] font-medium text-dark-300">
-                                        {group.tools.length}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col divide-y divide-dark-700">
+                            <SettingGroup>
                                 {group.tools.map((tool) => {
                                     const current: ToolPermissionDecision =
                                         defaults[tool.name] ??
@@ -320,21 +312,18 @@ export function ToolPermissionsSettings() {
                                     return (
                                         <div
                                             key={tool.name}
-                                            className="flex items-center justify-between gap-4 p-3"
+                                            className="flex items-center justify-between gap-4 px-5 py-3.5"
                                         >
                                             <div className="flex min-w-0 flex-col gap-0.5">
-                                                <span className="text-xs font-medium leading-tight text-dark-50">
+                                                <span className="text-[13px] font-medium text-dark-50">
                                                     {formatToolLabel(tool.name)}
                                                 </span>
                                                 {tool.description && (
-                                                    <span className="truncate text-[11px] leading-tight text-dark-200">
-                                                        {tool.description.length >
-                                                        56
-                                                            ? tool.description
-                                                                  .slice(0, 56)
-                                                                  .trimEnd() +
-                                                              "…"
-                                                            : tool.description}
+                                                    <span
+                                                        className="truncate text-[12px] text-dark-300"
+                                                        title={tool.description}
+                                                    >
+                                                        {tool.description}
                                                     </span>
                                                 )}
                                             </div>
@@ -352,26 +341,26 @@ export function ToolPermissionsSettings() {
                                         </div>
                                     );
                                 })}
-                            </div>
-                        </section>
+                            </SettingGroup>
+                        </SettingSection>
                     ))}
 
                 {!isLoading && tools.length === 0 && !error && (
-                    <div className="flex flex-col items-center gap-2 rounded-md border border-dark-700 bg-dark-900 py-10">
-                        <span className="text-xs text-dark-300">
-                            No tools found
+                    <div className="flex flex-col items-center gap-2 rounded-lg border border-dark-700 bg-dark-900 px-6 py-12 text-center">
+                        <span className="text-sm text-dark-200">
+                            No tools registered yet.
                         </span>
                     </div>
                 )}
 
                 {error && (
-                    <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">
+                    <div className="flex items-center gap-2 rounded-md border border-red-900 bg-red-950 px-4 py-3">
                         <WarningCircleIcon
                             size={14}
                             weight="duotone"
                             className="shrink-0 text-red-400"
                         />
-                        <span className="text-xs text-red-300">{error}</span>
+                        <span className="text-[13px] text-red-300">{error}</span>
                     </div>
                 )}
             </div>

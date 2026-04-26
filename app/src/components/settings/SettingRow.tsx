@@ -14,19 +14,19 @@ export function SettingRow({
     children
 }: SettingRowProps) {
     return (
-        <div className="flex items-center justify-between gap-2 p-3">
-            <div className="flex items-start gap-3">
+        <div className="flex items-center justify-between gap-6 px-5 py-4">
+            <div className="flex min-w-0 items-start gap-3">
                 {icon && (
-                    <span className="shrink-0 text-dark-300 self-center">
+                    <span className="mt-0.5 shrink-0 text-dark-200">
                         {icon}
                     </span>
                 )}
-                <div className="flex flex-col gap-0.5">
-                    <span className="text-[13px] font-medium text-dark-50">
+                <div className="flex min-w-0 flex-col gap-1">
+                    <span className="text-sm font-medium text-dark-50">
                         {label}
                     </span>
                     {description && (
-                        <span className="text-xs text-dark-300">
+                        <span className="text-[13px] leading-relaxed text-dark-300">
                             {description}
                         </span>
                     )}

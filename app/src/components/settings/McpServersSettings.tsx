@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
     ArrowClockwiseIcon,
+    CheckCircleIcon,
     CodeIcon,
     DotsThreeIcon,
     FolderNotchOpenIcon,
-    GlobeIcon,
     HouseIcon,
     PencilSimpleIcon,
     PlugsIcon,
@@ -29,6 +29,7 @@ import { fetchMcpConfig } from "@/features/mcp/mcp-api";
 import { toApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { SettingHeader } from "./SettingHeader";
+import { SettingSection } from "./SettingSection";
 import {
     Button,
     Input,
@@ -47,12 +48,12 @@ const STATUS_CONFIG: Record<
 > = {
     ready: {
         label: "Ready",
-        dot: "bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.7)]",
+        dot: "bg-emerald-400",
         text: "text-emerald-300"
     },
     starting: {
         label: "Connecting",
-        dot: "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]",
+        dot: "bg-amber-400",
         text: "text-amber-300"
     },
     disconnected: {
@@ -67,7 +68,7 @@ const STATUS_CONFIG: Record<
     },
     error: {
         label: "Error",
-        dot: "bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.6)]",
+        dot: "bg-red-400",
         text: "text-red-300"
     }
 };
@@ -200,7 +201,7 @@ function StatusPill({ status }: { status: McpServerStatus }) {
 
 function TransportPill({ transport }: { transport: McpTransport }) {
     return (
-        <span className="rounded border border-dark-700 bg-dark-900 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-dark-300">
+        <span className="rounded bg-dark-700 px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-dark-200">
             {TRANSPORT_LABEL[transport]}
         </span>
     );
@@ -220,7 +221,7 @@ function KeyValueEditor({
     valuePlaceholder?: string;
 }) {
     return (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
             <span className="text-[13px] font-medium text-dark-100">
                 {label}
             </span>
@@ -308,18 +309,19 @@ function ServerRow({
     };
 
     return (
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex items-center gap-3 px-5 py-4">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-dark-50">
+                    <span className="truncate text-sm font-medium text-dark-50">
                         {server.name}
                     </span>
                     <TransportPill transport={server.transport} />
                     <StatusPill status={server.status} />
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-dark-300">
+                <div className="flex items-center gap-2 text-[12px] text-dark-300">
                     <span>
-                        {server.toolCount} tool{server.toolCount === 1 ? "" : "s"}
+                        {server.toolCount} tool
+                        {server.toolCount === 1 ? "" : "s"}
                     </span>
                     {server.error && (
                         <>
@@ -476,7 +478,7 @@ function ServerFormModal({
                         </ModalDescription>
                     </div>
 
-                    <div className="flex flex-col gap-4 overflow-y-auto px-5 py-4">
+                    <div className="flex flex-col gap-4 overflow-y-auto px-5 py-5">
                         <div className="grid grid-cols-2 gap-3">
                             <Input
                                 label="Name"
@@ -618,13 +620,17 @@ function ServerFormModal({
                                 className={cn(
                                     "rounded-md border px-3 py-2.5",
                                     testResult.ok
-                                        ? "border-emerald-500/25 bg-emerald-500/10"
-                                        : "border-red-500/25 bg-red-500/10"
+                                        ? "border-emerald-900 bg-emerald-950"
+                                        : "border-red-900 bg-red-950"
                                 )}
                             >
                                 <div className="flex items-center gap-2">
                                     {testResult.ok ? (
-                                        <span className="size-1.5 rounded-full bg-emerald-400" />
+                                        <CheckCircleIcon
+                                            size={13}
+                                            weight="fill"
+                                            className="text-emerald-400"
+                                        />
                                     ) : (
                                         <WarningCircleIcon
                                             size={13}
@@ -662,7 +668,7 @@ function ServerFormModal({
                         )}
 
                         {formError && (
-                            <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">
+                            <div className="flex items-center gap-2 rounded-md border border-red-900 bg-red-950 px-3 py-2.5">
                                 <WarningCircleIcon
                                     size={13}
                                     className="shrink-0 text-red-400"
@@ -734,6 +740,10 @@ function ScopeSection({
 
     const Icon = scope === "global" ? HouseIcon : FolderNotchOpenIcon;
     const title = scope === "global" ? "Global" : "This workspace";
+    const description =
+        scope === "global"
+            ? "Available everywhere on this machine."
+            : "Scoped to the current workspace; overrides global entries with the same name.";
 
     const enterRawMode = async () => {
         setRawError(null);
@@ -756,7 +766,9 @@ function ScopeSection({
                 typeof parsed !== "object" ||
                 typeof parsed.mcpServers !== "object"
             ) {
-                throw new Error("Config must contain a `mcpServers` object");
+                throw new Error(
+                    "Config must contain a `mcpServers` object"
+                );
             }
             await saveConfig(workspaceId, scope, parsed);
             setRawMode(false);
@@ -768,121 +780,128 @@ function ScopeSection({
     };
 
     return (
-        <section className="overflow-hidden rounded-md border border-dark-700 bg-dark-900">
-            <div className="flex items-center justify-between gap-3 border-b border-dark-700 bg-dark-950/60 px-4 py-3">
-                <div className="flex min-w-0 items-center gap-2">
-                    <Icon
-                        size={14}
-                        weight="duotone"
-                        className="text-dark-200"
-                    />
-                    <div className="min-w-0">
-                        <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-dark-200">
-                            {title}
-                        </h3>
-                        <p
-                            className="mt-0.5 truncate font-mono text-[10px] text-dark-400"
+        <SettingSection title={title} description={description}>
+            <div className="overflow-hidden rounded-lg border border-dark-700 bg-dark-900">
+                <div className="flex items-center justify-between gap-3 border-b border-dark-700 bg-dark-850 px-4 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <Icon
+                            size={12}
+                            weight="duotone"
+                            className="shrink-0 text-dark-300"
+                        />
+                        <span
+                            className="truncate font-mono text-[11px] text-dark-300"
                             title={configPath}
                         >
                             {configPath}
-                        </p>
+                        </span>
                     </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                            rawMode ? setRawMode(false) : void enterRawMode()
-                        }
-                    >
-                        <CodeIcon size={12} />
-                        {rawMode ? "Form view" : "Edit JSON"}
-                    </Button>
-                    {!rawMode && (
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={onAdd}
-                        >
-                            <PlusIcon size={12} weight="bold" />
-                            Add
-                        </Button>
-                    )}
-                </div>
-            </div>
-
-            {rawMode ? (
-                <div className="flex flex-col gap-2 p-4">
-                    <textarea
-                        value={rawText}
-                        onChange={(e) => setRawText(e.target.value)}
-                        spellCheck={false}
-                        className="h-72 w-full resize-y rounded-md border border-dark-700 bg-dark-950 p-3 font-mono text-[11px] leading-5 text-dark-100 outline-none focus:border-dark-500 scrollbar-custom"
-                    />
-                    {rawError && (
-                        <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2">
-                            <WarningCircleIcon
-                                size={13}
-                                className="shrink-0 text-red-400"
-                            />
-                            <span className="text-xs text-red-300">
-                                {rawError}
-                            </span>
-                        </div>
-                    )}
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="-mr-2 flex shrink-0 items-center">
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setRawMode(false)}
+                            onClick={() =>
+                                rawMode
+                                    ? setRawMode(false)
+                                    : void enterRawMode()
+                            }
                         >
-                            Cancel
+                            <CodeIcon size={12} />
+                            {rawMode ? "Form view" : "Edit JSON"}
                         </Button>
-                        <Button
-                            variant="primary"
-                            size="sm"
-                            loading={rawSaving}
-                            onClick={() => void handleRawSave()}
-                        >
-                            Save JSON
-                        </Button>
+                        {!rawMode && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={onAdd}
+                            >
+                                <PlusIcon size={12} weight="bold" />
+                                Add
+                            </Button>
+                        )}
                     </div>
                 </div>
-            ) : servers.length > 0 ? (
-                <div className="divide-y divide-dark-700">
-                    {servers.map((server) => (
-                        <ServerRow
-                            key={`${server.scope}:${server.name}`}
-                            server={server}
-                            onRefresh={async () => {
-                                await refreshServer(workspaceId, server.name);
-                            }}
-                            onEdit={() => onEdit(server)}
-                            onToggleDisabled={async (disabled) => {
-                                await setServerDisabled(
-                                    workspaceId,
-                                    server.scope,
-                                    server.name,
-                                    disabled
-                                );
-                            }}
-                            onDelete={async () => {
-                                await deleteServer(
-                                    workspaceId,
-                                    server.scope,
-                                    server.name
-                                );
-                            }}
+
+                {rawMode ? (
+                    <div className="flex flex-col gap-3 p-5">
+                        <textarea
+                            value={rawText}
+                            onChange={(e) => setRawText(e.target.value)}
+                            spellCheck={false}
+                            className="h-72 w-full resize-y rounded-md border border-dark-700 bg-dark-950 p-3 font-mono text-[11px] leading-5 text-dark-100 outline-none focus:border-dark-500 scrollbar-custom"
                         />
-                    ))}
-                </div>
-            ) : (
-                <div className="px-4 py-6 text-center text-[11px] text-dark-400">
-                    No servers configured.
-                </div>
-            )}
-        </section>
+                        {rawError && (
+                            <div className="flex items-center gap-2 rounded-md border border-red-900 bg-red-950 px-3 py-2">
+                                <WarningCircleIcon
+                                    size={13}
+                                    className="shrink-0 text-red-400"
+                                />
+                                <span className="text-xs text-red-300">
+                                    {rawError}
+                                </span>
+                            </div>
+                        )}
+                        <div className="flex items-center justify-end gap-2">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRawMode(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                loading={rawSaving}
+                                onClick={() => void handleRawSave()}
+                            >
+                                Save JSON
+                            </Button>
+                        </div>
+                    </div>
+                ) : servers.length > 0 ? (
+                    <div className="divide-y divide-dark-800">
+                        {servers.map((server) => (
+                            <ServerRow
+                                key={`${server.scope}:${server.name}`}
+                                server={server}
+                                onRefresh={async () => {
+                                    await refreshServer(
+                                        workspaceId,
+                                        server.name
+                                    );
+                                }}
+                                onEdit={() => onEdit(server)}
+                                onToggleDisabled={async (disabled) => {
+                                    await setServerDisabled(
+                                        workspaceId,
+                                        server.scope,
+                                        server.name,
+                                        disabled
+                                    );
+                                }}
+                                onDelete={async () => {
+                                    await deleteServer(
+                                        workspaceId,
+                                        server.scope,
+                                        server.name
+                                    );
+                                }}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={onAdd}
+                        className="flex w-full items-center justify-center gap-2 px-5 py-5 text-[13px] text-dark-400 transition-colors hover:bg-dark-850 hover:text-dark-100"
+                    >
+                        <PlusIcon size={12} weight="bold" />
+                        No servers yet — add one
+                    </button>
+                )}
+            </div>
+        </SettingSection>
     );
 }
 
@@ -942,7 +961,6 @@ export function McpServersSettings() {
             });
             setModalOpen(true);
         } catch (error) {
-            // Surface in the panel-level error banner via the store
             useMcpStore.setState({
                 error: toApiErrorMessage(
                     error,
@@ -965,43 +983,43 @@ export function McpServersSettings() {
     };
 
     return (
-        <div className="mx-auto w-full max-w-2xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="MCP servers"
                 description="Connect Model Context Protocol servers so the assistant can call their tools. Servers can be configured globally or per workspace."
             />
 
             {!workspace ? (
-                <div className="flex flex-col items-center gap-3 rounded-md border border-dark-700 bg-dark-900 py-10 text-center">
-                    <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-400">
+                <div className="flex flex-col items-center gap-3 rounded-lg border border-dark-700 bg-dark-900 px-6 py-12 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-300">
                         <PlugsIcon size={20} weight="duotone" />
                     </div>
-                    <div className="space-y-1">
+                    <div className="flex flex-col gap-1">
                         <p className="text-sm font-medium text-dark-100">
                             No workspace selected
                         </p>
-                        <p className="text-xs text-dark-400">
+                        <p className="text-[13px] text-dark-400">
                             Open a workspace to manage MCP servers.
                         </p>
                     </div>
                 </div>
             ) : (
-                <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-8">
                     {error && (
-                        <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">
+                        <div className="flex items-center gap-2 rounded-md border border-red-900 bg-red-950 px-4 py-3">
                             <WarningCircleIcon
                                 size={13}
                                 className="shrink-0 text-red-400"
                             />
-                            <span className="text-xs text-red-300">
+                            <span className="text-[13px] text-red-300">
                                 {error}
                             </span>
                         </div>
                     )}
 
                     {data?.warnings && data.warnings.length > 0 && (
-                        <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
-                            <ul className="list-disc space-y-1 pl-5 text-xs text-amber-200">
+                        <div className="rounded-md border border-amber-900 bg-amber-950 px-4 py-3">
+                            <ul className="list-disc space-y-1 pl-5 text-[13px] text-amber-200">
                                 {data.warnings.map((warning) => (
                                     <li key={warning}>{warning}</li>
                                 ))}
@@ -1010,7 +1028,7 @@ export function McpServersSettings() {
                     )}
 
                     {isLoading && !data ? (
-                        <div className="flex items-center justify-center gap-2 rounded-md border border-dark-700 bg-dark-900 py-10 text-xs text-dark-300">
+                        <div className="flex items-center justify-center gap-2 rounded-lg border border-dark-700 bg-dark-900 py-12 text-[13px] text-dark-300">
                             <SpinnerGapIcon
                                 size={14}
                                 className="animate-spin"
@@ -1035,14 +1053,6 @@ export function McpServersSettings() {
                                 onAdd={() => openAdd("project")}
                                 onEdit={(server) => void openEdit(server)}
                             />
-                            <p className="text-[11px] text-dark-400">
-                                <GlobeIcon
-                                    size={11}
-                                    className="mr-1 inline"
-                                    weight="duotone"
-                                />
-                                Project entries override global entries that share the same name.
-                            </p>
                         </>
                     ) : null}
                 </div>
@@ -1064,4 +1074,3 @@ export function McpServersSettings() {
         </div>
     );
 }
-

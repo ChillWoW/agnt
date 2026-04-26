@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { useSettingsStore } from "@/features/settings";
 import {
@@ -8,8 +9,13 @@ import {
     getEventHotkeyCombo,
     HotkeyShortcut
 } from "@/features/hotkeys";
-import type { HotkeyCombo, HotkeyDefinition, HotkeyId } from "@/features/hotkeys";
+import type {
+    HotkeyCombo,
+    HotkeyDefinition,
+    HotkeyId
+} from "@/features/hotkeys";
 import { SettingHeader } from "./SettingHeader";
+import { SettingSection } from "./SettingSection";
 import { SettingGroup } from "./SettingGroup";
 
 type HotkeyGroup = {
@@ -23,12 +29,16 @@ function toCategoryLabel(category: string) {
 
 export function HotkeySettings() {
     const definitions = useHotkeysStore((s) => s.definitions);
-    const hotkeyBindings = useSettingsStore((s) => s.settings.hotkeys?.bindings ?? {});
+    const hotkeyBindings = useSettingsStore(
+        (s) => s.settings.hotkeys?.bindings ?? {}
+    );
     const setHotkeyBinding = useSettingsStore((s) => s.setHotkeyBinding);
     const resetHotkeyBinding = useSettingsStore((s) => s.resetHotkeyBinding);
 
     const [recordingId, setRecordingId] = useState<HotkeyId | null>(null);
-    const [recordingMessage, setRecordingMessage] = useState<string | null>(null);
+    const [recordingMessage, setRecordingMessage] = useState<string | null>(
+        null
+    );
 
     const stopRecording = useCallback(() => {
         disableHotkeys(false);
@@ -84,7 +94,8 @@ export function HotkeySettings() {
         };
 
         window.addEventListener("keydown", handleKeyDown, true);
-        return () => window.removeEventListener("keydown", handleKeyDown, true);
+        return () =>
+            window.removeEventListener("keydown", handleKeyDown, true);
     }, [recordingId, stopRecording, setHotkeyBinding]);
 
     useEffect(() => {
@@ -113,7 +124,9 @@ export function HotkeySettings() {
         }));
     }, [definitions]);
 
-    const resolveCombo = (hotkey: HotkeyDefinition): HotkeyCombo | null => {
+    const resolveCombo = (
+        hotkey: HotkeyDefinition
+    ): HotkeyCombo | null => {
         if (Object.prototype.hasOwnProperty.call(hotkeyBindings, hotkey.id)) {
             return hotkeyBindings[hotkey.id] ?? null;
         }
@@ -126,105 +139,113 @@ export function HotkeySettings() {
     const hasDefinitions = groups.length > 0;
 
     return (
-        <div className="mx-auto w-full max-w-xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="Hotkeys"
-                description="View and customize keyboard shortcuts."
+                description="Click any shortcut to record a new combo. Press Delete to clear, Esc to cancel."
             />
 
-            {!hasDefinitions && (
-                <div className="rounded-md border border-dark-700 bg-dark-900 p-6 text-center">
+            {!hasDefinitions ? (
+                <div className="rounded-lg border border-dark-700 bg-dark-900 px-6 py-12 text-center">
                     <p className="text-sm text-dark-300">
-                        No hotkeys registered yet. Hotkeys will appear here once
-                        features register their shortcuts.
+                        No hotkeys registered yet.
                     </p>
                 </div>
-            )}
+            ) : (
+                <div className="flex flex-col gap-8">
+                    {groups.map((group) => (
+                        <SettingSection
+                            key={group.category}
+                            title={toCategoryLabel(group.category)}
+                        >
+                            <SettingGroup>
+                                {group.items.map((hotkey) => {
+                                    const value = resolveCombo(hotkey);
+                                    const isRecording =
+                                        recordingId === hotkey.id;
+                                    const custom = isCustom(hotkey.id);
 
-            <div className="flex flex-col gap-4">
-                {groups.map((group) => (
-                    <div key={group.category}>
-                        <p className="mb-2 text-xs font-semibold uppercase text-dark-300">
-                            {toCategoryLabel(group.category)}
-                        </p>
-
-                        <SettingGroup>
-                            {group.items.map((hotkey) => {
-                                const value = resolveCombo(hotkey);
-                                const isRecording = recordingId === hotkey.id;
-                                const custom = isCustom(hotkey.id);
-
-                                return (
-                                    <div
-                                        key={hotkey.id}
-                                        className="flex items-center justify-between gap-2 p-3"
-                                    >
-                                        <div className="flex flex-col gap-0.5">
-                                            <span className="text-[13px] font-medium text-dark-50">
-                                                {hotkey.label}
-                                            </span>
-                                            {hotkey.description && (
-                                                <span className="text-xs text-dark-300">
-                                                    {hotkey.description}
+                                    return (
+                                        <div
+                                            key={hotkey.id}
+                                            className="flex items-center justify-between gap-4 px-5 py-3.5"
+                                        >
+                                            <div className="flex min-w-0 flex-col gap-0.5">
+                                                <span className="text-sm font-medium text-dark-50">
+                                                    {hotkey.label}
                                                 </span>
-                                            )}
-                                        </div>
+                                                {hotkey.description && (
+                                                    <span className="text-[12px] text-dark-300">
+                                                        {hotkey.description}
+                                                    </span>
+                                                )}
+                                            </div>
 
-                                        <div className="flex shrink-0 items-center gap-1.5">
-                                            {custom && !isRecording && (
+                                            <div className="flex shrink-0 items-center gap-1">
+                                                {custom && !isRecording && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            resetHotkeyBinding(
+                                                                hotkey.id
+                                                            )
+                                                        }
+                                                        title="Reset to default"
+                                                        className="flex size-7 items-center justify-center rounded-md text-dark-400 transition-colors hover:bg-dark-800 hover:text-dark-100"
+                                                    >
+                                                        <ArrowCounterClockwiseIcon
+                                                            size={12}
+                                                            weight="bold"
+                                                        />
+                                                    </button>
+                                                )}
+
                                                 <button
                                                     type="button"
                                                     onClick={() =>
-                                                        resetHotkeyBinding(hotkey.id)
+                                                        isRecording
+                                                            ? stopRecording()
+                                                            : startRecording(
+                                                                  hotkey.id
+                                                              )
                                                     }
-                                                    className="cursor-pointer rounded px-1.5 py-0.5 text-[10px] text-dark-400 transition-colors hover:text-dark-200"
+                                                    className={cn(
+                                                        "flex h-7 min-w-20 items-center justify-center rounded-md border px-2 transition-colors",
+                                                        isRecording
+                                                            ? "border-dark-500 bg-dark-800 text-dark-50"
+                                                            : "border-dark-700 bg-dark-850 text-dark-100 hover:border-dark-600 hover:bg-dark-800"
+                                                    )}
                                                 >
-                                                    Reset
+                                                    {isRecording ? (
+                                                        <span className="text-[11px] text-dark-200 wave-text">
+                                                            Press keys…
+                                                        </span>
+                                                    ) : (
+                                                        <HotkeyShortcut
+                                                            combo={value}
+                                                        />
+                                                    )}
                                                 </button>
-                                            )}
-
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    isRecording
-                                                        ? stopRecording()
-                                                        : startRecording(hotkey.id)
-                                                }
-                                                className={cn(
-                                                    "cursor-pointer rounded-md px-2 py-1 text-xs transition-colors",
-                                                    isRecording
-                                                        ? "ring-1 ring-primary-400 text-primary-300 bg-primary-400/10"
-                                                        : "text-dark-200 hover:bg-dark-700 hover:text-dark-50"
-                                                )}
-                                            >
-                                                {isRecording ? (
-                                                    <span className="animate-pulse">
-                                                        Press keys...
-                                                    </span>
-                                                ) : (
-                                                    <HotkeyShortcut combo={value} />
-                                                )}
-                                            </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
-                        </SettingGroup>
-                    </div>
-                ))}
-            </div>
-
-            {recordingId && (
-                <div className="mt-4 text-center text-xs text-dark-300">
-                    {recordingMessage ?? (
-                        <>
-                            <span className="text-dark-100">Del</span> clears
-                            {" "}&middot;{" "}
-                            <span className="text-dark-100">Esc</span> cancels
-                        </>
-                    )}
+                                    );
+                                })}
+                            </SettingGroup>
+                        </SettingSection>
+                    ))}
                 </div>
             )}
+
+            <div
+                className={cn(
+                    "mt-8 text-center text-[12px] text-dark-400 transition-opacity",
+                    recordingId ? "opacity-100" : "opacity-0"
+                )}
+                aria-hidden={!recordingId}
+            >
+                {recordingMessage ??
+                    "Press the new combo · Del to clear · Esc to cancel"}
+            </div>
         </div>
     );
 }

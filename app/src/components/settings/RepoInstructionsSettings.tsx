@@ -10,6 +10,7 @@ import {
     type WorkspaceRepoInstructions
 } from "@/features/workspaces";
 import { SettingHeader } from "./SettingHeader";
+import { SettingSection } from "./SettingSection";
 
 function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -18,7 +19,9 @@ function formatBytes(bytes: number): string {
 }
 
 export function RepoInstructionsSettings() {
-    const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+    const activeWorkspaceId = useWorkspaceStore(
+        (state) => state.activeWorkspaceId
+    );
     const workspaces = useWorkspaceStore((state) => state.workspaces);
     const workspace = useMemo(
         () =>
@@ -71,40 +74,43 @@ export function RepoInstructionsSettings() {
     }, [activeWorkspaceId]);
 
     return (
-        <div className="mx-auto w-full max-w-xl p-8">
+        <div className="mx-auto w-full max-w-2xl px-10 pt-14 pb-16">
             <SettingHeader
                 title="Repo instructions"
-                description="Automatically injects AGENTS.md and CLAUDE.md guidance from the active workspace into conversation context."
+                description="AGENTS.md and CLAUDE.md guidance from the active workspace is automatically injected into every conversation."
             />
 
             {!workspace ? (
-                <div className="flex flex-col items-center gap-3 rounded-md border border-dark-700 bg-dark-900 py-10 text-center">
-                    <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-400">
+                <div className="flex flex-col items-center gap-3 rounded-lg border border-dark-700 bg-dark-900 px-6 py-12 text-center">
+                    <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-300">
                         <FolderNotchOpenIcon size={20} weight="duotone" />
                     </div>
-                    <div className="space-y-1">
+                    <div className="flex flex-col gap-1">
                         <p className="text-sm font-medium text-dark-100">
                             No workspace selected
                         </p>
-                        <p className="text-xs text-dark-400">
+                        <p className="text-[13px] text-dark-400">
                             Open a workspace to inspect injected AGENTS.md / CLAUDE.md files.
                         </p>
                     </div>
                 </div>
             ) : (
-                <div className="flex flex-col gap-3">
-                    <div className="rounded-md border border-dark-700 bg-dark-900 p-4">
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <p className="text-xs font-medium text-dark-50">
+                <div className="flex flex-col gap-8">
+                    <div className="rounded-lg border border-dark-700 bg-dark-900 px-5 py-4">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-dark-50">
                                     {workspace.name}
                                 </p>
-                                <p className="mt-1 break-all font-mono text-[11px] text-dark-300">
+                                <p
+                                    className="mt-1 truncate font-mono text-[12px] text-dark-300"
+                                    title={workspace.path}
+                                >
                                     {workspace.path}
                                 </p>
                             </div>
                             {isLoading && (
-                                <span className="text-[11px] text-dark-300">
+                                <span className="shrink-0 text-[12px] text-dark-300">
                                     Loading…
                                 </span>
                             )}
@@ -112,52 +118,62 @@ export function RepoInstructionsSettings() {
                     </div>
 
                     {error && (
-                        <div className="flex items-center gap-2 rounded-md border border-red-500/25 bg-red-500/10 px-3 py-2.5">
+                        <div className="flex items-center gap-2 rounded-md border border-red-900 bg-red-950 px-4 py-3">
                             <WarningCircleIcon
                                 size={14}
                                 weight="duotone"
                                 className="shrink-0 text-red-400"
                             />
-                            <span className="text-xs text-red-300">
+                            <span className="text-[13px] text-red-300">
                                 {error}
                             </span>
                         </div>
                     )}
 
-                    {!error && data && data.sources.length === 0 && !isLoading && (
-                        <div className="flex flex-col items-center gap-3 rounded-md border border-dark-700 bg-dark-900 py-10 text-center">
-                            <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-400">
-                                <FileTextIcon size={20} weight="duotone" />
+                    {!error &&
+                        data &&
+                        data.sources.length === 0 &&
+                        !isLoading && (
+                            <div className="flex flex-col items-center gap-3 rounded-lg border border-dark-700 bg-dark-900 px-6 py-12 text-center">
+                                <div className="flex size-10 items-center justify-center rounded-full bg-dark-800 text-dark-300">
+                                    <FileTextIcon
+                                        size={20}
+                                        weight="duotone"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <p className="text-sm font-medium text-dark-100">
+                                        No repo instructions found
+                                    </p>
+                                    <p className="text-[13px] text-dark-400">
+                                        Add AGENTS.md, CLAUDE.md, .agents/AGENTS.md, or .claude/CLAUDE.md to this workspace.
+                                    </p>
+                                </div>
                             </div>
-                            <div className="space-y-1">
-                                <p className="text-sm font-medium text-dark-100">
-                                    No repo instructions found
-                                </p>
-                                <p className="text-xs text-dark-400">
-                                    Add AGENTS.md, CLAUDE.md, .agents/AGENTS.md, or .claude/CLAUDE.md to this workspace.
-                                </p>
-                            </div>
-                        </div>
-                    )}
+                        )}
 
                     {data && data.sources.length > 0 && (
                         <>
-                            <div className="rounded-md border border-dark-700 bg-dark-900 overflow-hidden">
-                                <div className="border-b border-dark-700 px-4 py-3 text-[11px] text-dark-300">
-                                    Injected in listed order. Later entries have higher precedence.
-                                </div>
-                                <div className="divide-y divide-dark-700">
+                            <SettingSection
+                                title="Sources"
+                                description="Injected in listed order. Later entries have higher precedence."
+                            >
+                                <div className="overflow-hidden rounded-lg border border-dark-700 bg-dark-900 divide-y divide-dark-800">
                                     {data.sources.map((source) => (
                                         <div
                                             key={source.path}
-                                            className="flex items-start justify-between gap-4 px-4 py-3"
+                                            className="flex items-start justify-between gap-4 px-5 py-3.5"
                                         >
                                             <div className="min-w-0">
-                                                <p className="text-xs font-medium text-dark-50">
-                                                    {source.priority}. {source.relativePath}
+                                                <p className="text-[13px] font-medium text-dark-50">
+                                                    {source.priority}.{" "}
+                                                    {source.relativePath}
                                                 </p>
-                                                <p className="mt-1 text-[11px] text-dark-300">
-                                                    {source.fileName} · {formatBytes(source.bytes)} · {source.charCount.toLocaleString()} chars
+                                                <p className="mt-1 text-[12px] text-dark-300">
+                                                    {source.fileName} ·{" "}
+                                                    {formatBytes(source.bytes)} ·{" "}
+                                                    {source.charCount.toLocaleString()}{" "}
+                                                    chars
                                                     {source.truncated
                                                         ? " · truncated"
                                                         : ""}
@@ -166,20 +182,20 @@ export function RepoInstructionsSettings() {
                                         </div>
                                     ))}
                                 </div>
-                            </div>
+                            </SettingSection>
 
                             {data.warnings.length > 0 && (
-                                <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+                                <div className="rounded-md border border-amber-900 bg-amber-950 px-4 py-3">
                                     <div className="mb-1 flex items-center gap-2 text-amber-300">
                                         <WarningCircleIcon
                                             size={14}
                                             weight="duotone"
                                         />
-                                        <span className="text-xs font-medium">
+                                        <span className="text-[13px] font-medium">
                                             Loading notes
                                         </span>
                                     </div>
-                                    <ul className="list-disc space-y-1 pl-5 text-xs text-amber-200">
+                                    <ul className="list-disc space-y-1 pl-5 text-[12px] text-amber-200">
                                         {data.warnings.map((warning) => (
                                             <li key={warning}>{warning}</li>
                                         ))}
@@ -187,14 +203,16 @@ export function RepoInstructionsSettings() {
                                 </div>
                             )}
 
-                            <div className="rounded-md border border-dark-700 bg-dark-900 p-3">
-                                <p className="mb-2 text-[11px] text-dark-300">
-                                    Effective merged content
-                                </p>
-                                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-dark-700 bg-dark-950/80 p-3 text-[11px] leading-5 text-dark-100 scrollbar-custom">
-                                    {data.mergedContent}
-                                </pre>
-                            </div>
+                            <SettingSection
+                                title="Effective merged content"
+                                description="What the assistant actually sees prepended to its system prompt."
+                            >
+                                <div className="overflow-hidden rounded-lg border border-dark-700 bg-dark-900">
+                                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap p-5 font-mono text-[12px] leading-5 text-dark-100 scrollbar-custom">
+                                        {data.mergedContent}
+                                    </pre>
+                                </div>
+                            </SettingSection>
                         </>
                     )}
                 </div>
