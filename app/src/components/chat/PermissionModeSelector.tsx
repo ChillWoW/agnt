@@ -38,7 +38,7 @@ export function PermissionModeSelector({
         conversationId
     });
 
-    const cycleHotkey = useResolvedHotkeyCombo("permissions.mode.cycle");
+    const cycleHotkey = useResolvedHotkeyCombo("models.permission-mode.cycle");
 
     useHotkey({
         id: "models.permission-mode.cycle",

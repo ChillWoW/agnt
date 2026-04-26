@@ -38,7 +38,7 @@ export function AgenticModeSelector({
         conversationId
     });
 
-    const cycleHotkey = useResolvedHotkeyCombo("agentic.mode.cycle");
+    const cycleHotkey = useResolvedHotkeyCombo("models.agentic-mode.cycle");
 
     useHotkey({
         id: "models.agentic-mode.cycle",
