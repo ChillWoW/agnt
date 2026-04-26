@@ -141,14 +141,16 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                         <span className="truncate flex-1">{conv.title}</span>
                         <Tooltip content="Archive" side="top">
                             <button
-                                onClick={(e) => {
+                                type="button"
+                                onClick={async (e) => {
                                     e.stopPropagation();
-                                    void useConversationStore
+                                    await useConversationStore
                                         .getState()
                                         .archiveConversation(
                                             workspaceId,
                                             conv.id
                                         );
+                                    void navigate({ to: "/" });
                                 }}
                                 className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
                             >
