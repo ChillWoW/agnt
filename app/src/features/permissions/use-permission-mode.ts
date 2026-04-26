@@ -25,6 +25,17 @@ function toMode(values: Record<string, unknown>): PermissionMode {
 // Module-level cache survives component unmounts caused by route changes
 let cachedMode: PermissionMode | null = null;
 
+/**
+ * Returns the last-displayed permission mode across the app, or `null` if
+ * `usePermissionMode` has never resolved a value yet. Used by the `/` route
+ * to carry the mode shown on the home screen into the new conversation it
+ * creates, regardless of whether that mode is currently in workspace state
+ * or just cached from a prior conversation override.
+ */
+export function getCachedPermissionMode(): PermissionMode | null {
+    return cachedMode;
+}
+
 export function usePermissionMode({
     workspaceId,
     conversationId

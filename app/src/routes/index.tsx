@@ -7,6 +7,8 @@ import { StatsPanel } from "@/components/stats";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
+import { getCachedPermissionMode } from "@/features/permissions";
+import { updateConversationState } from "@/features/history";
 
 export const Route = createFileRoute("/")({
     component: HomeRoute
@@ -36,12 +38,42 @@ function HomeRoute() {
     ) => {
         if (!activeWorkspaceId) return;
 
+        // Snapshot the permission mode shown on `/` BEFORE awaiting anything
+        // so a concurrent route change can't shift it under us.
+        const carriedPermissionMode = getCachedPermissionMode();
+
         const conversation = await createConversation(
             activeWorkspaceId,
             message,
             attachmentIds,
             mentions
         );
+
+        // Carry the permission mode shown on `/` into the new conversation as
+        // its own override. The home screen displays a cached mode that may
+        // have come from a prior conversation's per-conversation override
+        // rather than workspace state, so a fresh conversation that only
+        // inherits workspace state can otherwise silently flip back to "ask"
+        // (or whatever the workspace default is) even though the user just
+        // saw "bypass". Writing the override here guarantees the new
+        // conversation matches what was displayed on `/`. We must await this
+        // before kicking off `/reply` so the server resolves permissionMode
+        // against the override on the very first tool call.
+        if (carriedPermissionMode) {
+            try {
+                await updateConversationState(
+                    activeWorkspaceId,
+                    conversation.id,
+                    {
+                        values: { permissionMode: carriedPermissionMode },
+                        source: "home-screen-send"
+                    }
+                );
+            } catch {
+                // Non-fatal: the new conversation will fall back to the
+                // workspace default. The reply still proceeds.
+            }
+        }
 
         void navigate({
             to: "/conversations/$conversationId",
