@@ -9,6 +9,7 @@ import authRoutes from "./modules/auth/auth.routes";
 import historyRoutes from "./modules/history/history.routes";
 import modelsRoutes from "./modules/models/models.routes";
 import statsRoutes from "./modules/stats/stats.routes";
+import mcpRoutes from "./modules/mcp/mcp.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -31,6 +32,7 @@ const app = new Elysia()
     .use(modelsRoutes)
     .use(statsRoutes)
     .use(toolsRoutes)
+    .use(mcpRoutes)
     .use(attachmentsRoutes)
     .use(conversationsRoutes)
     .use(authRoutes);

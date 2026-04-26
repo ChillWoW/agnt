@@ -165,6 +165,65 @@ function buildModeBlock(agenticMode: AgenticMode): string {
     return agenticMode === "plan" ? PLAN_MODE_INSTRUCTIONS : AGENT_MODE_INSTRUCTIONS;
 }
 
+function escapeXmlAttribute(value: string): string {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+export interface AvailableMcpTool {
+    name: string;
+    description: string;
+    serverName: string;
+}
+
+/**
+ * Build the system-prompt block listing every MCP tool currently available
+ * for this conversation. Folded into the cached `instructions` blob in
+ * conversation.stream.ts since a workspace's MCP server set is stable
+ * across turns.
+ */
+export function buildAvailableMcpToolsBlock(tools: AvailableMcpTool[]): string {
+    if (tools.length === 0) return "";
+
+    // Group tools by server so the prompt mirrors the user's mental model
+    // (one MCP server, many tools) instead of dumping a flat list.
+    const byServer = new Map<string, AvailableMcpTool[]>();
+    for (const tool of tools) {
+        const bucket = byServer.get(tool.serverName);
+        if (bucket) {
+            bucket.push(tool);
+        } else {
+            byServer.set(tool.serverName, [tool]);
+        }
+    }
+
+    const groups: string[] = [];
+    for (const [serverName, serverTools] of byServer) {
+        const entries = serverTools
+            .map((tool) => {
+                const description = escapeXmlAttribute(
+                    (tool.description || "").slice(0, 240)
+                );
+                return `    <tool name="${escapeXmlAttribute(tool.name)}" description="${description}" />`;
+            })
+            .join("\n");
+        groups.push(
+            `  <server name="${escapeXmlAttribute(serverName)}">\n${entries}\n  </server>`
+        );
+    }
+
+    return (
+        "\n\n## MCP Tools\n" +
+        "The following tools are provided by external MCP (Model Context Protocol) servers configured for this workspace. " +
+        "Call them like any other tool; the same permission flow applies. " +
+        "Each tool name is namespaced as `mcp__<server>__<tool>`.\n\n" +
+        `<mcp_tools>\n${groups.join("\n")}\n</mcp_tools>`
+    );
+}
+
 function buildWarningBlock(repoInstructions: ResolvedRepoInstructions): string {
     if (repoInstructions.warnings.length === 0) {
         return "";

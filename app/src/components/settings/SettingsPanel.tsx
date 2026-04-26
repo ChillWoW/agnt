@@ -4,12 +4,14 @@ import {
     BugIcon,
     FileTextIcon,
     KeyboardIcon,
+    PlugsIcon,
     RobotIcon,
     ShieldCheckIcon
 } from "@phosphor-icons/react";
 import { HotkeySettings } from "./HotkeySettings";
 import { CodexSettings } from "./CodexSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
+import { McpServersSettings } from "./McpServersSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { RepoInstructionsSettings } from "./RepoInstructionsSettings";
 import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
@@ -45,6 +47,12 @@ export const settingsCategories: SettingsCategory[] = [
         key: "codex",
         label: "Codex",
         icon: RobotIcon,
+        group: "AI"
+    },
+    {
+        key: "mcpServers",
+        label: "MCP servers",
+        icon: PlugsIcon,
         group: "AI"
     },
     {
@@ -86,6 +94,7 @@ export function SettingsPanel() {
                     <DiagnosticsSettings />
                 )}
                 {activeCategory === "codex" && <CodexSettings />}
+                {activeCategory === "mcpServers" && <McpServersSettings />}
                 {activeCategory === "toolPermissions" && (
                     <ToolPermissionsSettings />
                 )}

@@ -73,7 +73,10 @@ import {
     DEFAULT_CONVERSATION_TITLE,
     DEFAULT_MODEL
 } from "./conversation.constants";
-import { buildConversationPrompt } from "./conversation.prompt";
+import {
+    buildAvailableMcpToolsBlock,
+    buildConversationPrompt
+} from "./conversation.prompt";
 import { generateConversationTitleIfNeeded } from "./conversation-title";
 import {
     buildMentionsInstructionBlock,
@@ -86,6 +89,7 @@ import {
     listSkillFiles,
     type Skill
 } from "../skills/skills.service";
+import { getMcpToolDefs } from "../mcp/mcp.service";
 export { DEFAULT_MODEL };
 
 const DEFAULT_SUBAGENT_MODEL = "gpt-5.4-mini";
@@ -442,6 +446,25 @@ function toolResultOutputFromInvocation(
     // to the same compact text/summary the model saw on the original turn.
     // Without this, every subsequent turn re-injects the full stored
     // payload into the prompt, exploding context.
+    //
+    // MCP tools (mcp__server__name) aren't in `AGNT_TOOL_DEF_BY_NAME`
+    // because they're discovered per workspace. Their stored output is
+    // already the JSON shape the SDK produced — return it as `json`
+    // without warn-spamming on the lookup miss.
+    if (invocation.tool_name.startsWith("mcp__")) {
+        if (typeof output === "string") {
+            return { type: "text", value: output };
+        }
+        return {
+            type: "json",
+            value: output as SdkToolResultOutput extends {
+                type: "json";
+                value: infer V;
+            }
+                ? V
+                : never
+        };
+    }
     const def = AGNT_TOOL_DEF_BY_NAME[invocation.tool_name];
     if (def?.toModelOutput) {
         try {
@@ -1405,7 +1428,40 @@ async function runStreamTextIntoController({
             ? getSubagentTypeConfig(subagentOverrides.subagentType)
                   .systemPromptAddition
             : "";
-        const instructions = prompt.prompt + subagentPromptAddition;
+
+        // Resolve MCP tools BEFORE building the instructions blob so the
+        // available-MCP-tools block can be folded into the cached prefix.
+        // Skip lookup entirely for subagents and plan mode — third-party
+        // MCP tools should not run in restricted contexts.
+        const skipMcp =
+            Boolean(subagentOverrides?.subagentType) || agenticMode === "plan";
+        let mcpTools: Awaited<ReturnType<typeof getMcpToolDefs>> = [];
+        if (!skipMcp) {
+            try {
+                mcpTools = await getMcpToolDefs(workspaceId);
+            } catch (error) {
+                logger.error("[stream] getMcpToolDefs failed", {
+                    workspaceId,
+                    error
+                });
+            }
+        }
+
+        const mcpToolsBlock =
+            mcpTools.length > 0
+                ? buildAvailableMcpToolsBlock(
+                      mcpTools.map((tool) => {
+                          const parts = tool.name.split("__");
+                          return {
+                              name: tool.name,
+                              description: tool.description,
+                              serverName: parts[1] ?? ""
+                          };
+                      })
+                  )
+                : "";
+        const instructions =
+            prompt.prompt + subagentPromptAddition + mcpToolsBlock;
 
         logger.log(
             "[stream] Starting streamText with model:",
@@ -1465,6 +1521,7 @@ async function runStreamTextIntoController({
             getAssistantMessageId: () => assistantMsgId,
             subagentType: subagentOverrides?.subagentType,
             getParentAbortSignal: () => abortSignal,
+            mcpTools,
             getMode: () => {
                 try {
                     return resolveConversationModelSettings(

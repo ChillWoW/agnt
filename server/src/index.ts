@@ -3,6 +3,7 @@ import app from "./app";
 import { markServerInitializing, markServerReady } from "./readiness";
 import { logger } from "./lib/logger";
 import { disposeAll as disposeAllLspProviders } from "./modules/lsp/lsp.service";
+import { disposeAllMcp } from "./modules/mcp/mcp.service";
 
 const allowedOrigins = new Set([
     "tauri://localhost",
@@ -123,17 +124,21 @@ program
 
         const handleSignal = async (signal: string) => {
             logShutdown(signal);
-            // Tear down long-lived children (language servers) before
-            // exiting so we don't leave zombie processes around.
+            // Tear down long-lived children (language servers + MCP stdio
+            // processes) before exiting so we don't leave zombie processes
+            // around. Both run concurrently and share a single 2.5s budget.
             try {
                 await Promise.race([
-                    disposeAllLspProviders(),
+                    Promise.all([
+                        disposeAllLspProviders(),
+                        disposeAllMcp()
+                    ]),
                     new Promise<void>((resolve) =>
                         setTimeout(() => resolve(undefined), 2500)
                     )
                 ]);
             } catch (error) {
-                logger.error("[shutdown] LSP dispose failed", error);
+                logger.error("[shutdown] dispose failed", error);
             }
             process.exit(0);
         };

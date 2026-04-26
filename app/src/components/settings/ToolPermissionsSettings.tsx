@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { useSettings } from "@/features/settings";
 import { fetchTools, type ToolCatalogEntry } from "@/features/permissions";
+import { useWorkspaceStore } from "@/features/workspaces";
+import { useMcpStore } from "@/features/mcp";
 import {
     getDefaultToolPermissionDecision,
     type ToolPermissionDecision
@@ -39,6 +41,7 @@ type ToolCategoryId =
     | "planning"
     | "web-external"
     | "media"
+    | "mcp"
     | "other";
 
 const TOOL_CATEGORY_CONFIG: Record<
@@ -69,6 +72,10 @@ const TOOL_CATEGORY_CONFIG: Record<
         label: "Media",
         description: "Generate image attachments."
     },
+    mcp: {
+        label: "MCP",
+        description: "Tools provided by external Model Context Protocol servers configured for this workspace."
+    },
     other: {
         label: "Other",
         description: "Tools that do not fit a primary category yet."
@@ -82,6 +89,7 @@ const TOOL_CATEGORY_ORDER: ToolCategoryId[] = [
     "planning",
     "web-external",
     "media",
+    "mcp",
     "other"
 ];
 
@@ -104,6 +112,12 @@ const TOOL_CATEGORIES: Partial<Record<string, ToolCategoryId>> = {
 };
 
 function formatToolLabel(name: string): string {
+    if (name.startsWith("mcp__")) {
+        const parts = name.split("__");
+        if (parts.length >= 3) {
+            return `${parts[1]} · ${parts.slice(2).join("__")}`;
+        }
+    }
     return name
         .split("_")
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -111,6 +125,7 @@ function formatToolLabel(name: string): string {
 }
 
 function getToolCategory(name: string): ToolCategoryId {
+    if (name.startsWith("mcp__")) return "mcp";
     return TOOL_CATEGORIES[name] ?? "other";
 }
 
@@ -174,11 +189,35 @@ function PermissionPills({
 export function ToolPermissionsSettings() {
     const { settings, updateCategory } = useSettings();
     const defaults = settings.toolPermissions.defaults;
+    const activeWorkspaceId = useWorkspaceStore(
+        (state) => state.activeWorkspaceId
+    );
+    const mcpData = useMcpStore((s) => s.data);
+    const loadMcp = useMcpStore((s) => s.load);
 
     const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const toolGroups = useMemo(() => groupToolsByCategory(tools), [tools]);
+
+    const mcpTools = useMemo<ToolCatalogEntry[]>(() => {
+        if (!mcpData) return [];
+        const entries: ToolCatalogEntry[] = [];
+        for (const server of mcpData.servers) {
+            if (server.disabled) continue;
+            for (const tool of server.tools) {
+                entries.push({
+                    name: tool.name,
+                    description: tool.description ?? ""
+                });
+            }
+        }
+        return entries;
+    }, [mcpData]);
+
+    const toolGroups = useMemo(
+        () => groupToolsByCategory([...tools, ...mcpTools]),
+        [tools, mcpTools]
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -207,6 +246,12 @@ export function ToolPermissionsSettings() {
             cancelled = true;
         };
     }, []);
+
+    useEffect(() => {
+        if (activeWorkspaceId) {
+            void loadMcp(activeWorkspaceId);
+        }
+    }, [activeWorkspaceId, loadMcp]);
 
     const handleChange = (
         toolName: string,

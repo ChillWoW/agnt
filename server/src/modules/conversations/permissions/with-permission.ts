@@ -74,6 +74,14 @@ export interface ConversationPermissionContext {
      * `createTaskToolDef` with the parent context.
      */
     getParentAbortSignal?: () => AbortSignal | undefined;
+    /**
+     * Pre-resolved MCP tool definitions for this workspace. The stream
+     * layer calls `mcpService.getMcpToolDefs(workspaceId)` once before
+     * building tools so all servers connect together up front. MCP tools
+     * are blocked in plan mode and for subagents to keep restricted
+     * contexts free of third-party side effects.
+     */
+    mcpTools?: ToolDefinition[];
 }
 
 function resolveConfiguredDecision(
@@ -244,6 +252,19 @@ export function buildConversationTools(
                 return rawDef;
         }
     });
+
+    // Append MCP tools after the built-ins. They are gated through the
+    // same `withPermission` wrapper as everything else, so the existing
+    // permission card / settings flow handles them with no extra UI.
+    // Restricted contexts (plan mode, subagents) intentionally skip MCP
+    // tools — third-party tools have unbounded side effects and shouldn't
+    // run in a research-only or restricted-by-type stream.
+    const allowMcp = !subagentAllowed && agenticMode !== "plan";
+    if (allowMcp && ctx.mcpTools) {
+        for (const mcpDef of ctx.mcpTools) {
+            defs.push(mcpDef);
+        }
+    }
 
     for (const rawDef of defs) {
         const def = rawDef as ToolDefinition<object, unknown>;
