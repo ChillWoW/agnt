@@ -6,7 +6,7 @@ import {
     useRef
 } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import type { Editor } from "@tiptap/core";
+import type { Content, Editor } from "@tiptap/core";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
@@ -39,12 +39,15 @@ export interface MentionEditorHandle {
     focus: () => void;
     serialize: () => SerializedEditor;
     isEmpty: () => boolean;
+    getDocJSON: () => unknown | null;
+    setDocJSON: (json: unknown) => void;
 }
 
 interface MentionEditorProps {
     workspaceId: string | null | undefined;
     placeholder?: string;
     disabled?: boolean;
+    initialContent?: unknown;
     onSubmit: () => void;
     onChange?: (serialized: SerializedEditor) => void;
     onPasteFiles?: (files: FileList) => void;
@@ -105,6 +108,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
             workspaceId,
             placeholder = "Ask anything...",
             disabled,
+            initialContent,
             onSubmit,
             onChange,
             onPasteFiles,
@@ -116,6 +120,10 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         const onSubmitRef = useRef(onSubmit);
         const onChangeRef = useRef(onChange);
         const onPasteFilesRef = useRef(onPasteFiles);
+        // The initial content is captured once when the editor instance is
+        // built — subsequent prop changes don't re-seed the editor (we use
+        // the imperative `setDocJSON` handle for that).
+        const initialContentRef = useRef(initialContent);
 
         useEffect(() => {
             workspaceIdRef.current = workspaceId ?? null;
@@ -187,6 +195,11 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         const editor = useEditor({
             extensions,
             editable: !disabled,
+            content:
+                initialContentRef.current &&
+                typeof initialContentRef.current === "object"
+                    ? (initialContentRef.current as Content)
+                    : undefined,
             editorProps: {
                 attributes: {
                     class:
@@ -258,7 +271,24 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                     editor
                         ? serializeEditor(editor)
                         : { text: "", mentions: [] },
-                isEmpty: () => editor?.isEmpty ?? true
+                isEmpty: () => editor?.isEmpty ?? true,
+                getDocJSON: () => editor?.getJSON() ?? null,
+                setDocJSON: (json) => {
+                    if (!editor) return;
+                    if (!json || typeof json !== "object") {
+                        editor.commands.clearContent(false);
+                        return;
+                    }
+                    // emitUpdate: false suppresses onUpdate so the
+                    // rehydrated content doesn't immediately echo back into
+                    // the draft store on mount.
+                    editor.commands.setContent(
+                        json as Parameters<
+                            typeof editor.commands.setContent
+                        >[0],
+                        { emitUpdate: false }
+                    );
+                }
             }),
             [editor]
         );

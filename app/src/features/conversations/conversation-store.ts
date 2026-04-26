@@ -16,6 +16,7 @@ import { useQuestionStore } from "@/features/questions";
 import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
 import { useTodoStore } from "@/features/todos";
 import type { Todo } from "@/features/todos";
+import { clearDraft as clearChatDraft } from "@/features/chat-drafts";
 import { usePlanStore, PLAN_FILE_PREFIX } from "@/features/plans";
 import type { Plan } from "@/features/plans";
 import { useRightSidebarStore } from "@/features/right-sidebar/right-sidebar-store";
@@ -1909,6 +1910,9 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             usePermissionStore.getState().clearPending(conversationId);
             useQuestionStore.getState().clearPending(conversationId);
             useTodoStore.getState().clearTodos(conversationId);
+            // Hard-delete only — archive intentionally keeps drafts so they
+            // come back if the user un-archives.
+            clearChatDraft({ kind: "conversation", conversationId });
 
             await conversationApi.deleteConversation(
                 workspaceId,

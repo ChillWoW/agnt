@@ -4,7 +4,15 @@ import {
     PlusIcon,
     StopIcon
 } from "@phosphor-icons/react";
-import { useCallback, useRef, useState, type DragEvent, type FormEvent } from "react";
+import {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type DragEvent,
+    type FormEvent
+} from "react";
 import {
     Button,
     Popover,
@@ -15,6 +23,14 @@ import {
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
 import { usePendingAttachments } from "@/features/attachments";
+import {
+    clearDraft,
+    draftSlotKey,
+    getDraft,
+    setDraft,
+    type DraftSlot,
+    type DraftSnapshot
+} from "@/features/chat-drafts";
 import { cn } from "@/lib/cn";
 import { AttachmentBar } from "./AttachmentBar";
 import { ContextMeter } from "./ContextMeter";
@@ -59,6 +75,59 @@ export function ChatInput({
     const dragCounterRef = useRef(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const editorRef = useRef<MentionEditorHandle>(null);
+
+    const slot = useMemo<DraftSlot | null>(() => {
+        if (conversationId) {
+            return { kind: "conversation", conversationId };
+        }
+        if (workspaceId) {
+            return { kind: "home", workspaceId };
+        }
+        return null;
+    }, [conversationId, workspaceId]);
+    const slotKey = slot ? draftSlotKey(slot) : null;
+    const previousSlotKeyRef = useRef<string | null>(null);
+    const saveTimerRef = useRef<number | null>(null);
+    // Holds the latest editor snapshot captured at keystroke time. We can't
+    // pull state out of `editorRef.current` later because the editor may
+    // unmount mid-debounce (e.g. a PermissionCard or QuestionCard pops over
+    // it via the conditional render), which would silently drop the user's
+    // last few keystrokes from persistence.
+    const pendingSnapshotRef = useRef<
+        { slot: DraftSlot; snapshot: DraftSnapshot } | null
+    >(null);
+
+    const writePendingSnapshot = useCallback(() => {
+        const pending = pendingSnapshotRef.current;
+        pendingSnapshotRef.current = null;
+        if (!pending) return;
+        const { slot: target, snapshot } = pending;
+        if (
+            !snapshot.docJSON ||
+            snapshot.plainText.trim().length === 0
+        ) {
+            // Defer the empty-check on mentions to the store's own
+            // isSnapshotEffectivelyEmpty: setDraft will fall through to
+            // clearDraft if there are no mention nodes either.
+            const doc = snapshot.docJSON as
+                | { content?: ReadonlyArray<unknown> }
+                | null
+                | undefined;
+            if (!doc || !Array.isArray(doc.content)) {
+                clearDraft(target);
+                return;
+            }
+        }
+        setDraft(target, snapshot);
+    }, []);
+
+    const flushSaveTimer = useCallback(() => {
+        if (saveTimerRef.current !== null) {
+            window.clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+        }
+        writePendingSnapshot();
+    }, [writePendingSnapshot]);
 
     const {
         pending,
@@ -109,19 +178,96 @@ export function ChatInput({
             editorRef.current?.clear();
             setDraftText("");
             setIsEmpty(true);
+            if (saveTimerRef.current !== null) {
+                window.clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = null;
+            }
+            pendingSnapshotRef.current = null;
+            if (slot) {
+                clearDraft(slot);
+            }
             clearPending();
             onSend?.(content, attachmentIds, mentions);
         },
-        [canSend, clearPending, onSend, takeReadyIds]
+        [canSend, clearPending, onSend, slot, takeReadyIds]
     );
 
     const handleEditorChange = useCallback(
         (serialized: { text: string; mentions: SerializedMention[] }) => {
             setDraftText(serialized.text);
-            setIsEmpty(editorRef.current?.isEmpty() ?? serialized.text.length === 0);
+            setIsEmpty(
+                editorRef.current?.isEmpty() ?? serialized.text.length === 0
+            );
+
+            if (!slot) return;
+            const editor = editorRef.current;
+            if (!editor) return;
+
+            // Capture the snapshot synchronously so fast typing right before
+            // the editor unmounts (PermissionCard/QuestionCard, navigation,
+            // etc.) is still preserved by the debounced flush below.
+            const docJSON = editor.getDocJSON();
+            pendingSnapshotRef.current = {
+                slot,
+                snapshot: {
+                    docJSON,
+                    plainText: serialized.text,
+                    updatedAt: new Date().toISOString()
+                }
+            };
+
+            if (saveTimerRef.current !== null) {
+                window.clearTimeout(saveTimerRef.current);
+            }
+            saveTimerRef.current = window.setTimeout(() => {
+                saveTimerRef.current = null;
+                writePendingSnapshot();
+            }, 250);
         },
-        []
+        [slot, writePendingSnapshot]
     );
+
+    useEffect(() => {
+        const previousKey = previousSlotKeyRef.current;
+
+        if (previousKey === slotKey) return;
+
+        // Slot changed (or first mount with a slot). Flush any pending save
+        // synchronously against whichever slot it was queued for so fast
+        // typing right before navigating doesn't get dropped.
+        flushSaveTimer();
+
+        previousSlotKeyRef.current = slotKey;
+
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        if (!slot) {
+            editor.clear();
+            setDraftText("");
+            setIsEmpty(true);
+            return;
+        }
+
+        const snapshot = getDraft(slot);
+        if (snapshot && snapshot.docJSON) {
+            editor.setDocJSON(snapshot.docJSON);
+            setDraftText(snapshot.plainText);
+            setIsEmpty(snapshot.plainText.trim().length === 0);
+        } else {
+            editor.clear();
+            setDraftText("");
+            setIsEmpty(true);
+        }
+    }, [flushSaveTimer, slot, slotKey]);
+
+    useEffect(() => {
+        return () => {
+            // Component unmounting — flush any pending save before the
+            // editor goes away.
+            flushSaveTimer();
+        };
+    }, [flushSaveTimer]);
 
     const handleEditorSubmit = useCallback(() => {
         handleSend();
@@ -238,6 +384,11 @@ export function ChatInput({
                                     ref={editorRef}
                                     workspaceId={workspaceId ?? null}
                                     placeholder={placeholder}
+                                    initialContent={
+                                        slot
+                                            ? (getDraft(slot)?.docJSON ?? null)
+                                            : null
+                                    }
                                     onSubmit={handleEditorSubmit}
                                     onChange={handleEditorChange}
                                     onPasteFiles={handlePasteFiles}
