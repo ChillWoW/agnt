@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "@/features/workspaces";
 import { StreamingPlaceholder } from "./StreamingPlaceholder";
 import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { WorkedSummary, type WorkedEntry } from "./WorkedSummary";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 import { MessageAttachments } from "./MessageAttachments";
 import { MessageFooter } from "./MessageFooter";
@@ -146,6 +147,37 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         return buildTimeline({ ...message, reasoning_parts: reasoningParts });
     })();
 
+    // Whole-turn collapse: once the message has settled we stack every
+    // reasoning block AND every tool call into a single "Worked for X"
+    // pill so the answer rises to the top. While streaming we keep the
+    // individual cards visible so the user can watch progress live.
+    const isFinished = !message.isStreaming;
+
+    const workedEntries: WorkedEntry[] = isFinished
+        ? timeline.map((entry) =>
+              entry.kind === "reasoning"
+                  ? { kind: "reasoning", key: entry.key, part: entry.part }
+                  : {
+                        kind: "tool",
+                        key: entry.key,
+                        invocation: entry.invocation
+                    }
+          )
+        : [];
+
+    const workedDurationMs = (() => {
+        if (!isFinished || workedEntries.length === 0) return 0;
+        // Prefer the server-tracked active generation time (excludes
+        // permission/question pauses). Fall back to first-entry → now for
+        // legacy rows that don't carry the field.
+        if (typeof message.generation_duration_ms === "number") {
+            return Math.max(0, message.generation_duration_ms);
+        }
+        const firstStart = timeline[0]?.time;
+        if (!Number.isFinite(firstStart)) return 0;
+        return Math.max(0, Date.now() - firstStart);
+    })();
+
     const showStreamingPlaceholder =
         message.isStreaming && !hasContent && !hasToolCalls && !hasReasoning;
 
@@ -175,31 +207,41 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     />
                 )}
 
-                {timeline.length > 0 && (
+                {isFinished && workedEntries.length > 0 ? (
                     <div className="mb-1">
-                        {timeline.map((entry) => {
-                            if (entry.kind === "reasoning") {
-                                const part = entry.part;
-                                const isActive =
-                                    !part.ended_at && !!message.isReasoning;
+                        <WorkedSummary
+                            entries={workedEntries}
+                            durationMs={workedDurationMs}
+                        />
+                    </div>
+                ) : (
+                    timeline.length > 0 && (
+                        <div className="mb-1">
+                            {timeline.map((entry) => {
+                                if (entry.kind === "reasoning") {
+                                    const part = entry.part;
+                                    const isActive =
+                                        !part.ended_at &&
+                                        !!message.isReasoning;
+                                    return (
+                                        <ThinkingBlock
+                                            key={entry.key}
+                                            text={part.text}
+                                            startedAt={part.started_at}
+                                            endedAt={part.ended_at}
+                                            isActive={isActive}
+                                        />
+                                    );
+                                }
                                 return (
-                                    <ThinkingBlock
+                                    <ToolCallCard
                                         key={entry.key}
-                                        text={part.text}
-                                        startedAt={part.started_at}
-                                        endedAt={part.ended_at}
-                                        isActive={isActive}
+                                        invocation={entry.invocation}
                                     />
                                 );
-                            }
-                            return (
-                                <ToolCallCard
-                                    key={entry.key}
-                                    invocation={entry.invocation}
-                                />
-                            );
-                        })}
-                    </div>
+                            })}
+                        </div>
+                    )
                 )}
 
                 {showStreamingPlaceholder ? (
