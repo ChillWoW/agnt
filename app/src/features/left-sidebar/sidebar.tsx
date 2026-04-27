@@ -335,6 +335,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     // the workspace is *not* the active one, we fall back to plain
     // navigation: a click switches workspace and conversation.
     const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const setActiveWorkspace = useWorkspaceStore((s) => s.setActive);
     const isActiveWorkspace = activeWorkspaceId === workspaceId;
 
     const extraPanes = useSplitPaneStore((s) =>
@@ -388,12 +389,19 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     const handleOpen = useCallback(
         (conversationId: string) => {
-            // Cross-workspace click: just navigate. If the target workspace
-            // happens to already have splits, the next mount of its sidebar
-            // will show them — but we don't try to preserve "which pane
-            // gets replaced" across workspace switches because that gets
-            // confusing fast.
+            // Cross-workspace click: switch the active workspace first,
+            // then navigate. Conversations live in per-workspace SQLite
+            // DBs, so the route's `loadConversation(activeWorkspaceId,
+            // conversationId)` would 404 ("Conversation not found") if
+            // we navigated while `activeWorkspaceId` still pointed at
+            // the previously active workspace. `setActive` updates the
+            // local store optimistically, so by the time the route
+            // mounts the workspace id matches the conversation's owner.
+            //
+            // We don't try to preserve "which pane gets replaced"
+            // across workspace switches — that gets confusing fast.
             if (!isActiveWorkspace) {
+                void setActiveWorkspace(workspaceId);
                 void navigate({
                     to: "/conversations/$conversationId",
                     params: { conversationId }
@@ -421,6 +429,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
             focusedPaneIndex,
             navigate,
             replaceSecondaryConversation,
+            setActiveWorkspace,
             setFocusedPaneIndex,
             workspaceId
         ]
@@ -520,12 +529,29 @@ function WorkspaceArchivedList({
     const activeConversationId = useConversationStore(
         (s) => s.activeConversationId
     );
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const setActiveWorkspace = useWorkspaceStore((s) => s.setActive);
 
     useEffect(() => {
         void useConversationStore
             .getState()
             .loadArchivedConversations(workspaceId);
     }, [workspaceId]);
+
+    // Same per-workspace SQLite caveat as the live conversation list:
+    // navigating to a conversation owned by a non-active workspace
+    // would 404 against the previously active workspace's DB. Switch
+    // first, then navigate.
+    const openArchivedConversation = (conversationId: string) => {
+        if (activeWorkspaceId !== workspaceId) {
+            void setActiveWorkspace(workspaceId);
+        }
+        void navigate({
+            to: "/conversations/$conversationId",
+            params: { conversationId }
+        });
+        onClose();
+    };
 
     if (archived.length === 0) {
         return (
@@ -544,20 +570,10 @@ function WorkspaceArchivedList({
                         key={conv.id}
                         role="button"
                         tabIndex={0}
-                        onClick={() => {
-                            void navigate({
-                                to: "/conversations/$conversationId",
-                                params: { conversationId: conv.id }
-                            });
-                            onClose();
-                        }}
+                        onClick={() => openArchivedConversation(conv.id)}
                         onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
-                                void navigate({
-                                    to: "/conversations/$conversationId",
-                                    params: { conversationId: conv.id }
-                                });
-                                onClose();
+                                openArchivedConversation(conv.id);
                             }
                         }}
                         className={cn(

@@ -52,8 +52,22 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     },
 
     setActive: async (id: string) => {
+        // Optimistically flip the local active workspace before the
+        // server round-trip completes. Callers (sidebar click → route
+        // navigation, home workspace picker, etc.) typically navigate
+        // synchronously right after firing this off, and the route they
+        // land on reads `activeWorkspaceId` to load the conversation
+        // out of the right per-workspace SQLite DB. Without this
+        // optimistic update, a cross-workspace click would race the
+        // pending API call and trigger a "Conversation not found" fetch
+        // against the previous workspace's DB.
+        if (get().activeWorkspaceId !== id) {
+            set({ activeWorkspaceId: id });
+        }
         const result = await workspaceApi.setActiveWorkspace(id);
-        set({ activeWorkspaceId: result.activeWorkspaceId });
+        if (get().activeWorkspaceId !== result.activeWorkspaceId) {
+            set({ activeWorkspaceId: result.activeWorkspaceId });
+        }
     }
 }));
 
