@@ -126,7 +126,8 @@ function resolveModel(
         supportsFastMode: false,
         docsUrl: "https://example.com",
         codexDocsUrl: "https://example.com",
-        access: { cli: true, ide: true, cloud: null, api: null }
+        access: { cli: true, ide: true, cloud: null, api: null },
+        pricing: null
     } as ModelCatalogEntry;
 }
 

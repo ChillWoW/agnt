@@ -3,6 +3,13 @@ import {
     type ModelCatalogEntry
 } from "./models.types";
 
+// All prices are USD per 1,000,000 tokens (USD / MTok), matching OpenAI's
+// public pricing pages. Sources:
+//   - https://developers.openai.com/api/docs/models/gpt-5.5
+//   - https://developers.openai.com/api/docs/models/gpt-5.4
+//   - https://developers.openai.com/api/docs/models/gpt-5.4-mini
+//   - https://developers.openai.com/api/docs/models/gpt-5.3-codex
+//   - https://developers.openai.com/codex/models
 const MODELS: ModelCatalogEntry[] = [
     {
         id: "gpt-5.5",
@@ -11,39 +18,68 @@ const MODELS: ModelCatalogEntry[] = [
         displayName: "GPT-5.5",
         tagline: "OpenAI's newest frontier model for complex tasks.",
         description:
-            "Most capable frontier model for complex coding, computer use, knowledge work, and research workflows. Available in Codex with ChatGPT sign-in; API key access coming soon.",
+            "Most capable frontier model for complex coding, computer use, knowledge work, and research workflows. Available in Codex with ChatGPT sign-in; not yet available with API-key authentication in Codex.",
         status: "recommended",
         releaseStage: "general",
         supportsReasoningEffort: true,
+        // Per docs: reasoning.effort supports none, low, medium (default), high, xhigh.
+        // We keep "none" out of the picker because this app is reasoning-first.
         allowedEfforts: ["low", "medium", "high", "xhigh"],
         defaultEffort: "medium",
         contextWindow: 1050000,
         maxOutputTokens: 128000,
-        knowledgeCutoff: "2025-12-31",
-        speedLabel: "Medium",
+        knowledgeCutoff: "2025-12-01",
+        speedLabel: "Fast",
         reasoningLabel: "Highest",
         inputModalities: ["text", "image"],
         outputModalities: ["text"],
         supportsImageInput: true,
-        supportsApi: false, // ← was wrongly true; no API key auth yet
-        supportsChatCompletions: false,
-        supportsResponsesApi: false,
-        supportsRealtimeApi: null,
-        supportsBuiltInTools: null,
-        supportsComputerUse: null,
-        supportsWebSearch: null,
-        supportsFileSearch: null,
-        supportsMcp: null,
-        supportsApplyPatch: null,
-        supportsSkills: null,
+        // The OpenAI API itself supports gpt-5.5 (Chat Completions, Responses,
+        // Realtime, Batch, etc.). The Codex-specific restriction is captured
+        // by `access.api` below.
+        supportsApi: true,
+        supportsChatCompletions: true,
+        supportsResponsesApi: true,
+        supportsRealtimeApi: true,
+        supportsBuiltInTools: true,
+        supportsComputerUse: true,
+        supportsWebSearch: true,
+        supportsFileSearch: true,
+        supportsMcp: true,
+        supportsApplyPatch: true,
+        supportsSkills: true,
         supportsFastMode: true,
-        docsUrl: "https://developers.openai.com/codex/models",
+        docsUrl: "https://developers.openai.com/api/docs/models/gpt-5.5",
         codexDocsUrl: "https://developers.openai.com/codex/models",
         access: {
-            cli: true, // ← available via `codex -m gpt-5.5`
-            ide: true, // ← available in Codex IDE extension
-            cloud: true, // ← Codex Cloud
-            api: false // ← NOT available with API key auth yet
+            cli: true,
+            ide: true,
+            cloud: true,
+            // Codex requires ChatGPT sign-in for gpt-5.5 today; API-key auth
+            // is not yet supported.
+            api: false
+        },
+        pricing: {
+            currency: "USD",
+            unit: "per_1m_tokens",
+            standard: {
+                input: 5.0,
+                cachedInput: 0.5,
+                output: 30.0
+            },
+            priority: null,
+            batch: {
+                input: 5.0,
+                cachedInput: 0.5,
+                output: 30.0
+            },
+            // Prompts >272K input tokens are priced at 2x input / 1.5x output
+            // for the full session (standard, batch, and flex).
+            longContext: {
+                thresholdTokens: 272000,
+                inputMultiplier: 2,
+                outputMultiplier: 1.5
+            }
         }
     },
     {
@@ -86,6 +122,26 @@ const MODELS: ModelCatalogEntry[] = [
             ide: true,
             cloud: true,
             api: true
+        },
+        pricing: {
+            currency: "USD",
+            unit: "per_1m_tokens",
+            standard: {
+                input: 2.5,
+                cachedInput: 0.25,
+                output: 15.0
+            },
+            priority: null,
+            batch: {
+                input: 2.5,
+                cachedInput: 0.25,
+                output: 15.0
+            },
+            longContext: {
+                thresholdTokens: 272000,
+                inputMultiplier: 2,
+                outputMultiplier: 1.5
+            }
         }
     },
     {
@@ -101,25 +157,27 @@ const MODELS: ModelCatalogEntry[] = [
         supportsReasoningEffort: true,
         allowedEfforts: ["low", "medium", "high"],
         defaultEffort: "medium",
-        contextWindow: 200000,
-        maxOutputTokens: 65536,
+        // Per docs: 400K context window, 128K max output (the previous
+        // 200K / 65K values were stale).
+        contextWindow: 400000,
+        maxOutputTokens: 128000,
         knowledgeCutoff: "2025-08-31",
         speedLabel: "Fast",
-        reasoningLabel: "Medium",
+        reasoningLabel: "Higher",
         inputModalities: ["text", "image"],
         outputModalities: ["text"],
         supportsImageInput: true,
         supportsApi: true,
         supportsChatCompletions: true,
         supportsResponsesApi: true,
-        supportsRealtimeApi: null,
-        supportsBuiltInTools: null,
-        supportsComputerUse: null,
-        supportsWebSearch: null,
-        supportsFileSearch: null,
-        supportsMcp: null,
-        supportsApplyPatch: null,
-        supportsSkills: null,
+        supportsRealtimeApi: true,
+        supportsBuiltInTools: true,
+        supportsComputerUse: true,
+        supportsWebSearch: true,
+        supportsFileSearch: true,
+        supportsMcp: true,
+        supportsApplyPatch: true,
+        supportsSkills: true,
         supportsFastMode: false,
         docsUrl: "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
         codexDocsUrl: "https://developers.openai.com/codex/models",
@@ -128,6 +186,22 @@ const MODELS: ModelCatalogEntry[] = [
             ide: true,
             cloud: true,
             api: true
+        },
+        pricing: {
+            currency: "USD",
+            unit: "per_1m_tokens",
+            standard: {
+                input: 0.75,
+                cachedInput: 0.075,
+                output: 4.5
+            },
+            priority: null,
+            batch: {
+                input: 0.75,
+                cachedInput: 0.075,
+                output: 4.5
+            },
+            longContext: null
         }
     },
     {
@@ -155,6 +229,9 @@ const MODELS: ModelCatalogEntry[] = [
         supportsChatCompletions: true,
         supportsResponsesApi: true,
         supportsRealtimeApi: true,
+        // gpt-5.3-codex docs only list streaming/function-calling/structured-
+        // outputs explicitly; tool support beyond that isn't documented, so
+        // we leave it null instead of guessing.
         supportsBuiltInTools: null,
         supportsComputerUse: null,
         supportsWebSearch: null,
@@ -170,6 +247,18 @@ const MODELS: ModelCatalogEntry[] = [
             ide: true,
             cloud: true,
             api: true
+        },
+        pricing: {
+            currency: "USD",
+            unit: "per_1m_tokens",
+            standard: {
+                input: 1.75,
+                cachedInput: 0.175,
+                output: 14.0
+            },
+            priority: null,
+            batch: null,
+            longContext: null
         }
     }
 ].map((model) => modelCatalogEntrySchema.parse(model));

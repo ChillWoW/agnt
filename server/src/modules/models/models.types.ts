@@ -23,6 +23,34 @@ export const modelAccessSchema = z.object({
     api: z.boolean().nullable()
 });
 
+// All token prices are expressed in USD per 1,000,000 tokens (USD / MTok),
+// which is the unit OpenAI's pricing pages use. We keep the unit explicit on
+// the wire so consumers (e.g. cost estimators in the UI) don't have to guess.
+export const tokenPricingSchema = z.object({
+    input: z.number().nonnegative(),
+    cachedInput: z.number().nonnegative().nullable(),
+    output: z.number().nonnegative()
+});
+
+// GPT-5.5 / GPT-5.4 charge a multiplier on the *entire* session once the
+// prompt exceeds a threshold (currently 272K input tokens). Encoding the rule
+// instead of a flat number lets the UI show effective $/MTok for the current
+// turn.
+export const longContextPricingSchema = z.object({
+    thresholdTokens: z.number().int().positive(),
+    inputMultiplier: z.number().positive(),
+    outputMultiplier: z.number().positive()
+});
+
+export const modelPricingSchema = z.object({
+    currency: z.literal("USD"),
+    unit: z.literal("per_1m_tokens"),
+    standard: tokenPricingSchema.nullable(),
+    priority: tokenPricingSchema.nullable(),
+    batch: tokenPricingSchema.nullable(),
+    longContext: longContextPricingSchema.nullable()
+});
+
 export const modelCatalogEntrySchema = z.object({
     id: z.string().min(1),
     apiModelId: z.string().min(1),
@@ -57,10 +85,14 @@ export const modelCatalogEntrySchema = z.object({
     supportsFastMode: z.boolean(),
     docsUrl: z.url(),
     codexDocsUrl: z.url(),
-    access: modelAccessSchema
+    access: modelAccessSchema,
+    pricing: modelPricingSchema.nullable()
 });
 
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
+export type TokenPricing = z.infer<typeof tokenPricingSchema>;
+export type LongContextPricing = z.infer<typeof longContextPricingSchema>;
+export type ModelPricing = z.infer<typeof modelPricingSchema>;
 export type ModelCatalogEntry = z.infer<typeof modelCatalogEntrySchema>;
 
 export type ModelsErrorResponse = {
