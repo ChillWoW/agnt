@@ -89,6 +89,11 @@ interface ConversationStoreState {
     archiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     unarchiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     deleteConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    renameConversation: (
+        workspaceId: string,
+        conversationId: string,
+        title: string
+    ) => Promise<void>;
     clearActiveConversation: () => void;
 }
 
@@ -1974,6 +1979,204 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                             : state.activeConversationId
                 };
             });
+        },
+
+        renameConversation: async (
+            workspaceId: string,
+            conversationId: string,
+            title: string
+        ) => {
+            const trimmed = title.trim();
+            if (trimmed.length === 0) return;
+
+            // Snapshot prior values across all places this conversation
+            // shows up so we can roll back on failure.
+            const state = get();
+            const activeList =
+                state.conversationsByWorkspace[workspaceId] ?? [];
+            const archivedList =
+                state.archivedByWorkspace[workspaceId] ?? [];
+            const fromActive = activeList.find(
+                (c) => c.id === conversationId
+            );
+            const fromArchived = archivedList.find(
+                (c) => c.id === conversationId
+            );
+            const previousTitle =
+                fromActive?.title ??
+                fromArchived?.title ??
+                state.conversationsById[conversationId]?.title ??
+                null;
+
+            if (previousTitle === trimmed) return;
+
+            const now = new Date().toISOString();
+
+            const applyTitle = (rows: Conversation[]): Conversation[] => {
+                let mutated = false;
+                const next = rows.map((row) => {
+                    if (row.id !== conversationId) return row;
+                    mutated = true;
+                    return { ...row, title: trimmed, updated_at: now };
+                });
+                return mutated ? next : rows;
+            };
+
+            set((s) => {
+                const patch: Partial<ConversationStoreState> = {};
+                const nextActive = applyTitle(
+                    s.conversationsByWorkspace[workspaceId] ?? []
+                );
+                if (
+                    nextActive !==
+                    (s.conversationsByWorkspace[workspaceId] ?? [])
+                ) {
+                    patch.conversationsByWorkspace = {
+                        ...s.conversationsByWorkspace,
+                        [workspaceId]: nextActive
+                    };
+                }
+                const nextArchived = applyTitle(
+                    s.archivedByWorkspace[workspaceId] ?? []
+                );
+                if (
+                    nextArchived !==
+                    (s.archivedByWorkspace[workspaceId] ?? [])
+                ) {
+                    patch.archivedByWorkspace = {
+                        ...s.archivedByWorkspace,
+                        [workspaceId]: nextArchived
+                    };
+                }
+                const existing = s.conversationsById[conversationId];
+                if (existing) {
+                    patch.conversationsById = {
+                        ...s.conversationsById,
+                        [conversationId]: {
+                            ...existing,
+                            title: trimmed,
+                            updated_at: now
+                        }
+                    };
+                }
+                return patch;
+            });
+
+            try {
+                const updated = await conversationApi.updateConversationTitle(
+                    workspaceId,
+                    conversationId,
+                    trimmed
+                );
+                set((s) => {
+                    const patch: Partial<ConversationStoreState> = {};
+                    const reconcile = (
+                        rows: Conversation[]
+                    ): Conversation[] => {
+                        let mutated = false;
+                        const next = rows.map((row) => {
+                            if (row.id !== conversationId) return row;
+                            mutated = true;
+                            return {
+                                ...row,
+                                title: updated.title,
+                                updated_at: updated.updated_at
+                            };
+                        });
+                        return mutated ? next : rows;
+                    };
+                    const nextActive = reconcile(
+                        s.conversationsByWorkspace[workspaceId] ?? []
+                    );
+                    if (
+                        nextActive !==
+                        (s.conversationsByWorkspace[workspaceId] ?? [])
+                    ) {
+                        patch.conversationsByWorkspace = {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: nextActive
+                        };
+                    }
+                    const nextArchived = reconcile(
+                        s.archivedByWorkspace[workspaceId] ?? []
+                    );
+                    if (
+                        nextArchived !==
+                        (s.archivedByWorkspace[workspaceId] ?? [])
+                    ) {
+                        patch.archivedByWorkspace = {
+                            ...s.archivedByWorkspace,
+                            [workspaceId]: nextArchived
+                        };
+                    }
+                    const existing = s.conversationsById[conversationId];
+                    if (existing) {
+                        patch.conversationsById = {
+                            ...s.conversationsById,
+                            [conversationId]: {
+                                ...existing,
+                                title: updated.title,
+                                updated_at: updated.updated_at
+                            }
+                        };
+                    }
+                    return patch;
+                });
+            } catch (error) {
+                if (previousTitle !== null) {
+                    set((s) => {
+                        const patch: Partial<ConversationStoreState> = {};
+                        const revert = (
+                            rows: Conversation[]
+                        ): Conversation[] => {
+                            let mutated = false;
+                            const next = rows.map((row) => {
+                                if (row.id !== conversationId) return row;
+                                mutated = true;
+                                return { ...row, title: previousTitle };
+                            });
+                            return mutated ? next : rows;
+                        };
+                        const nextActive = revert(
+                            s.conversationsByWorkspace[workspaceId] ?? []
+                        );
+                        if (
+                            nextActive !==
+                            (s.conversationsByWorkspace[workspaceId] ?? [])
+                        ) {
+                            patch.conversationsByWorkspace = {
+                                ...s.conversationsByWorkspace,
+                                [workspaceId]: nextActive
+                            };
+                        }
+                        const nextArchived = revert(
+                            s.archivedByWorkspace[workspaceId] ?? []
+                        );
+                        if (
+                            nextArchived !==
+                            (s.archivedByWorkspace[workspaceId] ?? [])
+                        ) {
+                            patch.archivedByWorkspace = {
+                                ...s.archivedByWorkspace,
+                                [workspaceId]: nextArchived
+                            };
+                        }
+                        const existing =
+                            s.conversationsById[conversationId];
+                        if (existing) {
+                            patch.conversationsById = {
+                                ...s.conversationsById,
+                                [conversationId]: {
+                                    ...existing,
+                                    title: previousTitle
+                                }
+                            };
+                        }
+                        return patch;
+                    });
+                }
+                throw error;
+            }
         },
 
         clearActiveConversation: () => {

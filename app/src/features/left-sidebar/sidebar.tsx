@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useLeftSidebarStore } from "./left-sidebar-store";
 import { useHotkey } from "../hotkeys";
@@ -11,6 +11,7 @@ import {
     TrashIcon,
     ArchiveIcon,
     ArrowCounterClockwiseIcon,
+    PencilSimpleIcon,
     PlusIcon,
     DotsThreeIcon,
     XIcon,
@@ -19,6 +20,7 @@ import {
     GearSixIcon
 } from "@phosphor-icons/react";
 import {
+    ContextMenu,
     Menu,
     Tooltip,
     Modal,
@@ -46,8 +48,202 @@ import { AccountButton } from "./account-button";
 const EMPTY_CONVERSATIONS: import("@/features/conversations").Conversation[] =
     [];
 
-function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
+interface ConversationRowProps {
+    conv: import("@/features/conversations").Conversation;
+    workspaceId: string;
+    isActive: boolean;
+    isUnread: boolean;
+    isStreaming: boolean;
+    isPendingPermission: boolean;
+    isPendingQuestion: boolean;
+}
+
+function ConversationRow({
+    conv,
+    workspaceId,
+    isActive,
+    isUnread,
+    isStreaming,
+    isPendingPermission,
+    isPendingQuestion
+}: ConversationRowProps) {
     const navigate = useNavigate();
+    const [isEditing, setIsEditing] = useState(false);
+    const [draft, setDraft] = useState(conv.title);
+    const inputRef = useRef<HTMLInputElement>(null);
+    // Tracks the latest edit-mode flag without going through React state, so
+    // an Escape that fires `cancelEdit` can prevent the trailing `onBlur`
+    // from racing in and committing the (now-discarded) draft.
+    const editingRef = useRef(false);
+
+    useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            inputRef.current.select();
+        }
+    }, [isEditing]);
+
+    // If the title changes from outside (e.g. server-generated title)
+    // while we're not editing, keep the draft in sync.
+    useEffect(() => {
+        if (!editingRef.current) {
+            setDraft(conv.title);
+        }
+    }, [conv.title]);
+
+    const startEdit = () => {
+        editingRef.current = true;
+        setDraft(conv.title);
+        setIsEditing(true);
+    };
+
+    const commitEdit = () => {
+        if (!editingRef.current) return;
+        editingRef.current = false;
+        const next = draft.trim();
+        setIsEditing(false);
+        if (next.length === 0 || next === conv.title) {
+            setDraft(conv.title);
+            return;
+        }
+        void useConversationStore
+            .getState()
+            .renameConversation(workspaceId, conv.id, next);
+    };
+
+    const cancelEdit = () => {
+        if (!editingRef.current) return;
+        editingRef.current = false;
+        setIsEditing(false);
+        setDraft(conv.title);
+    };
+
+    const handleArchive = async () => {
+        await useConversationStore
+            .getState()
+            .archiveConversation(workspaceId, conv.id);
+        void navigate({ to: "/" });
+    };
+
+    const navigateToConversation = () => {
+        void navigate({
+            to: "/conversations/$conversationId",
+            params: { conversationId: conv.id }
+        });
+    };
+
+    return (
+        <ContextMenu>
+            <ContextMenu.Trigger>
+                <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                        if (isEditing) return;
+                        navigateToConversation();
+                    }}
+                    onKeyDown={(e) => {
+                        if (isEditing) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                            navigateToConversation();
+                        }
+                    }}
+                    className={cn(
+                        "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
+                        isActive
+                            ? "bg-dark-800 text-dark-50"
+                            : isUnread
+                              ? "text-dark-50 hover:bg-dark-800"
+                              : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                    )}
+                >
+                    {isPendingQuestion ? (
+                        <ChatTeardropDotsIcon
+                            className="size-3 shrink-0 text-dark-50 animate-pulse"
+                            weight="fill"
+                        />
+                    ) : isPendingPermission ? (
+                        <ShieldWarningIcon
+                            className="size-3 shrink-0 text-dark-50 animate-pulse"
+                            weight="fill"
+                        />
+                    ) : isStreaming ? (
+                        <BinaryMatrix />
+                    ) : (
+                        <MinusIcon
+                            className={cn(
+                                "size-3 shrink-0 transition-colors",
+                                isUnread ? "text-dark-50" : "text-dark-200"
+                            )}
+                        />
+                    )}
+                    {isEditing ? (
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitEdit();
+                                } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    cancelEdit();
+                                }
+                            }}
+                            onBlur={commitEdit}
+                            className={cn(
+                                "min-w-0 flex-1 rounded-sm bg-dark-700 px-1 py-0",
+                                "text-[11px] text-dark-50",
+                                "outline-none border border-dark-500",
+                                "focus:border-dark-400"
+                            )}
+                        />
+                    ) : (
+                        <span className="truncate flex-1">{conv.title}</span>
+                    )}
+                    {!isEditing && (
+                        <Tooltip content="Archive" side="top">
+                            <button
+                                type="button"
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await handleArchive();
+                                }}
+                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
+                            >
+                                <ArchiveIcon className="size-3" />
+                            </button>
+                        </Tooltip>
+                    )}
+                </div>
+            </ContextMenu.Trigger>
+            <ContextMenu.Content>
+                <ContextMenu.Item
+                    icon={<PencilSimpleIcon className="size-3" />}
+                    onClick={startEdit}
+                >
+                    Rename
+                </ContextMenu.Item>
+                <ContextMenu.Separator />
+                <ContextMenu.Item
+                    icon={<ArchiveIcon className="size-3" />}
+                    onClick={() => {
+                        void handleArchive();
+                    }}
+                >
+                    Archive
+                </ContextMenu.Item>
+            </ContextMenu.Content>
+        </ContextMenu>
+    );
+}
+
+function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const conversations = useConversationStore(
         (s) => s.conversationsByWorkspace[workspaceId] ?? EMPTY_CONVERSATIONS
     );
@@ -71,85 +267,22 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     return (
         <div className="flex flex-col gap-0.5">
-            {conversations.map((conv) => {
-                const isUnread = Boolean(unreadConversationIds[conv.id]);
-                const isStreaming = Boolean(streamingConversationIds[conv.id]);
-                const isPendingPermission =
-                    (pendingPermissions[conv.id]?.length ?? 0) > 0;
-                const isPendingQuestion =
-                    (pendingQuestions[conv.id]?.length ?? 0) > 0;
-                const isActive = activeConversationId === conv.id;
-
-                return (
-                    <div
-                        key={conv.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                            void navigate({
-                                to: "/conversations/$conversationId",
-                                params: { conversationId: conv.id }
-                            })
-                        }
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                                void navigate({
-                                    to: "/conversations/$conversationId",
-                                    params: { conversationId: conv.id }
-                                });
-                            }
-                        }}
-                        className={cn(
-                            "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
-                            isActive
-                                ? "bg-dark-800 text-dark-50"
-                                : isUnread
-                                  ? "text-dark-50 hover:bg-dark-800"
-                                  : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
-                        )}
-                    >
-                        {isPendingQuestion ? (
-                            <ChatTeardropDotsIcon
-                                className="size-3 shrink-0 text-dark-50 animate-pulse"
-                                weight="fill"
-                            />
-                        ) : isPendingPermission ? (
-                            <ShieldWarningIcon
-                                className="size-3 shrink-0 text-dark-50 animate-pulse"
-                                weight="fill"
-                            />
-                        ) : isStreaming ? (
-                            <BinaryMatrix />
-                        ) : (
-                            <MinusIcon
-                                className={cn(
-                                    "size-3 shrink-0 transition-colors",
-                                    isUnread ? "text-dark-50" : "text-dark-200"
-                                )}
-                            />
-                        )}
-                        <span className="truncate flex-1">{conv.title}</span>
-                        <Tooltip content="Archive" side="top">
-                            <button
-                                type="button"
-                                onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await useConversationStore
-                                        .getState()
-                                        .archiveConversation(
-                                            workspaceId,
-                                            conv.id
-                                        );
-                                    void navigate({ to: "/" });
-                                }}
-                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
-                            >
-                                <ArchiveIcon className="size-3" />
-                            </button>
-                        </Tooltip>
-                    </div>
-                );
-            })}
+            {conversations.map((conv) => (
+                <ConversationRow
+                    key={conv.id}
+                    conv={conv}
+                    workspaceId={workspaceId}
+                    isActive={activeConversationId === conv.id}
+                    isUnread={Boolean(unreadConversationIds[conv.id])}
+                    isStreaming={Boolean(streamingConversationIds[conv.id])}
+                    isPendingPermission={
+                        (pendingPermissions[conv.id]?.length ?? 0) > 0
+                    }
+                    isPendingQuestion={
+                        (pendingQuestions[conv.id]?.length ?? 0) > 0
+                    }
+                />
+            ))}
         </div>
     );
 }
