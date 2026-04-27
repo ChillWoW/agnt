@@ -174,6 +174,44 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
         []
     );
 
+    // ─── Alt+<digit> pane switching ──────────────────────────────────────
+    //
+    // Built-in (non-configurable) shortcut for split mode: Alt+1 focuses
+    // the primary pane, Alt+2 the first secondary, Alt+3 the second
+    // secondary, etc. Bypasses the user-configurable `useHotkey` system on
+    // purpose — the user requested this be a plain feature, not a
+    // remappable binding.
+    //
+    // Only active while a split is actually visible; in single-pane mode
+    // there's nothing to switch to and we don't want to swallow Alt+digit.
+    useEffect(() => {
+        if (!activeWorkspaceId || !splitActive) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            // `event.code` is layout-independent ("Digit1" .. "Digit9");
+            // `event.key` would be the alt-modified character on macOS
+            // (e.g. "¡" for Opt+1) which wouldn't match a digit string.
+            const code = e.code;
+            if (!code.startsWith("Digit")) return;
+            const digit = Number.parseInt(code.slice(5), 10);
+            if (!Number.isFinite(digit) || digit < 1) return;
+            const targetIndex = digit - 1;
+            if (targetIndex >= totalPanes) return;
+            e.preventDefault();
+            if (focusedPaneIndex !== targetIndex) {
+                setFocusedPaneIndex(activeWorkspaceId, targetIndex);
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [
+        activeWorkspaceId,
+        splitActive,
+        totalPanes,
+        focusedPaneIndex,
+        setFocusedPaneIndex
+    ]);
+
     // ─── Drag-and-drop from sidebar ──────────────────────────────────────
     //
     // The drop overlay shows three zones per pane: insert-before, replace
