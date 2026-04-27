@@ -6,6 +6,7 @@ import {
     type DiscoveredSkills
 } from "../skills/skills.service";
 import { loadRulesForPrompt } from "../rules/rules.service";
+import { listMemoryIndex, type MemoryIndexEntry } from "../memories";
 import { buildTodosPromptBlock, listTodos, type Todo } from "./todos";
 import { getSystemContext, type SystemContext } from "./system-context";
 import type { AgenticMode } from "./permissions";
@@ -26,12 +27,22 @@ import type { AgenticMode } from "./permissions";
 //   8. Environment     — OS, user, home dir, workspace, git status, date
 //   9. Available skills (discovered from disk)
 //  10. User rules      — global, always-on user-authored rules
+//  11. Memories        — global LLM-managed memory index (titles only,
+//                        bodies fetched on demand via the `memory_read`
+//                        tool; written/deleted via `memory_write` /
+//                        `memory_delete`)
 //
 // Every block above is part of the cached `instructions` blob (the OpenAI
 // Responses API caches against `prompt_cache_key = conversationId`). The
 // only volatile content is the trailing todos block (rendered as a
 // separate trailing system message in conversation.stream.ts so todo
 // edits never invalidate the cached prefix).
+//
+// Note: like rules, the memory index changes whenever the LLM calls
+// `memory_write` / `memory_delete`, which invalidates the prompt cache
+// for the next turn. That's acceptable — memory mutations are infrequent
+// in practice and only the title index lives in the prompt (bodies are
+// pulled lazily through `memory_read`).
 //
 // The current date is included at YYYY-MM-DD granularity, so the cache
 // only invalidates once per local-day boundary.
@@ -207,6 +218,40 @@ export function buildUserRulesBlock(rules: string[]): string {
     );
 }
 
+/**
+ * Build the trailing Memories block. The block lists ONLY the id + title
+ * of every memory the LLM has previously written via `memory_write`; the
+ * actual bodies are fetched on demand via the `memory_read` tool. This
+ * keeps the prompt cheap even when the memory store grows large, and
+ * lets the LLM choose which memories to load instead of paying for all
+ * of them every turn.
+ *
+ * Returns `""` when there are no memories so callers can cheaply skip
+ * the whole block (and avoid invalidating the prompt cache for users
+ * who never use the memory system).
+ */
+export function buildMemoryIndexBlock(entries: MemoryIndexEntry[]): string {
+    if (entries.length === 0) return "";
+
+    const items = entries
+        .map((entry) => {
+            const id = escapeXmlAttribute(entry.id);
+            const title = escapeXmlAttribute(entry.title);
+            return `  <memory id="${id}" title="${title}" />`;
+        })
+        .join("\n");
+
+    return (
+        "\n\n# Memories\n" +
+        "You have a global, persistent memory store accessed only through the `memory_read`, `memory_write`, and `memory_delete` tools. " +
+        "Memories are NOT scoped to this workspace — they follow you across every conversation on this machine.\n" +
+        "Below is the title index of every memory you have stored. Bodies are NOT included here; call `memory_read` with the matching `id` to load a body before relying on it. " +
+        "Use `memory_write` to persist a new fact (omit `id`) or update an existing one (pass the `id` shown below). " +
+        "Prefer durable, cross-conversation facts (user preferences, project conventions, repeated decisions) — not turn-local scratch (use `todo_write` for that).\n\n" +
+        `<memories>\n${items}\n</memories>`
+    );
+}
+
 export interface AvailableMcpTool {
     name: string;
     description: string;
@@ -300,6 +345,8 @@ type ConversationPromptParts = {
     skillsBlock: string;
     rules: string[];
     rulesBlock: string;
+    memoryIndex: MemoryIndexEntry[];
+    memoryBlock: string;
     todos: Todo[];
     todosBlock: string;
     agenticModeBlock: string;
@@ -358,6 +405,14 @@ export function buildConversationPrompt(
     const rules = loadRulesForPrompt();
     const rulesBlock = buildUserRulesBlock(rules);
 
+    // Global memory index is loaded fresh each turn. Like rules, any
+    // `memory_write` / `memory_delete` invalidates the next turn's prompt
+    // cache. We only inject titles here; bodies are fetched on demand via
+    // the `memory_read` tool, so the prompt cost is bounded by the number
+    // of memories, not their size.
+    const memoryIndex = listMemoryIndex();
+    const memoryBlock = buildMemoryIndexBlock(memoryIndex);
+
     const todos = options.conversationId
         ? listTodos(options.workspaceId, options.conversationId)
         : [];
@@ -365,14 +420,14 @@ export function buildConversationPrompt(
 
     // The order below is intentional. Identity → communication → mode-specific
     // capabilities → universal tool guidance → file editing → long-running
-    // commands → git safety → environment → skills → user rules.
+    // commands → git safety → environment → skills → user rules → memories.
     // `prompt` is what goes into the Responses API `instructions` field; it
     // stays stable across turns (modulo midnight / model / mode / workspace
-    // / rules changes) so the OpenAI prompt cache (keyed on conversationId
-    // via `prompt_cache_key`) keeps hitting. The volatile todos block is
-    // exposed separately so callers can inject it as a trailing system
-    // input item in conversation.stream.ts without perturbing the cached
-    // prefix.
+    // / rules / memory changes) so the OpenAI prompt cache (keyed on
+    // conversationId via `prompt_cache_key`) keeps hitting. The volatile
+    // todos block is exposed separately so callers can inject it as a
+    // trailing system input item in conversation.stream.ts without
+    // perturbing the cached prefix.
     const prompt =
         identityBlock +
         COMMUNICATION_BLOCK +
@@ -383,7 +438,8 @@ export function buildConversationPrompt(
         GIT_SAFETY_BLOCK +
         environmentBlock +
         skillsBlock +
-        rulesBlock;
+        rulesBlock +
+        memoryBlock;
 
     return {
         workspacePath: workspace.path,
@@ -401,6 +457,8 @@ export function buildConversationPrompt(
         skillsBlock,
         rules,
         rulesBlock,
+        memoryIndex,
+        memoryBlock,
         todos,
         todosBlock,
         agenticModeBlock: modeBlock,

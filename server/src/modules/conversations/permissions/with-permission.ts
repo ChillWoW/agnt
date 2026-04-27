@@ -51,7 +51,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
     "web_search",
     "web_fetch",
     "task",
-    "diagnostics"
+    "diagnostics",
+    "memory_read"
 ]);
 
 export interface ConversationPermissionContext {

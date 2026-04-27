@@ -15,6 +15,9 @@ import { awaitShellToolDef, createAwaitShellToolDef } from "./await-shell";
 import { writePlanToolDef, createWritePlanToolDef } from "./write-plan";
 import { taskToolDef, createTaskToolDef } from "./task";
 import { diagnosticsToolDef, createDiagnosticsToolDef } from "./diagnostics";
+import { memoryWriteToolDef, createMemoryWriteToolDef } from "./memory-write";
+import { memoryReadToolDef, createMemoryReadToolDef } from "./memory-read";
+import { memoryDeleteToolDef, createMemoryDeleteToolDef } from "./memory-delete";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -34,7 +37,10 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     awaitShellToolDef as ToolDefinition,
     writePlanToolDef as ToolDefinition,
     taskToolDef as ToolDefinition,
-    diagnosticsToolDef as ToolDefinition
+    diagnosticsToolDef as ToolDefinition,
+    memoryWriteToolDef as ToolDefinition,
+    memoryReadToolDef as ToolDefinition,
+    memoryDeleteToolDef as ToolDefinition
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -49,7 +55,14 @@ export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
  * caching. Use sparingly — this is for tools that ARE themselves the user
  * interaction (e.g. `question`), not for tools that happen to be safe.
  */
-export const UNGATED_TOOL_NAMES = new Set<string>(["question", "todo_write", "write_plan"]);
+export const UNGATED_TOOL_NAMES = new Set<string>([
+    "question",
+    "todo_write",
+    "write_plan",
+    "memory_write",
+    "memory_read",
+    "memory_delete"
+]);
 
 export function isUngatedTool(toolName: string): boolean {
     return UNGATED_TOOL_NAMES.has(toolName);
@@ -91,6 +104,12 @@ export {
     taskToolDef,
     createTaskToolDef,
     diagnosticsToolDef,
-    createDiagnosticsToolDef
+    createDiagnosticsToolDef,
+    memoryWriteToolDef,
+    createMemoryWriteToolDef,
+    memoryReadToolDef,
+    createMemoryReadToolDef,
+    memoryDeleteToolDef,
+    createMemoryDeleteToolDef
 };
 export type { ToolDefinition };
