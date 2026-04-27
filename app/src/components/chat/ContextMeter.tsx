@@ -251,10 +251,6 @@ function ContextMeterBody({
                     value={summary.breakdown.attachments}
                 />
                 <Row
-                    label="Repo instructions"
-                    value={summary.breakdown.repoInstructions}
-                />
-                <Row
                     label="System"
                     value={summary.breakdown.systemInstructions}
                 />

@@ -1,5 +1,4 @@
 export { useWorkspaceStore, getActiveWorkspace } from "./workspace-store";
-export { fetchRepoInstructions } from "./workspace-api";
 export {
     fetchWorkspaceTree,
     fetchWorkspaceSearch,
@@ -9,9 +8,4 @@ export {
     type MentionEntry,
     type MentionEntryType
 } from "./mention-search";
-export type {
-    Workspace,
-    WorkspacesData,
-    RepoInstructionSource,
-    WorkspaceRepoInstructions
-} from "./workspace-types";
+export type { Workspace, WorkspacesData } from "./workspace-types";

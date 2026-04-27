@@ -2,7 +2,6 @@ import { type ElementType, useEffect } from "react";
 import {
     BellIcon,
     BugIcon,
-    FileTextIcon,
     KeyboardIcon,
     PlugsIcon,
     RobotIcon,
@@ -13,7 +12,6 @@ import { CodexSettings } from "./CodexSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { McpServersSettings } from "./McpServersSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
-import { RepoInstructionsSettings } from "./RepoInstructionsSettings";
 import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
 import { useSettingsStore } from "./settings-store";
 
@@ -29,8 +27,7 @@ export const settingsCategories: SettingsCategory[] = [
     { key: "toolPermissions", label: "Tool permissions", icon: ShieldCheckIcon },
     { key: "mcpServers", label: "MCP servers", icon: PlugsIcon },
     { key: "codex", label: "Codex", icon: RobotIcon },
-    { key: "diagnostics", label: "Diagnostics", icon: BugIcon },
-    { key: "repoInstructions", label: "Repo instructions", icon: FileTextIcon }
+    { key: "diagnostics", label: "Diagnostics", icon: BugIcon }
 ];
 
 export function SettingsPanel() {
@@ -61,9 +58,6 @@ export function SettingsPanel() {
                 {activeCategory === "mcpServers" && <McpServersSettings />}
                 {activeCategory === "toolPermissions" && (
                     <ToolPermissionsSettings />
-                )}
-                {activeCategory === "repoInstructions" && (
-                    <RepoInstructionsSettings />
                 )}
             </div>
         </div>

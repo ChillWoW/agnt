@@ -120,7 +120,8 @@ Keep compact: one line per entry, latest 10 entries only — collapse older into
 - 2026-04-26: Auto-compaction now runs inside the SSE stream, also trims `tool_invocations.output_json`, has a deterministic markdown fallback when the summarizer LLM fails, and now also runs on the `/reply` (home create-then-reply) path.
 - 2026-04-26: Mid-turn tool-result trim (`prepareStep` in `streamText`) shrinks oversized tool outputs in the in-flight prompt without touching DB rows.
 - 2026-04-26: Local-dev Tauri icon split — `app/src-tauri/icons/local/` overrides `bundle.icon` via `tauri.localdev.json` for `bun run local:dev`.
-- 2026-04-26: Reworked system prompt composition (`conversation.prompt.ts` + `system-context.ts`) — ten ordered blocks (Identity / Communication / Mode / Tool calling / File editing / Long-running commands / Git safety / Environment / Repo instructions / Skills).
+- 2026-04-27: Removed automatic AGENTS.md / CLAUDE.md injection. Deleted `server/src/modules/conversations/repo-instructions.ts`, the `/workspaces/:id/repo-instructions` route, the Repo Instructions settings panel, and the `repoInstructions` slice from the context-meter breakdown. The agent reads repo-level markdown files via `read_file` like any other source now.
+- 2026-04-26: Reworked system prompt composition (`conversation.prompt.ts` + `system-context.ts`) — nine ordered blocks (Identity / Communication / Mode / Tool calling / File editing / Long-running commands / Git safety / Environment / Skills).
 - 2026-04-25: Soft-archive flow for conversations (`archived_at` column, sidebar archive button + per-workspace popover with restore + permanent-delete).
 - 2026-04-25: Real interactive terminals in right sidebar via `portable-pty` (Rust) + xterm.js (frontend); separate from the agent's `shell` tool.
 - 2026-04-24: Assistant message footer (generation time + model + hover-reveal copy button); pause-aware clock excludes time blocked on permission/question prompts.

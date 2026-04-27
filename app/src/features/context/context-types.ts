@@ -3,7 +3,6 @@ export interface ContextBreakdown {
     reasoning: number;
     toolOutputs: number;
     attachments: number;
-    repoInstructions: number;
     systemInstructions: number;
     todos: number;
 }

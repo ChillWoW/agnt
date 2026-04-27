@@ -8,7 +8,6 @@ import {
 import { listDirectory } from "./filetree.service";
 import { readWorkspaceFile } from "./file-read.service";
 import { searchWorkspace } from "./search.service";
-import { resolveRepoInstructions } from "../conversations/repo-instructions";
 import { discoverSkills } from "../skills/skills.service";
 
 const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
@@ -75,19 +74,6 @@ const workspacesRoutes = new Elysia({ prefix: "/workspaces" })
                     error instanceof Error
                         ? error.message
                         : "Failed to read file"
-            };
-        }
-    })
-    .get("/:id/repo-instructions", ({ params, set }) => {
-        try {
-            return resolveRepoInstructions(params.id);
-        } catch (error) {
-            set.status = 404;
-            return {
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Failed to load repo instructions"
             };
         }
     })

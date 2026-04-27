@@ -1,10 +1,6 @@
 import { getWorkspace } from "../workspaces/workspaces.service";
 import { getModelById } from "../models/models.service";
 import {
-    resolveRepoInstructions,
-    type ResolvedRepoInstructions
-} from "./repo-instructions";
-import {
     buildAvailableSkillsBlock,
     discoverSkillsForPath,
     type DiscoveredSkills
@@ -27,8 +23,7 @@ import type { AgenticMode } from "./permissions";
 //   6. Long-running cmds — background shell + await_shell pattern
 //   7. Git safety      — non-negotiable git rules
 //   8. Environment     — OS, user, home dir, workspace, git status, date
-//   9. Repo instructions (AGENTS.md / CLAUDE.md, injected from workspace)
-//  10. Available skills (discovered from disk)
+//   9. Available skills (discovered from disk)
 //
 // Every block above is part of the cached `instructions` blob (the OpenAI
 // Responses API caches against `prompt_cache_key = conversationId`). The
@@ -39,6 +34,10 @@ import type { AgenticMode } from "./permissions";
 // The current date is included at YYYY-MM-DD granularity, so the cache
 // only invalidates once per local-day boundary.
 //
+// Repository-specific markdown files (AGENTS.md / CLAUDE.md / etc.) are
+// intentionally NOT auto-injected into the prompt. If the user wants
+// the agent to consider them, the agent should read them through the
+// normal `read_file` flow like any other source file.
 
 const IDENTITY_TEMPLATE =
     "# Identity\n" +
@@ -224,16 +223,6 @@ export function buildAvailableMcpToolsBlock(tools: AvailableMcpTool[]): string {
     );
 }
 
-function buildWarningBlock(repoInstructions: ResolvedRepoInstructions): string {
-    if (repoInstructions.warnings.length === 0) {
-        return "";
-    }
-
-    return `\n\n## Repository Instruction Loading Notes\n${repoInstructions.warnings
-        .map((warning) => `- ${warning}`)
-        .join("\n")}`;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,8 +261,6 @@ type ConversationPromptParts = {
     modeBlock: string;
     environmentBlock: string;
     systemContext: SystemContext;
-    repoInstructions: ResolvedRepoInstructions;
-    warningBlock: string;
     skills: DiscoveredSkills;
     skillsBlock: string;
     todos: Todo[];
@@ -319,14 +306,12 @@ export function buildConversationPrompt(
               };
 
     const workspace = getWorkspace(options.workspaceId);
-    const repoInstructions = resolveRepoInstructions(options.workspaceId);
     const skills = discoverSkillsForPath(workspace.path, options.workspaceId);
     const systemContext = getSystemContext(workspace.path);
 
     const identityBlock = buildIdentityBlock(options.modelName);
     const modeBlock = buildModeBlock(options.agenticMode);
     const environmentBlock = buildEnvironmentBlock(systemContext);
-    const warningBlock = buildWarningBlock(repoInstructions);
     const skillsBlock = buildAvailableSkillsBlock(skills.skills);
 
     const todos = options.conversationId
@@ -336,7 +321,7 @@ export function buildConversationPrompt(
 
     // The order below is intentional. Identity → communication → mode-specific
     // capabilities → universal tool guidance → file editing → long-running
-    // commands → git safety → environment → repo instructions → skills.
+    // commands → git safety → environment → skills.
     // `prompt` is what goes into the Responses API `instructions` field; it
     // stays stable across turns (modulo midnight / model / mode / workspace
     // changes) so the OpenAI prompt cache (keyed on conversationId via
@@ -352,8 +337,6 @@ export function buildConversationPrompt(
         LONG_RUNNING_COMMANDS_BLOCK +
         GIT_SAFETY_BLOCK +
         environmentBlock +
-        repoInstructions.promptBlock +
-        warningBlock +
         skillsBlock;
 
     return {
@@ -368,8 +351,6 @@ export function buildConversationPrompt(
         modeBlock,
         environmentBlock,
         systemContext,
-        repoInstructions,
-        warningBlock,
         skills,
         skillsBlock,
         todos,

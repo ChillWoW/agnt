@@ -28,7 +28,6 @@ export interface ContextBreakdown {
     reasoning: number;
     toolOutputs: number;
     attachments: number;
-    repoInstructions: number;
     systemInstructions: number;
     todos: number;
 }
@@ -259,17 +258,14 @@ export function computeContextSummary(
             prompt.fileEditingBlock +
             prompt.longRunningCommandsBlock +
             prompt.gitSafetyBlock +
-            prompt.environmentBlock +
-            prompt.warningBlock
+            prompt.environmentBlock
     );
-    const repoInstructionsTokens = countTokens(prompt.repoInstructions.promptBlock);
     const todosTokens = countTokens(prompt.todosBlock);
 
     const usedTokens =
         messagesTokens +
         toolOutputsTokens +
         attachmentsTokens +
-        repoInstructionsTokens +
         systemInstructionsTokens +
         todosTokens;
 
@@ -287,7 +283,6 @@ export function computeContextSummary(
             reasoning: reasoningTokens,
             toolOutputs: toolOutputsTokens,
             attachments: attachmentsTokens,
-            repoInstructions: repoInstructionsTokens,
             systemInstructions: systemInstructionsTokens,
             todos: todosTokens
         },
