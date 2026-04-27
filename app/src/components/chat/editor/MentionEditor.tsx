@@ -194,6 +194,14 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
         // built — subsequent prop changes don't re-seed the editor (we use
         // the imperative `setDocJSON` handle for that).
         const initialContentRef = useRef(initialContent);
+        // Tiptap's Placeholder extension reads `options.placeholder` once
+        // per decoration recompute. We bind a function that reads from
+        // this ref so the extension always sees the latest placeholder
+        // string without us having to recreate the editor (which would
+        // wipe focus, selection and undo history). The effect below kicks
+        // a no-op transaction whenever the prop changes so the decoration
+        // re-runs immediately instead of waiting for the next keystroke.
+        const placeholderRef = useRef(placeholder);
 
         useEffect(() => {
             workspaceIdRef.current = workspaceId ?? null;
@@ -230,7 +238,9 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                 Text,
                 HardBreak,
                 UndoRedo,
-                Placeholder.configure({ placeholder }),
+                Placeholder.configure({
+                    placeholder: () => placeholderRef.current
+                }),
                 SlashCommandMark,
                 SlashSuggestionExtension.configure({
                     getWorkspaceId: () => workspaceIdRef.current,
@@ -272,7 +282,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                     )
                 })
             ],
-            [placeholder]
+            []
         );
 
         const editor = useEditor({
@@ -342,6 +352,19 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                 editor.setEditable(!disabled);
             }
         }, [editor, disabled]);
+
+        useEffect(() => {
+            placeholderRef.current = placeholder;
+            if (!editor || editor.isDestroyed) return;
+            // The Placeholder extension's decoration is only recomputed on
+            // editor transactions (typing, selection moves, etc.). When
+            // the placeholder prop changes without any editor interaction
+            // — e.g. streaming flips from idle → running and the parent
+            // swaps "Send a message..." → "Add to queue..." — we have to
+            // kick a no-op transaction ourselves so the placeholder text
+            // (read via the ref above) is re-emitted into the DOM.
+            editor.view.dispatch(editor.state.tr);
+        }, [editor, placeholder]);
 
         useImperativeHandle(
             ref,
