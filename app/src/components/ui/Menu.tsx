@@ -1,4 +1,5 @@
 import { Menu as BaseMenu } from "@base-ui/react/menu";
+import { ContextMenu as BaseContextMenu } from "@base-ui/react/context-menu";
 import { type ReactNode, type ComponentProps } from "react";
 import { CaretRightIcon, CheckIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
@@ -289,6 +290,72 @@ function MenuSubmenu({
     );
 }
 
+// ─── Context Menu ─────────────────────────────────────────────────────────────
+//
+// Wraps Base UI's ContextMenu so right-click / long-press opens the popup at
+// the cursor. Internally `BaseContextMenu.Root` wraps the same `Menu.Root`
+// machinery used above, which means every `Menu*` item primitive defined in
+// this file (Item, CheckboxItem, RadioGroup, RadioItem, Group, Label,
+// Separator, Submenu) works unchanged inside a `ContextMenu`. We expose them
+// on the `ContextMenu` namespace so callsites have one obvious API surface.
+
+interface ContextMenuProps extends ComponentProps<typeof BaseContextMenu.Root> {
+    children: ReactNode;
+}
+
+interface ContextMenuTriggerProps
+    extends Omit<ComponentProps<typeof BaseContextMenu.Trigger>, "children"> {
+    children: ReactNode;
+}
+
+interface ContextMenuContentProps {
+    children: ReactNode;
+    sideOffset?: number;
+    className?: string;
+}
+
+function ContextMenu({ children, ...props }: ContextMenuProps) {
+    return (
+        <BaseContextMenu.Root {...props}>{children}</BaseContextMenu.Root>
+    );
+}
+
+function ContextMenuTrigger({
+    children,
+    className,
+    ...props
+}: ContextMenuTriggerProps) {
+    return (
+        <BaseContextMenu.Trigger
+            className={cn("outline-none", className)}
+            {...props}
+        >
+            {children}
+        </BaseContextMenu.Trigger>
+    );
+}
+
+function ContextMenuContent({
+    children,
+    sideOffset = 4,
+    className
+}: ContextMenuContentProps) {
+    return (
+        <BaseContextMenu.Portal>
+            <BaseContextMenu.Positioner
+                sideOffset={sideOffset}
+                className="z-50"
+            >
+                <BaseContextMenu.Popup
+                    className={cn(popupClasses, className)}
+                >
+                    {children}
+                </BaseContextMenu.Popup>
+            </BaseContextMenu.Positioner>
+        </BaseContextMenu.Portal>
+    );
+}
+
 // ─── Compose & export ─────────────────────────────────────────────────────────
 
 Menu.Trigger = MenuTrigger;
@@ -302,4 +369,15 @@ Menu.Label = MenuLabel;
 Menu.Separator = MenuSeparator;
 Menu.Submenu = MenuSubmenu;
 
-export { Menu };
+ContextMenu.Trigger = ContextMenuTrigger;
+ContextMenu.Content = ContextMenuContent;
+ContextMenu.Item = MenuItem;
+ContextMenu.CheckboxItem = MenuCheckboxItem;
+ContextMenu.RadioGroup = MenuRadioGroup;
+ContextMenu.RadioItem = MenuRadioItem;
+ContextMenu.Group = MenuGroup;
+ContextMenu.Label = MenuLabel;
+ContextMenu.Separator = MenuSeparator;
+ContextMenu.Submenu = MenuSubmenu;
+
+export { Menu, ContextMenu };
