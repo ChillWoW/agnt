@@ -40,6 +40,16 @@ interface ConversationStoreState {
     isLoadingList: boolean;
     loadingConversationIds: Record<string, true>;
     streamControllersById: Record<string, AbortController>;
+    /**
+     * Sibling map of `streamControllersById` that remembers which
+     * workspace owns each in-flight stream. Used by `stopGeneration` to
+     * call the server's `/stop` endpoint (which is workspace-scoped) so
+     * the in-flight `streamText` aborts internally and gets to emit a
+     * final `abort` SSE event with model id + generation duration +
+     * token usage. Without that, the assistant footer would lose the
+     * duration and cost on user-initiated stops.
+     */
+    streamWorkspaceById: Record<string, string>;
     observerControllersById: Record<string, AbortController>;
     unreadConversationIds: Record<string, true>;
     contextByConversationId: Record<string, ContextSummary>;
@@ -56,7 +66,7 @@ interface ConversationStoreState {
 
     setActiveConversation: (conversationId: string | null) => void;
     markConversationRead: (conversationId: string) => void;
-    stopGeneration: (conversationId?: string) => void;
+    stopGeneration: (conversationId?: string) => Promise<void>;
     setContextSummary: (
         conversationId: string,
         summary: ContextSummary
@@ -1043,6 +1053,13 @@ function handleConversationSseEvent(
                 const abortedAssistantMessageId = data.assistantMessageId as
                     | string
                     | undefined;
+                // Server aggregates token usage from the steps that
+                // completed before the abort fired (see `onAbort` in
+                // `conversation.stream.ts`). Applying it here lets the
+                // assistant footer render the cost estimate even on
+                // user-initiated Stops, alongside the duration + model.
+                const abortedUsage =
+                    (data.usage as UsageSseEvent | null | undefined) ?? null;
                 updateConversation((prev) => {
                     const lastStreamingAssistantIndex = [...prev.messages]
                         .map((message, index) => ({ message, index }))
@@ -1092,6 +1109,16 @@ function handleConversationSseEvent(
                                           generation_duration_ms:
                                               abortedDurationMs
                                       }
+                                    : {}),
+                                ...(shouldApplyAbortMetadata && abortedUsage
+                                    ? {
+                                          input_tokens: abortedUsage.inputTokens,
+                                          output_tokens:
+                                              abortedUsage.outputTokens,
+                                          reasoning_tokens:
+                                              abortedUsage.reasoningTokens,
+                                          total_tokens: abortedUsage.totalTokens
+                                      }
                                     : {})
                             }
                         ];
@@ -1099,6 +1126,15 @@ function handleConversationSseEvent(
 
                     return { ...prev, messages };
                 });
+                // Server also persisted the partial usage to the message
+                // row + stats ledger; refresh the context meter so the
+                // post-stop token bar reflects the new totals just like
+                // it does after a normal `finish`.
+                if (abortedUsage) {
+                    useConversationStore
+                        .getState()
+                        .bumpContextRefresh(conversationId);
+                }
                 break;
             }
 
@@ -1179,6 +1215,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             streamControllersById: {
                 ...state.streamControllersById,
                 [conversationId]: controller
+            },
+            streamWorkspaceById: {
+                ...state.streamWorkspaceById,
+                [conversationId]: workspaceId
             }
         }));
 
@@ -1317,6 +1357,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                 streamControllersById: omitKey(
                     state.streamControllersById,
                     conversationId
+                ),
+                streamWorkspaceById: omitKey(
+                    state.streamWorkspaceById,
+                    conversationId
                 )
             }));
 
@@ -1373,6 +1417,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         isLoadingList: false,
         loadingConversationIds: {},
         streamControllersById: {},
+        streamWorkspaceById: {},
         observerControllersById: {},
         unreadConversationIds: {},
         contextByConversationId: {},
@@ -1454,17 +1499,66 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             });
         },
 
-        stopGeneration: (conversationId?: string) => {
+        stopGeneration: async (conversationId?: string) => {
             const targetId = conversationId ?? get().activeConversationId;
             if (!targetId) return;
             const controller = get().streamControllersById[targetId];
             if (!controller) return;
+            const workspaceId = get().streamWorkspaceById[targetId];
+
+            // Preferred path: ask the server to abort. The server's stream
+            // sees its internal `AbortController` trip, emits a final
+            // `abort` SSE event (with model id + generation duration +
+            // aggregated token usage), then closes the response stream.
+            // The client's SSE reader picks up the event and exits via
+            // `done: true`, at which point `runConversationStream`'s
+            // finally block clears the controller maps. This path is what
+            // keeps the assistant footer's duration + cost visible after
+            // a user-initiated Stop — a local `controller.abort()` would
+            // tear the connection down before the SSE event could be
+            // flushed and lose all of that metadata.
+            if (workspaceId) {
+                try {
+                    await conversationApi.cancelStream(workspaceId, targetId);
+                    // Safety net: if the server-side stream doesn't close
+                    // within a reasonable window (rare — would only happen
+                    // if a tool ignores its abort signal), fall back to a
+                    // local fetch abort so the UI doesn't lock up. By the
+                    // time this fires, the controller is usually already
+                    // gone (the `runConversationStream` finally block has
+                    // omit-keyed it on stream close), so the abort becomes
+                    // a no-op in the happy path.
+                    window.setTimeout(() => {
+                        if (
+                            get().streamControllersById[targetId] === controller
+                        ) {
+                            controller.abort();
+                        }
+                    }, 5000);
+                    return;
+                } catch (error) {
+                    console.warn(
+                        "[conversation-store] Server-side stop failed, falling back to local abort",
+                        error
+                    );
+                    // Fall through to local-abort path below.
+                }
+            }
+
+            // Fallback: drop the local fetch. The server's request signal
+            // will fire and the stream will end without delivering the
+            // final abort SSE event, so duration / cost won't show — but
+            // the conversation won't get stuck either.
             controller.abort();
             usePermissionStore.getState().clearPending(targetId);
             useQuestionStore.getState().clearPending(targetId);
             set((state) => ({
                 streamControllersById: omitKey(
                     state.streamControllersById,
+                    targetId
+                ),
+                streamWorkspaceById: omitKey(
+                    state.streamWorkspaceById,
                     targetId
                 )
             }));
@@ -2000,6 +2094,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     ),
                     streamControllersById: omitKey(
                         state.streamControllersById,
+                        conversationId
+                    ),
+                    streamWorkspaceById: omitKey(
+                        state.streamWorkspaceById,
                         conversationId
                     ),
                     unreadConversationIds: omitKey(

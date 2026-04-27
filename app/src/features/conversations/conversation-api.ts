@@ -71,6 +71,25 @@ export function replyToConversation(
     );
 }
 
+/**
+ * Ask the server to abort the conversation's in-flight stream. The server
+ * fires its internal `AbortController`, which makes `streamText` emit a
+ * final `abort` SSE event (with model id, generation duration, and
+ * aggregated token usage) before the response stream closes. The client's
+ * SSE reader then sees the event normally and exits the loop on `done`.
+ *
+ * Compared to dropping the local fetch, this preserves the duration +
+ * cost in the assistant footer when the user hits Stop.
+ *
+ * Returns `{ stopped: true }` if a stream was running, `{ stopped: false }`
+ * if there was nothing to abort.
+ */
+export function cancelStream(workspaceId: string, conversationId: string) {
+    return api.post<{ success: boolean; stopped: boolean }>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/stop`
+    );
+}
+
 export function deleteConversation(workspaceId: string, conversationId: string) {
     return api.delete<{ success: boolean }>(
         `/workspaces/${workspaceId}/conversations/${conversationId}`

@@ -11,7 +11,11 @@ import {
     unarchiveConversation,
     updateConversation
 } from "./conversations.service";
-import { streamConversationReply, streamReplyToLastMessage } from "./conversation.stream";
+import {
+    cancelConversationStream,
+    streamConversationReply,
+    streamReplyToLastMessage
+} from "./conversation.stream";
 import { buildStreamResponse } from "./conversation.sse";
 import { subscribeToConversationSse } from "./conversation-events";
 import { computeContextSummary } from "./context.service";
@@ -378,6 +382,19 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                         : "Failed to stream conversation reply"
             };
         }
+    })
+    .post("/:id/conversations/:conversationId/stop", ({ params }) => {
+        // Server-driven Stop. The client posts here instead of dropping
+        // its SSE fetch, so the in-flight `streamText` aborts internally
+        // and gets a chance to emit a final `abort` SSE event (model id +
+        // generation duration + aggregated token usage) before the HTTP
+        // response closes naturally. Without this route, a client-side
+        // `fetch.abort()` would tear the TCP connection down before that
+        // event could be flushed, leaving the assistant footer without
+        // duration/cost. Idempotent: returns `stopped: false` if no stream
+        // is active for the given conversation id.
+        const stopped = cancelConversationStream(params.conversationId);
+        return { success: true, stopped };
     })
     .post("/:id/conversations/:conversationId/reply", async ({ params, request, set }) => {
         try {

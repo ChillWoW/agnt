@@ -118,6 +118,98 @@ function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === "AbortError";
 }
 
+/**
+ * Per-conversation registry of in-flight stream `AbortController`s. The
+ * `/stop` HTTP route fires the registered controller for a conversation,
+ * which makes the in-flight `streamText` see its `abortSignal` trip and
+ * emit a `part.type === "abort"` chunk through `runStreamTextIntoController`.
+ * That path is what enqueues the final `abort` SSE event (with model id +
+ * generation duration + aggregated usage) before the response stream closes
+ * naturally — i.e. WITHOUT the client having to drop the fetch first, so
+ * the assistant footer keeps the duration and price visible after Stop.
+ *
+ * A conversation may have at most one active stream at a time (the stream
+ * routes already early-out via the existing client-side controller map),
+ * so a single-slot map is sufficient. We still defensively check for an
+ * existing entry on register and refuse to clobber it.
+ */
+const streamAbortControllersByConversation = new Map<string, AbortController>();
+
+function registerStreamAbortController(
+    conversationId: string,
+    controller: AbortController
+): void {
+    streamAbortControllersByConversation.set(conversationId, controller);
+}
+
+function unregisterStreamAbortController(
+    conversationId: string,
+    controller: AbortController
+): void {
+    const existing = streamAbortControllersByConversation.get(conversationId);
+    if (existing === controller) {
+        streamAbortControllersByConversation.delete(conversationId);
+    }
+}
+
+/**
+ * Trigger an internal abort for the in-flight stream of a conversation.
+ * Returns true if a stream was found and aborted, false otherwise.
+ *
+ * Used by the `/stop` route. Aborting via this path lets the server-side
+ * stream emit its final `abort` SSE event (with usage + duration) before
+ * the HTTP response closes — unlike a client-driven `fetch.abort()` which
+ * tears the connection down before the abort event can be flushed.
+ */
+export function cancelConversationStream(conversationId: string): boolean {
+    const controller = streamAbortControllersByConversation.get(conversationId);
+    if (!controller) return false;
+    controller.abort();
+    return true;
+}
+
+/**
+ * Build an `AbortSignal` that fires when either the inbound request signal
+ * (client fetch dropped / network gone) OR the per-conversation
+ * `cancelConversationStream` controller fires. The local controller is
+ * registered/unregistered around the lifetime of the stream so the `/stop`
+ * route can find it.
+ *
+ * Returns a cleanup callback the caller MUST invoke (in a `finally`) to
+ * deregister the controller and avoid leaking listeners on the inbound
+ * signal.
+ */
+function attachStreamCancellation(
+    conversationId: string,
+    inboundSignal: AbortSignal | undefined
+): { signal: AbortSignal; release: () => void } {
+    const local = new AbortController();
+    registerStreamAbortController(conversationId, local);
+
+    let inboundListener: (() => void) | null = null;
+    if (inboundSignal) {
+        if (inboundSignal.aborted) {
+            local.abort(inboundSignal.reason);
+        } else {
+            inboundListener = () => {
+                local.abort(inboundSignal.reason);
+            };
+            inboundSignal.addEventListener("abort", inboundListener, {
+                once: true
+            });
+        }
+    }
+
+    const release = () => {
+        unregisterStreamAbortController(conversationId, local);
+        if (inboundSignal && inboundListener) {
+            inboundSignal.removeEventListener("abort", inboundListener);
+        }
+    };
+
+    return { signal: local.signal, release };
+}
+
 interface StreamReasoningPart {
     id: string;
     text: string;
@@ -1779,11 +1871,94 @@ async function runStreamTextIntoController({
                     createdAt: assistantCreatedAt
                 });
             },
-            onAbort: () => {
+            onAbort: ({ steps }) => {
                 logger.log("[stream] Generation aborted", {
                     workspaceId,
                     conversationId,
-                    assistantMsgId
+                    assistantMsgId,
+                    completedSteps: steps.length
+                });
+                // Aggregate usage from all steps that completed before the
+                // abort fired. Each step carries its own `LanguageModelUsage`
+                // (the step that was in-flight at the moment of abort never
+                // landed in `steps`, so its tokens are unavoidably lost —
+                // this is a slight underestimate, not a wrong total). We
+                // mirror what `onFinish` does: persist token counts on the
+                // assistant row, append to the stats ledger, and stash the
+                // aggregate in `lastUsage` so the outgoing `abort` SSE event
+                // can carry it back to the UI for cost rendering.
+                if (steps.length === 0) return;
+                let inputTotal = 0;
+                let outputTotal = 0;
+                let reasoningTotal = 0;
+                let totalTotal = 0;
+                let sawAnyTokens = false;
+                for (const step of steps) {
+                    const u = step.usage;
+                    if (!u) continue;
+                    if (typeof u.inputTokens === "number") {
+                        inputTotal += u.inputTokens;
+                        sawAnyTokens = true;
+                    }
+                    if (typeof u.outputTokens === "number") {
+                        outputTotal += u.outputTokens;
+                        sawAnyTokens = true;
+                    }
+                    const stepReasoning =
+                        typeof u.outputTokenDetails?.reasoningTokens === "number"
+                            ? u.outputTokenDetails.reasoningTokens
+                            : typeof u.reasoningTokens === "number"
+                              ? u.reasoningTokens
+                              : 0;
+                    reasoningTotal += stepReasoning;
+                    if (typeof u.totalTokens === "number") {
+                        totalTotal += u.totalTokens;
+                        sawAnyTokens = true;
+                    }
+                }
+                if (!sawAnyTokens) return;
+                const input = inputTotal > 0 ? inputTotal : null;
+                const output = outputTotal > 0 ? outputTotal : null;
+                const reasoning = reasoningTotal > 0 ? reasoningTotal : null;
+                const total =
+                    totalTotal > 0
+                        ? totalTotal
+                        : input !== null && output !== null
+                          ? input + output + (reasoning ?? 0)
+                          : null;
+
+                lastUsage = {
+                    inputTokens: input,
+                    outputTokens: output,
+                    reasoningTokens: reasoning,
+                    totalTokens: total
+                };
+
+                try {
+                    db.query(
+                        "UPDATE messages SET input_tokens = ?, output_tokens = ?, reasoning_tokens = ?, total_tokens = ? WHERE id = ?"
+                    ).run(input, output, reasoning, total, assistantMsgId);
+                } catch (error) {
+                    logger.error(
+                        "[stream] Failed to persist aborted-turn usage",
+                        { assistantMsgId },
+                        error
+                    );
+                }
+
+                // Stats ledger gets the partial turn too — it's still real
+                // tokens spent at the provider, and the global cost report
+                // would otherwise undercount user-stopped generations.
+                recordStatAssistantMessage({
+                    workspaceId,
+                    conversationId,
+                    messageId: assistantMsgId,
+                    modelId: modelName,
+                    inputTokens: input,
+                    outputTokens: output,
+                    reasoningTokens: reasoning,
+                    totalTokens: total,
+                    createdAt: assistantCreatedAt
                 });
             }
         });
@@ -2064,7 +2239,8 @@ async function runStreamTextIntoController({
                         content: fullText,
                         assistantMessageId: assistantMsgId,
                         modelId: modelName,
-                        generationDurationMs: abortDurationMs
+                        generationDurationMs: abortDurationMs,
+                        usage: lastUsage
                     })
                 );
                 return;
@@ -2135,7 +2311,29 @@ async function runStreamTextIntoController({
                 fullText,
                 reasoningParts
             );
-            persistGenerationDuration(computeGenerationDurationMs());
+            const abortDurationMs = computeGenerationDurationMs();
+            persistGenerationDuration(abortDurationMs);
+            // Emit the same `abort` SSE event the in-loop `part.type ===
+            // "abort"` branch emits, so the client can render duration +
+            // model + cost in the assistant footer when streamText throws
+            // an AbortError out of the for-await loop instead of yielding
+            // an abort part. Safe to call here — if the underlying HTTP
+            // connection has already been torn down by the client (legacy
+            // local-fetch-abort path), the enqueue is a noop.
+            try {
+                controller.enqueue(
+                    sseEvent("abort", {
+                        reason: "aborted",
+                        content: fullText,
+                        assistantMessageId: assistantMsgId,
+                        modelId: modelName,
+                        generationDurationMs: abortDurationMs,
+                        usage: lastUsage
+                    })
+                );
+            } catch {
+                // controller already closed — nothing to do
+            }
             return;
         }
 
@@ -2407,16 +2605,24 @@ export async function streamReplyToLastMessage(
             })
         );
 
-        await runStreamTextIntoController({
-            controller,
-            workspaceId,
+        const cancellation = attachStreamCancellation(
             conversationId,
-            assistantMsgId,
-            assistantCreatedAt,
-            modelMessages,
-            abortSignal,
-            useSkillNames
-        });
+            abortSignal
+        );
+        try {
+            await runStreamTextIntoController({
+                controller,
+                workspaceId,
+                conversationId,
+                assistantMsgId,
+                assistantCreatedAt,
+                modelMessages,
+                abortSignal: cancellation.signal,
+                useSkillNames
+            });
+        } finally {
+            cancellation.release();
+        }
     });
 }
 
@@ -2581,16 +2787,24 @@ export async function streamConversationReply(
             })
         );
 
-        await runStreamTextIntoController({
-            controller,
-            workspaceId,
+        const cancellation = attachStreamCancellation(
             conversationId,
-            assistantMsgId,
-            assistantCreatedAt,
-            modelMessages,
-            abortSignal,
-            useSkillNames
-        });
+            abortSignal
+        );
+        try {
+            await runStreamTextIntoController({
+                controller,
+                workspaceId,
+                conversationId,
+                assistantMsgId,
+                assistantCreatedAt,
+                modelMessages,
+                abortSignal: cancellation.signal,
+                useSkillNames
+            });
+        } finally {
+            cancellation.release();
+        }
     });
 }
 

@@ -177,7 +177,7 @@ export function ConversationPane({
     };
 
     const handleStop = () => {
-        stopGeneration(conversationId);
+        void stopGeneration(conversationId);
     };
 
     const isSubagent = Boolean(conversation?.parent_conversation_id);
