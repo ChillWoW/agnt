@@ -119,53 +119,97 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Per-conversation registry of in-flight stream `AbortController`s. The
- * `/stop` HTTP route fires the registered controller for a conversation,
- * which makes the in-flight `streamText` see its `abortSignal` trip and
- * emit a `part.type === "abort"` chunk through `runStreamTextIntoController`.
- * That path is what enqueues the final `abort` SSE event (with model id +
- * generation duration + aggregated usage) before the response stream closes
- * naturally — i.e. WITHOUT the client having to drop the fetch first, so
- * the assistant footer keeps the duration and price visible after Stop.
+ * Per-conversation registry of in-flight stream registrations. The `/stop`
+ * HTTP route fires the registered controller for a conversation, which
+ * makes the in-flight `streamText` see its `abortSignal` trip and emit a
+ * `part.type === "abort"` chunk through `runStreamTextIntoController`. That
+ * path is what enqueues the final `abort` SSE event (with model id +
+ * generation duration + aggregated usage) before the response stream
+ * closes naturally — i.e. WITHOUT the client having to drop the fetch
+ * first, so the assistant footer keeps the duration and price visible
+ * after Stop.
+ *
+ * Registrations also carry the workspace id and the id of the user
+ * message that triggered the in-flight turn (`userMsgId`). The early-stop
+ * UX lets the client request that the user message be discarded too —
+ * `cancelConversationStream` returns these so the route handler can find
+ * and delete the right row from the messages table without re-querying
+ * the DB heuristically.
  *
  * A conversation may have at most one active stream at a time (the stream
  * routes already early-out via the existing client-side controller map),
  * so a single-slot map is sufficient. We still defensively check for an
  * existing entry on register and refuse to clobber it.
  */
-const streamAbortControllersByConversation = new Map<string, AbortController>();
+interface StreamCancellationRegistration {
+    controller: AbortController;
+    workspaceId: string;
+    userMsgId: string | null;
+    assistantMsgId: string | null;
+}
+
+const streamAbortControllersByConversation = new Map<
+    string,
+    StreamCancellationRegistration
+>();
 
 function registerStreamAbortController(
     conversationId: string,
-    controller: AbortController
+    registration: StreamCancellationRegistration
 ): void {
-    streamAbortControllersByConversation.set(conversationId, controller);
+    streamAbortControllersByConversation.set(conversationId, registration);
 }
 
 function unregisterStreamAbortController(
     conversationId: string,
-    controller: AbortController
+    registration: StreamCancellationRegistration
 ): void {
     const existing = streamAbortControllersByConversation.get(conversationId);
-    if (existing === controller) {
+    if (existing === registration) {
         streamAbortControllersByConversation.delete(conversationId);
     }
 }
 
 /**
+ * Snapshot of a cancelled stream returned by `cancelConversationStream`.
+ * `userMsgId` is the user message id that triggered the cancelled turn —
+ * the route handler uses it to optionally discard that message when the
+ * client requests an "early stop" (Stop pressed before any reasoning /
+ * tool / text deltas had arrived). `assistantMsgId` is the placeholder
+ * the stream had just inserted; the route handler explicitly deletes it
+ * if it's still empty so the post-cancel COUNT check sees an accurate
+ * "conversation is now empty" state without racing against the stream's
+ * own async cleanup (which lives inside the stream's `onAbort`/`catch`
+ * handler and may not have run yet by the time `/stop` returns).
+ */
+export interface CancelledStreamInfo {
+    workspaceId: string;
+    userMsgId: string | null;
+    assistantMsgId: string | null;
+}
+
+/**
  * Trigger an internal abort for the in-flight stream of a conversation.
- * Returns true if a stream was found and aborted, false otherwise.
+ * Returns the cancelled registration's snapshot, or `null` if no stream
+ * was registered.
  *
  * Used by the `/stop` route. Aborting via this path lets the server-side
  * stream emit its final `abort` SSE event (with usage + duration) before
  * the HTTP response closes — unlike a client-driven `fetch.abort()` which
  * tears the connection down before the abort event can be flushed.
  */
-export function cancelConversationStream(conversationId: string): boolean {
-    const controller = streamAbortControllersByConversation.get(conversationId);
-    if (!controller) return false;
-    controller.abort();
-    return true;
+export function cancelConversationStream(
+    conversationId: string
+): CancelledStreamInfo | null {
+    const registration =
+        streamAbortControllersByConversation.get(conversationId);
+    if (!registration) return null;
+    registration.controller.abort();
+    return {
+        workspaceId: registration.workspaceId,
+        userMsgId: registration.userMsgId,
+        assistantMsgId: registration.assistantMsgId
+    };
 }
 
 /**
@@ -181,10 +225,19 @@ export function cancelConversationStream(conversationId: string): boolean {
  */
 function attachStreamCancellation(
     conversationId: string,
+    workspaceId: string,
+    userMsgId: string | null,
+    assistantMsgId: string | null,
     inboundSignal: AbortSignal | undefined
 ): { signal: AbortSignal; release: () => void } {
     const local = new AbortController();
-    registerStreamAbortController(conversationId, local);
+    const registration: StreamCancellationRegistration = {
+        controller: local,
+        workspaceId,
+        userMsgId,
+        assistantMsgId
+    };
+    registerStreamAbortController(conversationId, registration);
 
     let inboundListener: (() => void) | null = null;
     if (inboundSignal) {
@@ -201,7 +254,7 @@ function attachStreamCancellation(
     }
 
     const release = () => {
-        unregisterStreamAbortController(conversationId, local);
+        unregisterStreamAbortController(conversationId, registration);
         if (inboundSignal && inboundListener) {
             inboundSignal.removeEventListener("abort", inboundListener);
         }
@@ -2605,8 +2658,23 @@ export async function streamReplyToLastMessage(
             })
         );
 
+        // The user message that triggered this turn is the latest user
+        // row in the conversation (it was inserted by `createConversation`
+        // before this reply path ran, or by an earlier turn when this
+        // route is used to retry the last message). The early-stop UX
+        // discards this row when the client pressed Stop before any
+        // generation progress.
+        const triggeringUserMsgRow = db
+            .query(
+                "SELECT id FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1"
+            )
+            .get(conversationId) as { id: string } | null;
+
         const cancellation = attachStreamCancellation(
             conversationId,
+            workspaceId,
+            triggeringUserMsgRow?.id ?? null,
+            assistantMsgId,
             abortSignal
         );
         try {
@@ -2789,6 +2857,9 @@ export async function streamConversationReply(
 
         const cancellation = attachStreamCancellation(
             conversationId,
+            workspaceId,
+            userMsgId,
+            assistantMsgId,
             abortSignal
         );
         try {

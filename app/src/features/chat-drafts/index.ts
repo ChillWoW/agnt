@@ -3,6 +3,7 @@ export {
     getDraft,
     setDraft,
     clearDraft,
+    bumpRestoreEpoch,
     draftSlotKey,
     type DraftSlot,
     type DraftSnapshot

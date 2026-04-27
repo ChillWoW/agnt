@@ -28,6 +28,7 @@ import {
     draftSlotKey,
     getDraft,
     setDraft,
+    useChatDraftsStore,
     type DraftSlot,
     type DraftSnapshot
 } from "@/features/chat-drafts";
@@ -102,7 +103,6 @@ export function ChatInput({
         return null;
     }, [conversationId, workspaceId]);
     const slotKey = slot ? draftSlotKey(slot) : null;
-    const previousSlotKeyRef = useRef<string | null>(null);
     const saveTimerRef = useRef<number | null>(null);
     // Holds the latest editor snapshot captured at keystroke time. We can't
     // pull state out of `editorRef.current` later because the editor may
@@ -419,18 +419,7 @@ export function ChatInput({
         [slot, writePendingSnapshot]
     );
 
-    useEffect(() => {
-        const previousKey = previousSlotKeyRef.current;
-
-        if (previousKey === slotKey) return;
-
-        // Slot changed (or first mount with a slot). Flush any pending save
-        // synchronously against whichever slot it was queued for so fast
-        // typing right before navigating doesn't get dropped.
-        flushSaveTimer();
-
-        previousSlotKeyRef.current = slotKey;
-
+    const loadEditorFromDraft = useCallback(() => {
         const editor = editorRef.current;
         if (!editor) return;
 
@@ -459,7 +448,33 @@ export function ChatInput({
             setIsEmpty(true);
             setHasSlashMarks(false);
         }
-    }, [flushSaveTimer, slot, slotKey]);
+    }, [slot]);
+
+    // Per-slot restore counter. The early-stop UX bumps this to push the
+    // discarded prompt back into the live editor without remounting it.
+    // Subscribing here means slot changes AND epoch bumps both flow
+    // through the single applied-state tracker below.
+    const restoreEpoch = useChatDraftsStore((s) =>
+        slotKey ? (s.restoreEpoch[slotKey] ?? 0) : 0
+    );
+    const lastAppliedRef = useRef<{ slotKey: string | null; epoch: number }>({
+        slotKey: null,
+        epoch: 0
+    });
+
+    useEffect(() => {
+        const last = lastAppliedRef.current;
+        if (last.slotKey === slotKey && last.epoch === restoreEpoch) return;
+
+        // Slot changed: flush any pending save synchronously against
+        // whichever slot it was queued for so fast typing right before
+        // navigating doesn't get dropped.
+        if (last.slotKey !== slotKey) {
+            flushSaveTimer();
+        }
+        lastAppliedRef.current = { slotKey, epoch: restoreEpoch };
+        loadEditorFromDraft();
+    }, [flushSaveTimer, loadEditorFromDraft, slotKey, restoreEpoch]);
 
     useEffect(() => {
         return () => {

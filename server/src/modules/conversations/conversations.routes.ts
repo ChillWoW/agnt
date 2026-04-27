@@ -16,6 +16,7 @@ import {
     streamConversationReply,
     streamReplyToLastMessage
 } from "./conversation.stream";
+import { getWorkspaceDb } from "../../lib/db";
 import { buildStreamResponse } from "./conversation.sse";
 import { subscribeToConversationSse } from "./conversation-events";
 import { computeContextSummary } from "./context.service";
@@ -383,7 +384,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
-    .post("/:id/conversations/:conversationId/stop", ({ params }) => {
+    .post("/:id/conversations/:conversationId/stop", ({ params, body }) => {
         // Server-driven Stop. The client posts here instead of dropping
         // its SSE fetch, so the in-flight `streamText` aborts internally
         // and gets a chance to emit a final `abort` SSE event (model id +
@@ -393,8 +394,116 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
         // event could be flushed, leaving the assistant footer without
         // duration/cost. Idempotent: returns `stopped: false` if no stream
         // is active for the given conversation id.
-        const stopped = cancelConversationStream(params.conversationId);
-        return { success: true, stopped };
+        //
+        // Optional body: `{ discardUserMessage: boolean }`. When true and
+        // a stream was running, also delete the user message that triggered
+        // the in-flight turn (the early-stop UX for "Stop pressed during
+        // Planning next moves"). If the conversation has no user/assistant
+        // rows left after that delete (typical for a brand-new conversation
+        // where the very first turn was discarded), the conversation row
+        // itself is deleted too — the client uses `conversationDeleted`
+        // to navigate back to home.
+        const opts =
+            body && typeof body === "object"
+                ? {
+                      discardUserMessage: Boolean(
+                          (body as Record<string, unknown>).discardUserMessage
+                      )
+                  }
+                : { discardUserMessage: false };
+
+        const cancelled = cancelConversationStream(params.conversationId);
+        let discardedUserMessage: { id: string; content: string } | null = null;
+        let conversationDeleted = false;
+
+        if (opts.discardUserMessage && cancelled?.userMsgId) {
+            const db = getWorkspaceDb(params.id);
+            const row = db
+                .query(
+                    "SELECT id, content FROM messages WHERE id = ? AND role = 'user'"
+                )
+                .get(cancelled.userMsgId) as
+                | { id: string; content: string }
+                | null;
+            if (row) {
+                // Tool invocations / reasoning parts / message_attachments
+                // are wiped via FK cascade (see lib/db.ts schema), so a
+                // single DELETE on `messages` is enough.
+                db.query("DELETE FROM messages WHERE id = ?").run(row.id);
+                discardedUserMessage = { id: row.id, content: row.content };
+
+                // Pre-empt the stream's own async cleanup and explicitly
+                // remove the assistant placeholder if it's still empty.
+                // The stream's `finalizeAbortedAssistantMessage` will hit
+                // the same row in its `onAbort` handler, but that runs in
+                // a separate task and likely hasn't fired yet — leaving
+                // the placeholder in the table would make the COUNT below
+                // see a non-empty conversation and skip the `deleteConversation`
+                // path, stranding an empty conversation row. The DELETE is
+                // idempotent so it's safe even if the stream cleanup races
+                // ahead. We only delete when the placeholder is genuinely
+                // empty (no content, tool invocations, or reasoning parts)
+                // — the rare case where deltas arrived between the client's
+                // "Planning next moves" check and this handler will leave
+                // the message in place and the conversation alive.
+                if (cancelled.assistantMsgId) {
+                    const placeholder = db
+                        .query(
+                            "SELECT id, content FROM messages WHERE id = ? AND role = 'assistant'"
+                        )
+                        .get(cancelled.assistantMsgId) as
+                        | { id: string; content: string }
+                        | null;
+                    if (placeholder && placeholder.content.length === 0) {
+                        const toolCount = db
+                            .query(
+                                "SELECT COUNT(*) AS count FROM tool_invocations WHERE message_id = ?"
+                            )
+                            .get(cancelled.assistantMsgId) as { count: number };
+                        const reasoningCount = db
+                            .query(
+                                "SELECT COUNT(*) AS count FROM message_reasoning_parts WHERE message_id = ?"
+                            )
+                            .get(cancelled.assistantMsgId) as { count: number };
+                        if (
+                            toolCount.count === 0 &&
+                            reasoningCount.count === 0
+                        ) {
+                            db.query(
+                                "DELETE FROM messages WHERE id = ?"
+                            ).run(cancelled.assistantMsgId);
+                        }
+                    }
+                }
+
+                const remaining = db
+                    .query(
+                        "SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND role IN ('user','assistant')"
+                    )
+                    .get(params.conversationId) as { count: number };
+                if (remaining.count === 0) {
+                    try {
+                        deleteConversation(
+                            params.id,
+                            params.conversationId
+                        );
+                        conversationDeleted = true;
+                    } catch {
+                        // Best-effort: if the conversation was already
+                        // gone, treat it as deleted from the client's
+                        // perspective so it still navigates home.
+                        conversationDeleted = true;
+                    }
+                }
+            }
+        }
+
+        return {
+            success: true,
+            stopped: cancelled !== null,
+            discardedUserMessage,
+            conversationDeleted
+        };
     })
     .post("/:id/conversations/:conversationId/reply", async ({ params, request, set }) => {
         try {

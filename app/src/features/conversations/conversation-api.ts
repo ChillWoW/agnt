@@ -71,6 +71,23 @@ export function replyToConversation(
     );
 }
 
+export interface CancelStreamResult {
+    success: boolean;
+    stopped: boolean;
+    /**
+     * Set when the caller passed `discardUserMessage: true` AND a
+     * stream was running. Carries the row the server just deleted so the
+     * client can restore its content into the chat input.
+     */
+    discardedUserMessage: { id: string; content: string } | null;
+    /**
+     * `true` when the discard left the conversation with no remaining
+     * user/assistant rows — the server has deleted the conversation row
+     * too in that case, and the client should navigate back to home.
+     */
+    conversationDeleted: boolean;
+}
+
 /**
  * Ask the server to abort the conversation's in-flight stream. The server
  * fires its internal `AbortController`, which makes `streamText` emit a
@@ -81,12 +98,22 @@ export function replyToConversation(
  * Compared to dropping the local fetch, this preserves the duration +
  * cost in the assistant footer when the user hits Stop.
  *
- * Returns `{ stopped: true }` if a stream was running, `{ stopped: false }`
- * if there was nothing to abort.
+ * Pass `{ discardUserMessage: true }` for the early-stop UX (Stop pressed
+ * before any reasoning / tool / text deltas had arrived). The server then
+ * also deletes the user message that triggered the in-flight turn — and,
+ * if the conversation has no remaining user/assistant rows after that,
+ * deletes the conversation row itself. Both outcomes come back in the
+ * response so the client can update local state and (in the brand-new
+ * conversation case) navigate home.
  */
-export function cancelStream(workspaceId: string, conversationId: string) {
-    return api.post<{ success: boolean; stopped: boolean }>(
-        `/workspaces/${workspaceId}/conversations/${conversationId}/stop`
+export function cancelStream(
+    workspaceId: string,
+    conversationId: string,
+    options: { discardUserMessage?: boolean } = {}
+): Promise<CancelStreamResult> {
+    return api.post<CancelStreamResult>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/stop`,
+        { body: { discardUserMessage: !!options.discardUserMessage } }
     );
 }
 

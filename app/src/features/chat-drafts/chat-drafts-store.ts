@@ -14,10 +14,21 @@ export interface DraftSnapshot {
 interface ChatDraftsState {
     homeByWorkspace: Record<string, DraftSnapshot>;
     byConversation: Record<string, DraftSnapshot>;
+    /**
+     * Per-slot counter (keyed by `draftSlotKey`) used to nudge a mounted
+     * `ChatInput` into re-hydrating its editor from the current draft
+     * even when the slot hasn't changed. Bumped by callers like the
+     * "early Stop" flow which writes a draft on the user's behalf and
+     * needs the live editor to pick it up immediately. Not persisted —
+     * coupling re-hydration to a transient counter would be wrong on
+     * page refresh.
+     */
+    restoreEpoch: Record<string, number>;
 
     getDraft: (slot: DraftSlot) => DraftSnapshot | undefined;
     setDraft: (slot: DraftSlot, snapshot: DraftSnapshot) => void;
     clearDraft: (slot: DraftSlot) => void;
+    bumpRestoreEpoch: (slot: DraftSlot) => void;
 }
 
 // JSON-stringified payloads above this size are skipped entirely. Drafts are
@@ -55,6 +66,7 @@ export const useChatDraftsStore = create<ChatDraftsState>()(
         (set, get) => ({
             homeByWorkspace: {},
             byConversation: {},
+            restoreEpoch: {},
 
             getDraft: (slot) => {
                 const state = get();
@@ -113,6 +125,16 @@ export const useChatDraftsStore = create<ChatDraftsState>()(
                     delete next[slot.conversationId];
                     return { byConversation: next };
                 });
+            },
+
+            bumpRestoreEpoch: (slot) => {
+                const key = draftSlotKey(slot);
+                set((s) => ({
+                    restoreEpoch: {
+                        ...s.restoreEpoch,
+                        [key]: (s.restoreEpoch[key] ?? 0) + 1
+                    }
+                }));
             }
         }),
         {
@@ -136,6 +158,10 @@ export function setDraft(slot: DraftSlot, snapshot: DraftSnapshot): void {
 
 export function clearDraft(slot: DraftSlot): void {
     useChatDraftsStore.getState().clearDraft(slot);
+}
+
+export function bumpRestoreEpoch(slot: DraftSlot): void {
+    useChatDraftsStore.getState().bumpRestoreEpoch(slot);
 }
 
 export function draftSlotKey(slot: DraftSlot): string {

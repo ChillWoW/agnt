@@ -66,7 +66,10 @@ interface ConversationStoreState {
 
     setActiveConversation: (conversationId: string | null) => void;
     markConversationRead: (conversationId: string) => void;
-    stopGeneration: (conversationId?: string) => Promise<void>;
+    stopGeneration: (
+        conversationId?: string,
+        options?: StopGenerationOptions
+    ) => Promise<StopGenerationResult>;
     setContextSummary: (
         conversationId: string,
         summary: ContextSummary
@@ -111,6 +114,31 @@ interface ConversationStoreState {
 
 type SseEventPayload = Record<string, unknown>;
 type StreamOutcome = "finished" | "aborted" | "errored";
+
+/**
+ * `stopGeneration` knobs.
+ *
+ * When `discardUserMessage` is true, the store treats this as an
+ * "early stop" — the user hit Stop while the assistant was still in
+ * the "Planning next moves" placeholder state (no content, no tool
+ * call, no reasoning). The server is told to delete the triggering
+ * user message and (if that leaves the conversation empty) the
+ * conversation row itself; the store then removes the same rows from
+ * its local cache and writes the user's prompt back into the chat
+ * input draft so they can edit and resend.
+ */
+export interface StopGenerationOptions {
+    discardUserMessage?: boolean;
+}
+
+export interface StopGenerationResult {
+    /** Server confirmed there was a stream to cancel. */
+    stopped: boolean;
+    /** Server deleted the triggering user message and returned its content. */
+    discardedUserMessage: { id: string; content: string } | null;
+    /** Server deleted the entire conversation (it had no surviving turns). */
+    conversationDeleted: boolean;
+}
 
 function isAbortError(error: unknown): boolean {
     return error instanceof DOMException && error.name === "AbortError";
@@ -1218,6 +1246,111 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         });
     }
 
+    /**
+     * Strip the discarded user row AND the still-streaming empty
+     * assistant placeholder from a conversation's local cache in one
+     * pass. The server has already deleted both in the early-stop
+     * `/stop` handler; doing the local cleanup atomically keeps the
+     * two bubbles from disappearing on different ticks (the SSE
+     * `abort` event handles the placeholder by itself but lands a
+     * moment after the `/stop` response, which is visually jarring).
+     * The placeholder match is conservative — only an isStreaming
+     * assistant row that's still empty is dropped, so we never wipe a
+     * placeholder that has just received its first delta.
+     */
+    function applyLocalDiscardedUserMessage(
+        conversationId: string,
+        messageId: string
+    ): void {
+        applyConversationUpdate(conversationId, (prev) => ({
+            ...prev,
+            messages: prev.messages.filter((m) => {
+                if (m.id === messageId) return false;
+                if (
+                    m.role === "assistant" &&
+                    m.isStreaming &&
+                    isAssistantMessageEmpty(m)
+                ) {
+                    return false;
+                }
+                return true;
+            })
+        }));
+    }
+
+    /**
+     * Mirror a server-side conversation deletion in local state without
+     * issuing another DELETE request. This is the early-stop UX's
+     * "brand-new conversation, user pressed Stop, conversation has no
+     * other turns" path — the server has already torn the row + every
+     * FK-cascading dependent down, so the client just needs to forget
+     * it everywhere it might be referenced.
+     */
+    function applyLocalConversationDeletion(
+        conversationId: string,
+        workspaceId: string
+    ): void {
+        usePermissionStore.getState().clearPending(conversationId);
+        useQuestionStore.getState().clearPending(conversationId);
+        useTodoStore.getState().clearTodos(conversationId);
+        useSplitPaneStore.getState().forgetConversation(conversationId);
+        usePromptQueueStore.getState().clear(conversationId);
+        clearChatDraft({ kind: "conversation", conversationId });
+
+        set((state) => {
+            const existingActive =
+                state.conversationsByWorkspace[workspaceId] ?? [];
+            const existingArchived =
+                state.archivedByWorkspace[workspaceId] ?? [];
+            return {
+                conversationsByWorkspace: {
+                    ...state.conversationsByWorkspace,
+                    [workspaceId]: existingActive.filter(
+                        (c) => c.id !== conversationId
+                    )
+                },
+                archivedByWorkspace: {
+                    ...state.archivedByWorkspace,
+                    [workspaceId]: existingArchived.filter(
+                        (c) => c.id !== conversationId
+                    )
+                },
+                conversationsById: omitKey(
+                    state.conversationsById,
+                    conversationId
+                ),
+                streamControllersById: omitKey(
+                    state.streamControllersById,
+                    conversationId
+                ),
+                streamWorkspaceById: omitKey(
+                    state.streamWorkspaceById,
+                    conversationId
+                ),
+                unreadConversationIds: omitKey(
+                    state.unreadConversationIds,
+                    conversationId
+                ),
+                loadingConversationIds: omitKey(
+                    state.loadingConversationIds,
+                    conversationId
+                ),
+                contextByConversationId: omitKey(
+                    state.contextByConversationId,
+                    conversationId
+                ),
+                contextRefreshTokens: omitKey(
+                    state.contextRefreshTokens,
+                    conversationId
+                ),
+                activeConversationId:
+                    state.activeConversationId === conversationId
+                        ? null
+                        : state.activeConversationId
+            };
+        });
+    }
+
     async function runConversationStream(
         workspaceId: string,
         conversationId: string,
@@ -1516,12 +1649,22 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             });
         },
 
-        stopGeneration: async (conversationId?: string) => {
+        stopGeneration: async (
+            conversationId?: string,
+            options: StopGenerationOptions = {}
+        ): Promise<StopGenerationResult> => {
+            const empty: StopGenerationResult = {
+                stopped: false,
+                discardedUserMessage: null,
+                conversationDeleted: false
+            };
             const targetId = conversationId ?? get().activeConversationId;
-            if (!targetId) return;
+            if (!targetId) return empty;
             const controller = get().streamControllersById[targetId];
-            if (!controller) return;
+            if (!controller) return empty;
             const workspaceId = get().streamWorkspaceById[targetId];
+
+            const discardUserMessage = !!options.discardUserMessage;
 
             // Preferred path: ask the server to abort. The server's stream
             // sees its internal `AbortController` trip, emits a final
@@ -1536,7 +1679,37 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             // flushed and lose all of that metadata.
             if (workspaceId) {
                 try {
-                    await conversationApi.cancelStream(workspaceId, targetId);
+                    const result = await conversationApi.cancelStream(
+                        workspaceId,
+                        targetId,
+                        { discardUserMessage }
+                    );
+
+                    if (result.conversationDeleted) {
+                        // The server tore the conversation row down (and
+                        // every message FK-cascade with it). Mirror that
+                        // locally so the sidebar / split panes / context
+                        // meters stop pointing at a dead id. We can't go
+                        // through `deleteConversation` because that would
+                        // re-issue a DELETE to the server (404).
+                        applyLocalConversationDeletion(targetId, workspaceId);
+                    } else if (
+                        discardUserMessage &&
+                        result.discardedUserMessage
+                    ) {
+                        // Conversation lives on but the user message + the
+                        // empty assistant placeholder are gone server-side.
+                        // Strip the same rows from the local cache so the
+                        // bubble disappears in lockstep with the SSE
+                        // `abort` event (which would otherwise keep the
+                        // user row visible until the next /context fetch
+                        // reconciled state).
+                        applyLocalDiscardedUserMessage(
+                            targetId,
+                            result.discardedUserMessage.id
+                        );
+                    }
+
                     // Safety net: if the server-side stream doesn't close
                     // within a reasonable window (rare — would only happen
                     // if a tool ignores its abort signal), fall back to a
@@ -1552,7 +1725,11 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                             controller.abort();
                         }
                     }, 5000);
-                    return;
+                    return {
+                        stopped: result.stopped,
+                        discardedUserMessage: result.discardedUserMessage,
+                        conversationDeleted: result.conversationDeleted
+                    };
                 } catch (error) {
                     console.warn(
                         "[conversation-store] Server-side stop failed, falling back to local abort",
@@ -1579,6 +1756,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     targetId
                 )
             }));
+            return empty;
         },
 
         loadConversations: async (workspaceId: string) => {

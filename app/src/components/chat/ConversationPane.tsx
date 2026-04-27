@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import {
     ArrowDownIcon,
@@ -14,8 +14,61 @@ import {
     useConversationStore,
     usePromptQueueStore
 } from "@/features/conversations";
-import type { SubagentType } from "@/features/conversations";
+import type { SubagentType, Message } from "@/features/conversations";
 import { useWorkspaceStore } from "@/features/workspaces";
+import {
+    bumpRestoreEpoch,
+    setDraft,
+    type DraftSlot,
+    type DraftSnapshot
+} from "@/features/chat-drafts";
+
+/**
+ * Build a Tiptap-compatible draft snapshot from a plain-text user prompt.
+ * Used by the early-stop UX to push a discarded user message back into
+ * the chat input without mention metadata (the in-memory user row only
+ * carries the rendered plain text — mention nodes are server-side only
+ * by the time the message is dispatched). Returns `null` for an empty
+ * string so the caller can avoid writing a no-op draft.
+ */
+function buildPlainTextDraft(content: string): DraftSnapshot | null {
+    if (content.length === 0) return null;
+    return {
+        docJSON: {
+            type: "doc",
+            content: [
+                {
+                    type: "paragraph",
+                    content: [{ type: "text", text: content }]
+                }
+            ]
+        },
+        plainText: content,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+/**
+ * Decide whether the in-flight assistant turn is still in the
+ * "Planning next moves" placeholder state — i.e. the model has not
+ * emitted any reasoning, tool call, or text delta yet. Mirrors the
+ * `showStreamingPlaceholder` check in `MessageBubble` so a Stop press
+ * during that window can be promoted to an early-stop discard.
+ */
+function isAssistantPlaceholderTurn(message: Message | undefined): boolean {
+    if (!message) return false;
+    if (message.role !== "assistant") return false;
+    if (!message.isStreaming) return false;
+    if (message.content.length > 0) return false;
+    if ((message.tool_invocations?.length ?? 0) > 0) return false;
+    if ((message.reasoning?.length ?? 0) > 0) return false;
+    if (
+        message.reasoning_parts?.some((part) => part.text.length > 0) ?? false
+    ) {
+        return false;
+    }
+    return true;
+}
 
 const SUBAGENT_TYPE_LABEL: Record<SubagentType, string> = {
     generalPurpose: "generalPurpose",
@@ -146,6 +199,8 @@ export function ConversationPane({
         loadSubagents
     ]);
 
+    const navigate = useNavigate();
+
     const handleSend = (
         content: string,
         attachmentIds: string[],
@@ -177,7 +232,74 @@ export function ConversationPane({
     };
 
     const handleStop = () => {
-        void stopGeneration(conversationId);
+        // Snapshot a few things up-front so we don't depend on stale state
+        // after the async stop call resolves (the conversation row may
+        // be gone by then for the brand-new-conversation path).
+        const messages = conversation?.messages ?? [];
+        const lastAssistant = [...messages]
+            .reverse()
+            .find((m) => m.role === "assistant");
+        const isEarlyStop = isAssistantPlaceholderTurn(lastAssistant);
+
+        // Latest user row regardless of role ordering — for early stops
+        // this is the row the server will discard. It's normally the
+        // last user message before the streaming assistant placeholder.
+        const triggeringUserMessage = isEarlyStop
+            ? [...messages].reverse().find((m) => m.role === "user")
+            : null;
+        const restoreContent = triggeringUserMessage?.content ?? "";
+        const workspaceForStop = activeWorkspaceId;
+
+        void (async () => {
+            const result = await stopGeneration(
+                conversationId,
+                isEarlyStop ? { discardUserMessage: true } : undefined
+            );
+
+            // The non-early-stop path keeps the user/assistant rows in
+            // place — nothing else to do beyond letting the SSE `abort`
+            // event handler finalize the assistant footer.
+            if (!isEarlyStop) return;
+
+            // Restore the discarded prompt so the user can edit and
+            // resend. Empty content is a degenerate case (the server
+            // wouldn't have created a meaningful turn anyway) — skip
+            // the draft write so we don't clobber whatever's already
+            // sitting in the slot the user navigates to next.
+            const snapshot = buildPlainTextDraft(restoreContent);
+
+            if (result.conversationDeleted) {
+                // Brand-new conversation, no prior turns: the server
+                // tore the whole conversation down. Stash the prompt
+                // on the home slot for the workspace we came from and
+                // navigate there — the home page's `ChatInput` mounts
+                // fresh against the home slot key, so its slot-change
+                // hydrate will pick up the draft on first paint
+                // without needing an epoch bump.
+                if (snapshot && workspaceForStop) {
+                    setDraft(
+                        { kind: "home", workspaceId: workspaceForStop },
+                        snapshot
+                    );
+                }
+                void navigate({ to: "/" });
+                return;
+            }
+
+            // Conversation lives on — restore the prompt into THIS
+            // conversation's input. The slot key hasn't changed (we're
+            // still on the same conversation), so we have to bump the
+            // restore epoch to nudge the mounted `ChatInput` into
+            // re-hydrating from the draft we just wrote.
+            const slot: DraftSlot = {
+                kind: "conversation",
+                conversationId
+            };
+            if (snapshot) {
+                setDraft(slot, snapshot);
+                bumpRestoreEpoch(slot);
+            }
+        })();
     };
 
     const isSubagent = Boolean(conversation?.parent_conversation_id);
