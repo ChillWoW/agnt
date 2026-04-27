@@ -14,7 +14,6 @@ import {
     ArrowCounterClockwiseIcon,
     PencilSimpleIcon,
     PlusIcon,
-    DotsThreeIcon,
     XIcon,
     MinusIcon,
     ShieldWarningIcon,
@@ -22,7 +21,6 @@ import {
 } from "@phosphor-icons/react";
 import {
     ContextMenu,
-    Menu,
     Tooltip,
     Modal,
     ModalContent,
@@ -660,107 +658,120 @@ function WorkspaceRow({
             {isDropBefore && (
                 <div className="h-0.5 rounded-full bg-dark-400 mx-1 mb-0.5" />
             )}
-            <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
-                <button
-                    onClick={() => onToggleExpanded(ws.id)}
-                    className={cn(
-                        "flex items-center gap-1 min-w-0 flex-1 text-left",
-                        isActive
-                            ? "text-dark-50"
-                            : "text-dark-200 hover:text-dark-50"
-                    )}
-                >
-                    <CaretRightIcon
-                        className={cn(
-                            "size-2.5 shrink-0 transition-transform duration-100",
-                            isExpanded && "rotate-90"
-                        )}
-                        weight="bold"
-                    />
-                    <span className="truncate font-medium">{ws.name}</span>
-                </button>
-
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <Tooltip content="New Agent" side="top">
+            <ContextMenu>
+                <ContextMenu.Trigger>
+                    <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
                         <button
-                            onClick={() => {
-                                void onSetActive(ws.id);
-                                void navigate({ to: "/" });
-                            }}
-                            className="text-dark-200 hover:text-dark-100"
+                            onClick={() => onToggleExpanded(ws.id)}
+                            className={cn(
+                                "flex items-center gap-1 min-w-0 flex-1 text-left",
+                                isActive
+                                    ? "text-dark-50"
+                                    : "text-dark-200 hover:text-dark-50"
+                            )}
                         >
-                            <PlusIcon className="size-3.5" />
-                        </button>
-                    </Tooltip>
-
-                    <Popover open={archivedOpen} onOpenChange={setArchivedOpen}>
-                        <Menu>
-                            <Menu.Trigger className="text-dark-200 hover:text-dark-100">
-                                <DotsThreeIcon
-                                    className="size-3.5"
-                                    weight="bold"
-                                />
-                            </Menu.Trigger>
-                            <Menu.Content side="bottom" align="start">
-                                <Menu.Item
-                                    icon={<ArchiveIcon className="size-3.5" />}
-                                    onClick={() => {
-                                        void useConversationStore
-                                            .getState()
-                                            .loadArchivedConversations(ws.id);
-                                        setArchivedOpen(true);
-                                    }}
-                                >
-                                    View archived
-                                </Menu.Item>
-                                <Menu.Item
-                                    destructive
-                                    icon={<XIcon className="size-3.5" />}
-                                    onClick={() => onRemove(ws.id)}
-                                >
-                                    Close workspace
-                                </Menu.Item>
-                            </Menu.Content>
-                        </Menu>
-
-                        {/* Zero-size anchor next to the dot-menu so the
-                            popover positions to the right of the row. */}
-                        <PopoverTrigger
-                            tabIndex={-1}
-                            aria-hidden
-                            render={<span />}
-                            style={{
-                                width: 0,
-                                height: 0,
-                                opacity: 0,
-                                pointerEvents: "none",
-                                display: "inline-block",
-                                overflow: "hidden"
-                            }}
-                        />
-                        <PopoverContent
-                            side="right"
-                            align="start"
-                            sideOffset={8}
-                            className="w-72 p-1.5"
-                        >
-                            <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1.5">
-                                <p className="truncate text-[11px] font-semibold uppercase text-dark-300">
-                                    Archived in {ws.name}
-                                </p>
-                                <span className="shrink-0 text-[10px] text-dark-300">
-                                    {archived.length}
-                                </span>
-                            </div>
-                            <WorkspaceArchivedList
-                                workspaceId={ws.id}
-                                onPickDelete={(id) => setPendingDeleteId(id)}
-                                onClose={() => setArchivedOpen(false)}
+                            <CaretRightIcon
+                                className={cn(
+                                    "size-2.5 shrink-0 transition-transform duration-100",
+                                    isExpanded && "rotate-90"
+                                )}
+                                weight="bold"
                             />
-                        </PopoverContent>
-                    </Popover>
-                </div>
-            </div>
+                            <span className="truncate font-medium">
+                                {ws.name}
+                            </span>
+                        </button>
+
+                        <Popover
+                            open={archivedOpen}
+                            onOpenChange={setArchivedOpen}
+                        >
+                            <div className="flex items-center gap-1 shrink-0">
+                                <Tooltip content="New Agent" side="top">
+                                    <button
+                                        onClick={() => {
+                                            void onSetActive(ws.id);
+                                            void navigate({ to: "/" });
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-dark-200 hover:text-dark-100"
+                                    >
+                                        <PlusIcon className="size-3.5" />
+                                    </button>
+                                </Tooltip>
+
+                                {/* Zero-size anchor in the row's right edge so
+                                    the archived popover (opened via the
+                                    context menu) positions next to the row. */}
+                                <PopoverTrigger
+                                    tabIndex={-1}
+                                    aria-hidden
+                                    render={<span />}
+                                    style={{
+                                        width: 0,
+                                        height: 0,
+                                        opacity: 0,
+                                        pointerEvents: "none",
+                                        display: "inline-block",
+                                        overflow: "hidden"
+                                    }}
+                                />
+                            </div>
+                            <PopoverContent
+                                side="right"
+                                align="start"
+                                sideOffset={8}
+                                className="w-72 p-1.5"
+                            >
+                                <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1.5">
+                                    <p className="truncate text-[11px] font-semibold uppercase text-dark-300">
+                                        Archived in {ws.name}
+                                    </p>
+                                    <span className="shrink-0 text-[10px] text-dark-300">
+                                        {archived.length}
+                                    </span>
+                                </div>
+                                <WorkspaceArchivedList
+                                    workspaceId={ws.id}
+                                    onPickDelete={(id) =>
+                                        setPendingDeleteId(id)
+                                    }
+                                    onClose={() => setArchivedOpen(false)}
+                                />
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                </ContextMenu.Trigger>
+                <ContextMenu.Content>
+                    <ContextMenu.Item
+                        icon={<PlusIcon className="size-3" />}
+                        onClick={() => {
+                            void onSetActive(ws.id);
+                            void navigate({ to: "/" });
+                        }}
+                    >
+                        New agent
+                    </ContextMenu.Item>
+                    <ContextMenu.Item
+                        icon={<ArchiveIcon className="size-3" />}
+                        onClick={() => {
+                            void useConversationStore
+                                .getState()
+                                .loadArchivedConversations(ws.id);
+                            setArchivedOpen(true);
+                        }}
+                    >
+                        View archived
+                    </ContextMenu.Item>
+                    <ContextMenu.Separator />
+                    <ContextMenu.Item
+                        destructive
+                        icon={<XIcon className="size-3" />}
+                        onClick={() => onRemove(ws.id)}
+                    >
+                        Close workspace
+                    </ContextMenu.Item>
+                </ContextMenu.Content>
+            </ContextMenu>
 
             {isExpanded && (
                 <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
