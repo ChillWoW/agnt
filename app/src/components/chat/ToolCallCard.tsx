@@ -269,6 +269,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+// Hard cap on detail-string length so a long user pattern (e.g. a sprawling
+// glob brace expansion) can't push the tool-call row across the chat column.
+// CSS `truncate` on the inner span isn't enough on its own because the button
+// row has no width constraint.
+const TOOL_DETAIL_MAX_CHARS = 80;
+
+function clampDetail(
+    text: string,
+    maxChars: number = TOOL_DETAIL_MAX_CHARS
+): string {
+    if (text.length <= maxChars) {
+        return text;
+    }
+    return `${text.slice(0, maxChars - 1)}…`;
+}
+
 function normalizePath(path: string): string {
     return path.replace(/\\/g, "/");
 }
@@ -456,9 +472,9 @@ function formatGlobDetail(
 
     if (pattern && typeof count === "number") {
         const suffix = output?.truncated ? "+" : "";
-        return `${pattern} · ${count}${suffix}`;
+        return `${clampDetail(pattern)} · ${count}${suffix}`;
     }
-    return pattern;
+    return pattern ? clampDetail(pattern) : pattern;
 }
 
 function GlobBlock({ invocation }: { invocation: ToolInvocation }) {
@@ -571,9 +587,9 @@ function formatGrepDetail(
                   : typeof files === "number" && files > 0
                     ? ` in ${files} files`
                     : "";
-        return `${pattern} · ${count}${suffix}${tail}`;
+        return `${clampDetail(pattern)} · ${count}${suffix}${tail}`;
     }
-    return pattern;
+    return pattern ? clampDetail(pattern) : pattern;
 }
 
 function GrepBlock({ invocation }: { invocation: ToolInvocation }) {
