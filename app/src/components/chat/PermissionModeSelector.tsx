@@ -48,7 +48,7 @@ export function PermissionModeSelector({
         id: "models.permission-mode.cycle",
         label: "Cycle permission mode",
         description: "Toggle between Ask and Bypass permission modes",
-        defaultCombo: "Ctrl+Shift+P",
+        defaultCombo: "Alt+A",
         enabled: isPaneFocused,
         handler: () => {
             const next = mode === "ask" ? "bypass" : "ask";
