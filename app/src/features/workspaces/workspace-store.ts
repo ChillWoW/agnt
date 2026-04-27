@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import type { Workspace } from "./workspace-types";
 import * as workspaceApi from "./workspace-api";
-import { useSplitPaneStore } from "@/features/split-panes";
+// Import directly from the store module rather than the package index to
+// avoid a circular module load: workspaces/index → workspace-store →
+// split-panes/index → pane-scope → workspaces/index.
+import { useSplitPaneStore } from "@/features/split-panes/split-pane-store";
 
 interface WorkspaceStoreState {
     workspaces: Workspace[];
@@ -45,9 +48,11 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
 
     remove: async (id: string) => {
         await workspaceApi.removeWorkspace(id);
-        // Drop any persisted split-pane layout for the removed workspace so
-        // we don't carry zombie layout state across re-adds.
-        useSplitPaneStore.getState().clearWorkspace(id);
+        // Drop any open split panes that belonged to the removed workspace
+        // so we don't carry orphan panes pointing at a workspace that's no
+        // longer reachable. (Other workspaces' panes are unaffected since
+        // the layout is global.)
+        useSplitPaneStore.getState().forgetWorkspace(id);
         await get().load();
     },
 

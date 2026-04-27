@@ -36,6 +36,7 @@ import type {
 import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations/conversation-store";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
+import { usePaneWorkspaceId } from "@/features/split-panes";
 import { PierreDiff } from "@/components/chat/PierreDiff";
 import {
     DiagnosticsInline,
@@ -402,12 +403,10 @@ function formatReadDetail(
 }
 
 function ReadFileBlock({ invocation }: { invocation: ToolInvocation }) {
+    const paneWorkspaceId = usePaneWorkspaceId();
     const workspacePath = useWorkspaceStore((state) => {
-        const activeWorkspace = state.workspaces.find(
-            (workspace) => workspace.id === state.activeWorkspaceId
-        );
-
-        return activeWorkspace?.path ?? null;
+        const target = state.workspaces.find((w) => w.id === paneWorkspaceId);
+        return target?.path ?? null;
     });
     const inputPath =
         isRecord(invocation.input) &&
@@ -1171,9 +1170,7 @@ function formatImageGenDetail(
 }
 
 function ImageGenBlock({ invocation }: { invocation: ToolInvocation }) {
-    const activeWorkspaceId = useWorkspaceStore(
-        (state) => state.activeWorkspaceId
-    );
+    const paneWorkspaceId = usePaneWorkspaceId();
     const input = isRecord(invocation.input)
         ? (invocation.input as ImageGenInputShape)
         : undefined;
@@ -1194,9 +1191,9 @@ function ImageGenBlock({ invocation }: { invocation: ToolInvocation }) {
         output?.ok === true &&
         typeof output.attachmentId === "string" &&
         output.attachmentId.length > 0 &&
-        activeWorkspaceId
+        paneWorkspaceId
             ? resolveAttachmentContentUrl(
-                  activeWorkspaceId,
+                  paneWorkspaceId,
                   output.attachmentId
               )
             : null;
@@ -1829,11 +1826,10 @@ function formatWriteDetail(
 }
 
 function WriteBlock({ invocation }: { invocation: ToolInvocation }) {
+    const paneWorkspaceId = usePaneWorkspaceId();
     const workspacePath = useWorkspaceStore((state) => {
-        const active = state.workspaces.find(
-            (w) => w.id === state.activeWorkspaceId
-        );
-        return active?.path ?? null;
+        const target = state.workspaces.find((w) => w.id === paneWorkspaceId);
+        return target?.path ?? null;
     });
 
     const input = isRecord(invocation.input)
@@ -1977,11 +1973,10 @@ function formatStrReplaceDetail(
 }
 
 function StrReplaceBlock({ invocation }: { invocation: ToolInvocation }) {
+    const paneWorkspaceId = usePaneWorkspaceId();
     const workspacePath = useWorkspaceStore((state) => {
-        const active = state.workspaces.find(
-            (w) => w.id === state.activeWorkspaceId
-        );
-        return active?.path ?? null;
+        const target = state.workspaces.find((w) => w.id === paneWorkspaceId);
+        return target?.path ?? null;
     });
 
     const input = isRecord(invocation.input)
@@ -2299,11 +2294,10 @@ function formatApplyPatchDetail(
 }
 
 function ApplyPatchBlock({ invocation }: { invocation: ToolInvocation }) {
+    const paneWorkspaceId = usePaneWorkspaceId();
     const workspacePath = useWorkspaceStore((state) => {
-        const active = state.workspaces.find(
-            (w) => w.id === state.activeWorkspaceId
-        );
-        return active?.path ?? null;
+        const target = state.workspaces.find((w) => w.id === paneWorkspaceId);
+        return target?.path ?? null;
     });
 
     const input = isRecord(invocation.input)

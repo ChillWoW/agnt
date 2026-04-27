@@ -36,6 +36,16 @@ interface ConversationStoreState {
     conversationsByWorkspace: Record<string, Conversation[]>;
     archivedByWorkspace: Record<string, Conversation[]>;
     conversationsById: Record<string, ConversationWithMessages>;
+    /**
+     * Map of conversation id → owning workspace id. Populated by every
+     * load/create code path that knows the workspace. Used by routes and
+     * panes that render a conversation without an explicit workspace
+     * context (e.g. `/conversations/$conversationId`) so they can resolve
+     * the per-workspace SQLite the conversation lives in even when the
+     * globally "active" workspace is something else (split panes can
+     * show conversations from multiple workspaces simultaneously).
+     */
+    workspaceIdByConversationId: Record<string, string>;
     activeConversationId: string | null;
     isLoadingList: boolean;
     loadingConversationIds: Record<string, true>;
@@ -65,6 +75,16 @@ interface ConversationStoreState {
     compactingByConversationId: Record<string, true>;
 
     setActiveConversation: (conversationId: string | null) => void;
+    /**
+     * Pre-populate the workspaceId for a conversation id. Called by UI
+     * paths (sidebar click, drag-drop) before they navigate or open a
+     * pane, so the route/pane can resolve the right workspace
+     * synchronously without waiting for `loadConversation` to complete.
+     */
+    setConversationWorkspace: (
+        conversationId: string,
+        workspaceId: string
+    ) => void;
     markConversationRead: (conversationId: string) => void;
     stopGeneration: (
         conversationId?: string,
@@ -1319,6 +1339,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     state.conversationsById,
                     conversationId
                 ),
+                workspaceIdByConversationId: omitKey(
+                    state.workspaceIdByConversationId,
+                    conversationId
+                ),
                 streamControllersById: omitKey(
                     state.streamControllersById,
                     conversationId
@@ -1443,14 +1467,31 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     set((state) => {
                         const existing =
                             state.subagentsByParentId[parentId] ?? [];
+                        const parentWorkspace =
+                            state.workspaceIdByConversationId[parentId] ??
+                            workspaceId;
+                        const ownerPatch =
+                            state.workspaceIdByConversationId[entry.id] ===
+                            parentWorkspace
+                                ? state.workspaceIdByConversationId
+                                : {
+                                      ...state.workspaceIdByConversationId,
+                                      [entry.id]: parentWorkspace
+                                  };
                         if (existing.some((c) => c.id === entry.id)) {
-                            return {};
+                            return ownerPatch ===
+                                state.workspaceIdByConversationId
+                                ? {}
+                                : {
+                                      workspaceIdByConversationId: ownerPatch
+                                  };
                         }
                         return {
                             subagentsByParentId: {
                                 ...state.subagentsByParentId,
                                 [parentId]: [...existing, entry]
-                            }
+                            },
+                            workspaceIdByConversationId: ownerPatch
                         };
                     });
                     // Link the spawned subagent to its task tool invocation
@@ -1563,6 +1604,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
         conversationsByWorkspace: {},
         archivedByWorkspace: {},
         conversationsById: {},
+        workspaceIdByConversationId: {},
         activeConversationId: null,
         isLoadingList: false,
         loadingConversationIds: {},
@@ -1634,6 +1676,26 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     );
                 }
                 return patch;
+            });
+        },
+
+        setConversationWorkspace: (
+            conversationId: string,
+            workspaceId: string
+        ) => {
+            set((state) => {
+                if (
+                    state.workspaceIdByConversationId[conversationId] ===
+                    workspaceId
+                ) {
+                    return {};
+                }
+                return {
+                    workspaceIdByConversationId: {
+                        ...state.workspaceIdByConversationId,
+                        [conversationId]: workspaceId
+                    }
+                };
             });
         },
 
@@ -1765,12 +1827,21 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             try {
                 const conversations =
                     await conversationApi.fetchConversations(workspaceId);
-                set((state) => ({
-                    conversationsByWorkspace: {
-                        ...state.conversationsByWorkspace,
-                        [workspaceId]: conversations
+                set((state) => {
+                    const nextOwners = {
+                        ...state.workspaceIdByConversationId
+                    };
+                    for (const c of conversations) {
+                        nextOwners[c.id] = workspaceId;
                     }
-                }));
+                    return {
+                        conversationsByWorkspace: {
+                            ...state.conversationsByWorkspace,
+                            [workspaceId]: conversations
+                        },
+                        workspaceIdByConversationId: nextOwners
+                    };
+                });
             } finally {
                 if (!hadCached) set({ isLoadingList: false });
             }
@@ -1782,12 +1853,21 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     await conversationApi.fetchArchivedConversations(
                         workspaceId
                     );
-                set((state) => ({
-                    archivedByWorkspace: {
-                        ...state.archivedByWorkspace,
-                        [workspaceId]: conversations
+                set((state) => {
+                    const nextOwners = {
+                        ...state.workspaceIdByConversationId
+                    };
+                    for (const c of conversations) {
+                        nextOwners[c.id] = workspaceId;
                     }
-                }));
+                    return {
+                        archivedByWorkspace: {
+                            ...state.archivedByWorkspace,
+                            [workspaceId]: conversations
+                        },
+                        workspaceIdByConversationId: nextOwners
+                    };
+                });
             } catch (error) {
                 console.error(
                     "[conversation-store] loadArchivedConversations failed",
@@ -1805,12 +1885,22 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     workspaceId,
                     parentConversationId
                 );
-                set((state) => ({
-                    subagentsByParentId: {
-                        ...state.subagentsByParentId,
-                        [parentConversationId]: subagents
+                set((state) => {
+                    const nextOwners = {
+                        ...state.workspaceIdByConversationId
+                    };
+                    nextOwners[parentConversationId] = workspaceId;
+                    for (const s of subagents) {
+                        nextOwners[s.id] = workspaceId;
                     }
-                }));
+                    return {
+                        subagentsByParentId: {
+                            ...state.subagentsByParentId,
+                            [parentConversationId]: subagents
+                        },
+                        workspaceIdByConversationId: nextOwners
+                    };
+                });
             } catch (error) {
                 console.error("[conversation-store] loadSubagents failed", error);
             }
@@ -1954,7 +2044,11 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                         loadingConversationIds: omitKey(
                             s.loadingConversationIds,
                             conversationId
-                        )
+                        ),
+                        workspaceIdByConversationId: {
+                            ...s.workspaceIdByConversationId,
+                            [conversationId]: workspaceId
+                        }
                     };
 
                     // Don't clobber a stream that populated state while
@@ -2006,6 +2100,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     conversationsByWorkspace: {
                         ...state.conversationsByWorkspace,
                         [workspaceId]: [conversation, ...existing]
+                    },
+                    workspaceIdByConversationId: {
+                        ...state.workspaceIdByConversationId,
+                        [conversation.id]: workspaceId
                     }
                 };
             });
@@ -2285,6 +2383,10 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     },
                     conversationsById: omitKey(
                         state.conversationsById,
+                        conversationId
+                    ),
+                    workspaceIdByConversationId: omitKey(
+                        state.workspaceIdByConversationId,
                         conversationId
                     ),
                     streamControllersById: omitKey(

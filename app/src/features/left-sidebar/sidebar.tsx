@@ -45,12 +45,6 @@ import {
     SPLIT_PANE_DRAG_MIME,
     useSplitPaneStore
 } from "@/features/split-panes";
-import type { SecondaryPane } from "@/features/split-panes";
-
-// Stable empty array reference for the split-pane selector — returning a
-// fresh `[]` on every render would tear into a `useSyncExternalStore`
-// infinite loop.
-const EMPTY_PANES: SecondaryPane[] = [];
 import type { ElementType } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AccountButton } from "./account-button";
@@ -316,6 +310,9 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const activeConversationId = useConversationStore(
         (s) => s.activeConversationId
     );
+    const setConversationWorkspace = useConversationStore(
+        (s) => s.setConversationWorkspace
+    );
     const unreadConversationIds = useConversationStore(
         (s) => s.unreadConversationIds
     );
@@ -329,25 +326,21 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     // ── Split-pane integration ───────────────────────────────────────────
     //
-    // When this workspace is the active one, the sidebar reflects every
-    // open pane (primary URL conversation + secondary panes from the split
-    // store) and routes click/Split actions through the split store. When
-    // the workspace is *not* the active one, we fall back to plain
-    // navigation: a click switches workspace and conversation.
+    // Split panes are GLOBAL — each pane carries its own workspaceId, so
+    // panes from multiple workspaces can coexist side-by-side. Click and
+    // Split actions therefore work on every workspace's row regardless of
+    // which workspace is currently "active"; the focused pane is the
+    // routing target either way.
+    //
+    // Active workspace is still relevant for some UX bits (the file tree
+    // / terminals follow it, the home screen creates new agents inside
+    // it), so we still update it on cross-workspace open clicks below —
+    // but the split layout itself no longer depends on it.
     const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
     const setActiveWorkspace = useWorkspaceStore((s) => s.setActive);
-    const isActiveWorkspace = activeWorkspaceId === workspaceId;
 
-    const extraPanes = useSplitPaneStore((s) =>
-        isActiveWorkspace
-            ? (s.extraPanesByWorkspace[workspaceId] ?? EMPTY_PANES)
-            : EMPTY_PANES
-    );
-    const focusedPaneIndex = useSplitPaneStore((s) =>
-        isActiveWorkspace
-            ? (s.focusedPaneIndexByWorkspace[workspaceId] ?? 0)
-            : 0
-    );
+    const extraPanes = useSplitPaneStore((s) => s.extraPanes);
+    const focusedPaneIndex = useSplitPaneStore((s) => s.focusedPaneIndex);
     const replaceSecondaryConversation = useSplitPaneStore(
         (s) => s.replaceSecondaryConversation
     );
@@ -356,32 +349,50 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     );
     const addPane = useSplitPaneStore((s) => s.addPane);
 
-    const totalPanes = isActiveWorkspace ? extraPanes.length + 1 : 1;
-    const splitFull = isActiveWorkspace && totalPanes >= MAX_PANES;
+    const totalPanes = extraPanes.length + 1;
+    const splitFull = totalPanes >= MAX_PANES;
 
-    // Convs currently rendered in any pane of THIS workspace. The primary
-    // pane's conversation is whatever the URL points to, mirrored into
-    // `activeConversationId` by the route effect. Secondary panes come
-    // from the split store.
+    // Conversations from THIS workspace currently rendered in any pane.
+    // The primary pane's conversation is whatever the URL points to,
+    // mirrored into `activeConversationId` by the route effect — it
+    // belongs to this workspace iff the route resolved against this
+    // workspace (route uses `workspaceIdByConversationId` so cross-
+    // workspace navigations still resolve correctly). Secondary panes
+    // come from the global split store and are filtered by workspace
+    // here so each sidebar group only highlights its own rows.
     const openPaneConvIds = useMemo(() => {
-        if (!isActiveWorkspace) {
-            return new Set<string>(
-                activeConversationId ? [activeConversationId] : []
-            );
-        }
         const ids = new Set<string>();
-        if (activeConversationId) ids.add(activeConversationId);
-        for (const p of extraPanes) ids.add(p.conversationId);
+        if (
+            activeConversationId &&
+            activeWorkspaceId === workspaceId
+        ) {
+            ids.add(activeConversationId);
+        }
+        for (const p of extraPanes) {
+            if (p.workspaceId === workspaceId) {
+                ids.add(p.conversationId);
+            }
+        }
         return ids;
-    }, [isActiveWorkspace, activeConversationId, extraPanes]);
+    }, [activeConversationId, activeWorkspaceId, workspaceId, extraPanes]);
 
     const focusedPaneConvId = useMemo(() => {
-        if (!isActiveWorkspace) return activeConversationId;
-        if (focusedPaneIndex === 0) return activeConversationId ?? null;
+        if (focusedPaneIndex === 0) {
+            // The primary pane is URL-bound; only show as focused on
+            // this workspace if the active conversation actually
+            // belongs here.
+            return activeWorkspaceId === workspaceId
+                ? (activeConversationId ?? null)
+                : null;
+        }
         const extra = extraPanes[focusedPaneIndex - 1];
-        return extra?.conversationId ?? null;
+        if (!extra) return null;
+        return extra.workspaceId === workspaceId
+            ? extra.conversationId
+            : null;
     }, [
-        isActiveWorkspace,
+        activeWorkspaceId,
+        workspaceId,
         activeConversationId,
         extraPanes,
         focusedPaneIndex
@@ -389,28 +400,24 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     const handleOpen = useCallback(
         (conversationId: string) => {
-            // Cross-workspace click: switch the active workspace first,
-            // then navigate. Conversations live in per-workspace SQLite
-            // DBs, so the route's `loadConversation(activeWorkspaceId,
-            // conversationId)` would 404 ("Conversation not found") if
-            // we navigated while `activeWorkspaceId` still pointed at
-            // the previously active workspace. `setActive` updates the
-            // local store optimistically, so by the time the route
-            // mounts the workspace id matches the conversation's owner.
-            //
-            // We don't try to preserve "which pane gets replaced"
-            // across workspace switches — that gets confusing fast.
-            if (!isActiveWorkspace) {
-                void setActiveWorkspace(workspaceId);
-                void navigate({
-                    to: "/conversations/$conversationId",
-                    params: { conversationId }
-                });
-                return;
-            }
-            // Replace the focused pane: primary pane → navigate;
-            // secondary pane → store update.
+            // Replace the focused pane with the clicked conversation.
+            // The pane carries its own `workspaceId` so cross-workspace
+            // replacements work without touching the active workspace.
             if (focusedPaneIndex === 0) {
+                // Primary pane is URL-bound. Pre-populate the
+                // conversationId → workspaceId map so the route resolves
+                // against this conversation's owning workspace
+                // synchronously, even if the active workspace is
+                // something else.
+                setConversationWorkspace(conversationId, workspaceId);
+                // Still flip the active workspace on cross-workspace
+                // primary opens — the right sidebar (terminals / files)
+                // and home screen track the active workspace, and a
+                // primary-pane click reads as "switch to this
+                // workspace" in the user's mental model.
+                if (activeWorkspaceId !== workspaceId) {
+                    void setActiveWorkspace(workspaceId);
+                }
                 void navigate({
                     to: "/conversations/$conversationId",
                     params: { conversationId }
@@ -418,18 +425,19 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                 return;
             }
             replaceSecondaryConversation(
-                workspaceId,
                 focusedPaneIndex,
+                workspaceId,
                 conversationId
             );
-            setFocusedPaneIndex(workspaceId, focusedPaneIndex);
+            setFocusedPaneIndex(focusedPaneIndex);
         },
         [
-            isActiveWorkspace,
+            activeWorkspaceId,
             focusedPaneIndex,
             navigate,
             replaceSecondaryConversation,
             setActiveWorkspace,
+            setConversationWorkspace,
             setFocusedPaneIndex,
             workspaceId
         ]
@@ -437,10 +445,9 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
 
     const handleSplit = useCallback(
         (conversationId: string) => {
-            if (!isActiveWorkspace) return;
             addPane(workspaceId, conversationId);
         },
-        [isActiveWorkspace, addPane, workspaceId]
+        [addPane, workspaceId]
     );
 
     useEffect(() => {
@@ -455,9 +462,10 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     conv={conv}
                     workspaceId={workspaceId}
                     isActive={openPaneConvIds.has(conv.id)}
-                    isFocusedPane={
-                        isActiveWorkspace && focusedPaneConvId === conv.id
-                    }
+                    // `focusedPaneConvId` is already null when the
+                    // focused pane belongs to a different workspace, so
+                    // a simple equality check is enough.
+                    isFocusedPane={focusedPaneConvId === conv.id}
                     isUnread={Boolean(unreadConversationIds[conv.id])}
                     isStreaming={Boolean(streamingConversationIds[conv.id])}
                     isPendingPermission={
@@ -540,9 +548,15 @@ function WorkspaceArchivedList({
 
     // Same per-workspace SQLite caveat as the live conversation list:
     // navigating to a conversation owned by a non-active workspace
-    // would 404 against the previously active workspace's DB. Switch
-    // first, then navigate.
+    // would 404 against the previously active workspace's DB. Pre-
+    // populate the conversation→workspace map (so the route resolves
+    // against the right workspace immediately), then flip the active
+    // workspace so the rest of the app (file tree / terminals / home)
+    // follows.
     const openArchivedConversation = (conversationId: string) => {
+        useConversationStore
+            .getState()
+            .setConversationWorkspace(conversationId, workspaceId);
         if (activeWorkspaceId !== workspaceId) {
             void setActiveWorkspace(workspaceId);
         }

@@ -5,7 +5,7 @@ import type {
     ToolInvocation
 } from "@/features/conversations/conversation-types";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
-import { useWorkspaceStore } from "@/features/workspaces";
+import { usePaneWorkspaceId } from "@/features/split-panes";
 import { StreamingPlaceholder } from "./StreamingPlaceholder";
 import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -97,7 +97,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     const hasToolCalls = toolInvocations.length > 0;
     const attachments = message.attachments ?? [];
     const hasAttachments = attachments.length > 0;
-    const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    // Resolve attachments against this pane's owning workspace rather
+    // than the globally-active one — split panes can render conversations
+    // from multiple workspaces side-by-side, and using the active
+    // workspace here would cross-wire attachment URLs.
+    const workspaceId = usePaneWorkspaceId();
 
     const reasoningParts: ReasoningPart[] = (() => {
         if (message.reasoning_parts && message.reasoning_parts.length > 0) {

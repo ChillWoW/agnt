@@ -50,7 +50,7 @@ Auth (`Authorization: Basic app:<password>`) is only enforced when `SERVER_PASSW
 - `features/` — feature modules (Zustand stores, hooks, API clients):
   - `server/` — server connection + health polling
   - `conversations/` — conversation store, SSE handling, types
-  - `split-panes/` — per-workspace split-pane layout (1–3 conversations side-by-side); persisted via Zustand `persist` to `agnt:split-panes:v1`
+  - `split-panes/` — global split-pane layout (1–3 conversations side-by-side, freely mixing workspaces); each `SecondaryPane` carries its own `workspaceId`. Persisted via Zustand `persist` to `agnt:split-panes:v2`. `pane-scope.tsx` exposes `usePaneScope` / `usePaneWorkspaceId` so deeply-nested chat components resolve the *pane's* workspace, not the globally-active one. The conversation-store keeps a `workspaceIdByConversationId` map so the URL-bound primary pane can find its owning workspace
   - `models/`, `permissions/`, `questions/`, `plans/`, `slash-commands/`, `chat-drafts/`, `mcp/`, `stats/`, `context/`, `notifications/`, `hotkeys/`, `right-sidebar/terminals/`
 - `components/chat/` — chat UI (`MessageBubble`, `ToolCallCard`, `PermissionCard`, `QuestionCard`, `ContextMeter`, etc.)
 - `components/settings/` — settings panels

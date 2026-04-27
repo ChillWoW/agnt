@@ -9,7 +9,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { ConversationPane } from "@/components/chat/ConversationPane";
 import { cn } from "@/lib/cn";
-import { useWorkspaceStore } from "@/features/workspaces";
+import { useConversationStore } from "@/features/conversations";
 import {
     MAX_PANES,
     MIN_PANE_WIDTH_PX,
@@ -18,12 +18,6 @@ import {
     readSplitPaneDragPayload,
     useSplitPaneStore
 } from "@/features/split-panes";
-import type { SecondaryPane } from "@/features/split-panes";
-
-// Stable empty references so selectors can't trigger infinite re-renders by
-// returning a fresh `[]`/`undefined` placeholder when a workspace has no
-// persisted layout yet.
-const EMPTY_EXTRAS: SecondaryPane[] = [];
 
 interface SplitPaneAreaProps {
     /**
@@ -46,26 +40,18 @@ type DragZone = "before" | "replace" | "after";
  * contains a `ConversationPane` (when on `/conversations/:id`) or some
  * other route content (e.g. `/` home) doesn't matter — secondary panes are
  * drawn alongside it either way.
+ *
+ * Layout is global, NOT per-workspace: each pane carries its own
+ * `workspaceId`, so the user can drag a conversation from workspace A
+ * next to one from workspace B and both stay visible regardless of which
+ * workspace is currently "active".
  */
 export function SplitPaneArea({ children }: SplitPaneAreaProps) {
-    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
     const navigate = useNavigate();
 
-    const extraPanes = useSplitPaneStore((s) =>
-        activeWorkspaceId
-            ? (s.extraPanesByWorkspace[activeWorkspaceId] ?? EMPTY_EXTRAS)
-            : EMPTY_EXTRAS
-    );
-    const widthFractions = useSplitPaneStore((s) =>
-        activeWorkspaceId
-            ? s.widthFractionsByWorkspace[activeWorkspaceId]
-            : undefined
-    );
-    const focusedPaneIndex = useSplitPaneStore((s) =>
-        activeWorkspaceId
-            ? (s.focusedPaneIndexByWorkspace[activeWorkspaceId] ?? 0)
-            : 0
-    );
+    const extraPanes = useSplitPaneStore((s) => s.extraPanes);
+    const widthFractions = useSplitPaneStore((s) => s.widthFractions);
+    const focusedPaneIndex = useSplitPaneStore((s) => s.focusedPaneIndex);
 
     const setFocusedPaneIndex = useSplitPaneStore(
         (s) => s.setFocusedPaneIndex
@@ -109,7 +95,7 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
 
     const handleResizeStart = useCallback(
         (handleIndex: number) => (e: React.PointerEvent<HTMLDivElement>) => {
-            if (!activeWorkspaceId || !containerRef.current) return;
+            if (!containerRef.current) return;
             e.preventDefault();
             // Capture on the element the React handlers are attached to so
             // subsequent pointermove/pointerup keep firing here even when
@@ -124,13 +110,13 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
             };
             setIsResizing(true);
         },
-        [activeWorkspaceId, effectiveFractions]
+        [effectiveFractions]
     );
 
     const handleResizeMove = useCallback(
         (e: React.PointerEvent<HTMLDivElement>) => {
             const drag = dragStateRef.current;
-            if (!drag || !activeWorkspaceId) return;
+            if (!drag) return;
             const deltaPx = e.clientX - drag.startX;
             const deltaFrac = deltaPx / drag.containerWidth;
 
@@ -158,9 +144,9 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
             next[left] = next[left]! + appliedDelta;
             next[right] = next[right]! - appliedDelta;
 
-            setWidthFractions(activeWorkspaceId, next);
+            setWidthFractions(next);
         },
-        [activeWorkspaceId, setWidthFractions]
+        [setWidthFractions]
     );
 
     const handleResizeEnd = useCallback(
@@ -185,7 +171,7 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
     // Only active while a split is actually visible; in single-pane mode
     // there's nothing to switch to and we don't want to swallow Alt+digit.
     useEffect(() => {
-        if (!activeWorkspaceId || !splitActive) return;
+        if (!splitActive) return;
         const onKeyDown = (e: KeyboardEvent) => {
             if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
             // `event.code` is layout-independent ("Digit1" .. "Digit9");
@@ -199,18 +185,12 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
             if (targetIndex >= totalPanes) return;
             e.preventDefault();
             if (focusedPaneIndex !== targetIndex) {
-                setFocusedPaneIndex(activeWorkspaceId, targetIndex);
+                setFocusedPaneIndex(targetIndex);
             }
         };
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, [
-        activeWorkspaceId,
-        splitActive,
-        totalPanes,
-        focusedPaneIndex,
-        setFocusedPaneIndex
-    ]);
+    }, [splitActive, totalPanes, focusedPaneIndex, setFocusedPaneIndex]);
 
     // ─── Drag-and-drop from sidebar ──────────────────────────────────────
     //
@@ -289,41 +269,45 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
                 setIsDragOver(false);
                 setHoverZone(null);
                 if (!payload) return;
-                if (
-                    !activeWorkspaceId ||
-                    payload.workspaceId !== activeWorkspaceId
-                ) {
-                    return;
-                }
 
                 if (zone === "replace") {
                     if (paneIndex === 0) {
                         // Replacing the primary means navigating the URL.
+                        // Pre-populate the conversation→workspace map so
+                        // the route's load uses the right per-workspace
+                        // SQLite even when the dragged conversation
+                        // belongs to a different workspace than the one
+                        // currently active.
+                        useConversationStore
+                            .getState()
+                            .setConversationWorkspace(
+                                payload.conversationId,
+                                payload.workspaceId
+                            );
                         void navigate({
                             to: "/conversations/$conversationId",
                             params: { conversationId: payload.conversationId }
                         });
-                        setFocusedPaneIndex(activeWorkspaceId, 0);
+                        setFocusedPaneIndex(0);
                         return;
                     }
                     replaceSecondaryConversation(
-                        activeWorkspaceId,
                         paneIndex,
+                        payload.workspaceId,
                         payload.conversationId
                     );
-                    setFocusedPaneIndex(activeWorkspaceId, paneIndex);
+                    setFocusedPaneIndex(paneIndex);
                     return;
                 }
 
                 insertPaneAt(
-                    activeWorkspaceId,
+                    payload.workspaceId,
                     payload.conversationId,
                     paneIndex,
                     zone
                 );
             },
         [
-            activeWorkspaceId,
             insertPaneAt,
             navigate,
             replaceSecondaryConversation,
@@ -343,15 +327,18 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
         node: ReactNode;
         index: number;
         conversationId: string | null;
+        workspaceId: string | null;
     }[] = [];
     panes.push({
         key: "primary",
         index: 0,
-        // We don't know the primary pane's conversationId at this layer
-        // (the URL determines it inside `children`), so we pass `null`.
-        // The pane scope's `isFocused` flag is what gates hotkeys; the
-        // conversation id is purely informational.
+        // We don't know the primary pane's conversationId/workspaceId at
+        // this layer (the URL determines them inside `children`), so we
+        // pass `null` and let nested components fall back to the
+        // active-workspace selector. The pane scope's `isFocused` flag
+        // is what gates hotkeys; the ids are purely informational.
         conversationId: null,
+        workspaceId: null,
         node: children
     });
     extraPanes.forEach((p, i) => {
@@ -360,18 +347,18 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
             key: p.id,
             index: idx,
             conversationId: p.conversationId,
+            workspaceId: p.workspaceId,
             node: (
                 <ConversationPane
+                    workspaceId={p.workspaceId}
                     conversationId={p.conversationId}
                     isFocused={focusedPaneIndex === idx}
                     splitActive={splitActive}
                     onFocus={() => {
-                        if (!activeWorkspaceId) return;
-                        setFocusedPaneIndex(activeWorkspaceId, idx);
+                        setFocusedPaneIndex(idx);
                     }}
                     onClose={() => {
-                        if (!activeWorkspaceId) return;
-                        removeSecondaryPane(activeWorkspaceId, idx);
+                        removeSecondaryPane(idx);
                     }}
                 />
             )
@@ -411,12 +398,8 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
                                     : undefined
                             }}
                             onMouseDownCapture={() => {
-                                if (!activeWorkspaceId) return;
                                 if (focusedPaneIndex !== pane.index) {
-                                    setFocusedPaneIndex(
-                                        activeWorkspaceId,
-                                        pane.index
-                                    );
+                                    setFocusedPaneIndex(pane.index);
                                 }
                             }}
                         >
@@ -438,6 +421,7 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
                             <PaneScopeProvider
                                 isFocused={isFocused}
                                 conversationId={pane.conversationId}
+                                workspaceId={pane.workspaceId}
                                 paneIndex={pane.index}
                             >
                                 <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -445,7 +429,7 @@ export function SplitPaneArea({ children }: SplitPaneAreaProps) {
                                 </div>
                             </PaneScopeProvider>
 
-                            {isDragOver && activeWorkspaceId ? (
+                            {isDragOver ? (
                                 <DropZoneOverlay
                                     paneIndex={pane.index}
                                     canAddMore={canAddMore}

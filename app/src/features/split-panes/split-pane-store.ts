@@ -13,6 +13,13 @@ export const MIN_PANE_WIDTH_PX = 280;
 export interface SecondaryPane {
     /** Stable unique id for the pane (independent of conversation id). */
     id: string;
+    /**
+     * Workspace the conversation belongs to. Each pane carries its own
+     * workspace so multiple workspaces can render side-by-side at the
+     * same time — the layout no longer follows the globally "active"
+     * workspace.
+     */
+    workspaceId: string;
     /** Conversation rendered inside this pane. */
     conversationId: string;
 }
@@ -21,29 +28,29 @@ export type InsertPosition = "before" | "after";
 
 interface SplitPaneState {
     /**
-     * Per-workspace list of secondary panes (panes other than the URL-bound
-     * primary pane). Only the active workspace's entry is rendered at any
-     * given moment, but inactive workspaces' layouts are kept around so they
-     * are restored when the user switches back.
+     * Flat list of secondary panes (panes other than the URL-bound primary
+     * pane). Each pane carries its own `workspaceId`, so panes from
+     * different workspaces can coexist side-by-side. Layout is global —
+     * panes are NOT cleared / hidden when the user switches active
+     * workspaces.
      */
-    extraPanesByWorkspace: Record<string, SecondaryPane[]>;
+    extraPanes: SecondaryPane[];
     /**
-     * Width fractions for ALL panes in the workspace, in order
-     * `[primary, ...extras]`. Always sums to ~1. Length is `extras.length + 1`.
+     * Width fractions for ALL panes in order `[primary, ...extras]`.
+     * Always sums to ~1. Length is `extras.length + 1`.
      */
-    widthFractionsByWorkspace: Record<string, number[]>;
+    widthFractions: number[];
     /**
      * Index of the focused pane within `[primary, ...extras]`. 0 = primary,
-     * 1 = first secondary, etc. Defaults to 0.
+     * 1 = first secondary, etc.
      */
-    focusedPaneIndexByWorkspace: Record<string, number>;
+    focusedPaneIndex: number;
 
     /**
      * Insert a new pane next to the focused one (or at the end when the
      * focused pane is the primary one). Caps the total pane count at
      * `MAX_PANES`. Returns the resulting pane index, or `null` when capped /
-     * a no-op (e.g. the conversation is already in another pane on the same
-     * workspace).
+     * a no-op (e.g. the conversation is already shown in another pane).
      */
     addPane(
         workspaceId: string,
@@ -67,7 +74,7 @@ interface SplitPaneState {
      * Remove the secondary pane at the given index (1-based, since 0 is the
      * URL-bound primary). Width fractions are renormalized.
      */
-    removeSecondaryPane(workspaceId: string, paneIndex: number): void;
+    removeSecondaryPane(paneIndex: number): void;
 
     /**
      * Replace the conversation rendered by the pane at `paneIndex`. For
@@ -75,20 +82,21 @@ interface SplitPaneState {
      * to the URL — callers should navigate instead.
      */
     replaceSecondaryConversation(
-        workspaceId: string,
         paneIndex: number,
+        workspaceId: string,
         conversationId: string
     ): void;
 
-    setFocusedPaneIndex(workspaceId: string, idx: number): void;
-    setWidthFractions(workspaceId: string, fractions: number[]): void;
+    setFocusedPaneIndex(idx: number): void;
+    setWidthFractions(fractions: number[]): void;
 
-    /** Drop a conversation from every pane in every workspace. Used as a
-     * cleanup when a conversation is archived/deleted. */
+    /** Drop a conversation from every pane. Used as a cleanup when a
+     * conversation is archived/deleted. */
     forgetConversation(conversationId: string): void;
 
-    /** Clear all panes for a workspace (e.g. when the workspace is closed). */
-    clearWorkspace(workspaceId: string): void;
+    /** Drop every pane that belongs to a workspace (e.g. when the
+     * workspace is closed/removed). */
+    forgetWorkspace(workspaceId: string): void;
 }
 
 function evenFractions(count: number): number[] {
@@ -160,33 +168,35 @@ function makePaneId(): string {
 export const useSplitPaneStore = create<SplitPaneState>()(
     persist(
         (set, get) => ({
-            extraPanesByWorkspace: {},
-            widthFractionsByWorkspace: {},
-            focusedPaneIndexByWorkspace: {},
+            extraPanes: [],
+            widthFractions: [1],
+            focusedPaneIndex: 0,
 
             addPane: (workspaceId, conversationId, opts) => {
                 const state = get();
-                const extras = state.extraPanesByWorkspace[workspaceId] ?? [];
-                const focused =
-                    state.focusedPaneIndexByWorkspace[workspaceId] ?? 0;
+                const extras = state.extraPanes;
+                const focused = state.focusedPaneIndex;
 
                 if (extras.length + 1 >= MAX_PANES) {
                     return null;
                 }
                 if (
                     !opts?.allowDuplicate &&
-                    extras.some((p) => p.conversationId === conversationId)
+                    extras.some(
+                        (p) =>
+                            p.conversationId === conversationId &&
+                            p.workspaceId === workspaceId
+                    )
                 ) {
                     // Already shown in a secondary pane — focus that one
                     // instead of creating a duplicate.
                     const existingIdx = extras.findIndex(
-                        (p) => p.conversationId === conversationId
+                        (p) =>
+                            p.conversationId === conversationId &&
+                            p.workspaceId === workspaceId
                     );
                     if (existingIdx >= 0) {
-                        get().setFocusedPaneIndex(
-                            workspaceId,
-                            existingIdx + 1
-                        );
+                        set({ focusedPaneIndex: existingIdx + 1 });
                     }
                     return existingIdx + 1;
                 }
@@ -200,32 +210,25 @@ export const useSplitPaneStore = create<SplitPaneState>()(
                 const nextExtras: SecondaryPane[] = extras.slice();
                 nextExtras.splice(insertExtrasAt, 0, {
                     id: makePaneId(),
+                    workspaceId,
                     conversationId
                 });
 
                 // The fractions array spans [primary, ...extras], so the
                 // insertion index there is `insertExtrasAt + 1`.
                 const prevFractions =
-                    state.widthFractionsByWorkspace[workspaceId] ??
-                    evenFractions(extras.length + 1);
+                    state.widthFractions.length === extras.length + 1
+                        ? state.widthFractions
+                        : evenFractions(extras.length + 1);
                 const nextFractions = insertFraction(
                     prevFractions,
                     insertExtrasAt + 1
                 );
 
                 set({
-                    extraPanesByWorkspace: {
-                        ...state.extraPanesByWorkspace,
-                        [workspaceId]: nextExtras
-                    },
-                    widthFractionsByWorkspace: {
-                        ...state.widthFractionsByWorkspace,
-                        [workspaceId]: nextFractions
-                    },
-                    focusedPaneIndexByWorkspace: {
-                        ...state.focusedPaneIndexByWorkspace,
-                        [workspaceId]: insertExtrasAt + 1
-                    }
+                    extraPanes: nextExtras,
+                    widthFractions: nextFractions,
+                    focusedPaneIndex: insertExtrasAt + 1
                 });
 
                 return insertExtrasAt + 1;
@@ -239,11 +242,15 @@ export const useSplitPaneStore = create<SplitPaneState>()(
                 opts
             ) => {
                 const state = get();
-                const extras = state.extraPanesByWorkspace[workspaceId] ?? [];
+                const extras = state.extraPanes;
                 if (extras.length + 1 >= MAX_PANES) return null;
                 if (
                     !opts?.allowDuplicate &&
-                    extras.some((p) => p.conversationId === conversationId)
+                    extras.some(
+                        (p) =>
+                            p.conversationId === conversationId &&
+                            p.workspaceId === workspaceId
+                    )
                 ) {
                     return null;
                 }
@@ -269,39 +276,32 @@ export const useSplitPaneStore = create<SplitPaneState>()(
                 const nextExtras: SecondaryPane[] = extras.slice();
                 nextExtras.splice(insertExtrasAt, 0, {
                     id: makePaneId(),
+                    workspaceId,
                     conversationId
                 });
 
                 const prevFractions =
-                    state.widthFractionsByWorkspace[workspaceId] ??
-                    evenFractions(extras.length + 1);
+                    state.widthFractions.length === extras.length + 1
+                        ? state.widthFractions
+                        : evenFractions(extras.length + 1);
                 const nextFractions = insertFraction(
                     prevFractions,
                     insertExtrasAt + 1
                 );
 
                 set({
-                    extraPanesByWorkspace: {
-                        ...state.extraPanesByWorkspace,
-                        [workspaceId]: nextExtras
-                    },
-                    widthFractionsByWorkspace: {
-                        ...state.widthFractionsByWorkspace,
-                        [workspaceId]: nextFractions
-                    },
-                    focusedPaneIndexByWorkspace: {
-                        ...state.focusedPaneIndexByWorkspace,
-                        [workspaceId]: insertExtrasAt + 1
-                    }
+                    extraPanes: nextExtras,
+                    widthFractions: nextFractions,
+                    focusedPaneIndex: insertExtrasAt + 1
                 });
 
                 return insertExtrasAt + 1;
             },
 
-            removeSecondaryPane: (workspaceId, paneIndex) => {
+            removeSecondaryPane: (paneIndex) => {
                 if (paneIndex <= 0) return; // primary is URL-bound
                 const state = get();
-                const extras = state.extraPanesByWorkspace[workspaceId] ?? [];
+                const extras = state.extraPanes;
                 const extrasIdx = paneIndex - 1;
                 if (extrasIdx < 0 || extrasIdx >= extras.length) return;
 
@@ -309,15 +309,12 @@ export const useSplitPaneStore = create<SplitPaneState>()(
                 nextExtras.splice(extrasIdx, 1);
 
                 const prevFractions =
-                    state.widthFractionsByWorkspace[workspaceId] ??
-                    evenFractions(extras.length + 1);
-                const nextFractions = removeFraction(
-                    prevFractions,
-                    paneIndex
-                );
+                    state.widthFractions.length === extras.length + 1
+                        ? state.widthFractions
+                        : evenFractions(extras.length + 1);
+                const nextFractions = removeFraction(prevFractions, paneIndex);
 
-                const focused =
-                    state.focusedPaneIndexByWorkspace[workspaceId] ?? 0;
+                const focused = state.focusedPaneIndex;
                 let nextFocus = focused;
                 if (focused === paneIndex) {
                     // Shift focus to the pane that took the closed pane's
@@ -329,126 +326,99 @@ export const useSplitPaneStore = create<SplitPaneState>()(
                 }
 
                 set({
-                    extraPanesByWorkspace: {
-                        ...state.extraPanesByWorkspace,
-                        [workspaceId]: nextExtras
-                    },
-                    widthFractionsByWorkspace: {
-                        ...state.widthFractionsByWorkspace,
-                        [workspaceId]: nextFractions
-                    },
-                    focusedPaneIndexByWorkspace: {
-                        ...state.focusedPaneIndexByWorkspace,
-                        [workspaceId]: nextFocus
-                    }
+                    extraPanes: nextExtras,
+                    widthFractions: nextFractions,
+                    focusedPaneIndex: nextFocus
                 });
             },
 
             replaceSecondaryConversation: (
-                workspaceId,
                 paneIndex,
+                workspaceId,
                 conversationId
             ) => {
                 if (paneIndex <= 0) return;
                 const state = get();
-                const extras = state.extraPanesByWorkspace[workspaceId] ?? [];
+                const extras = state.extraPanes;
                 const extrasIdx = paneIndex - 1;
                 if (extrasIdx < 0 || extrasIdx >= extras.length) return;
                 const next = extras.slice();
-                next[extrasIdx] = { ...next[extrasIdx]!, conversationId };
-                set({
-                    extraPanesByWorkspace: {
-                        ...state.extraPanesByWorkspace,
-                        [workspaceId]: next
-                    }
-                });
+                next[extrasIdx] = {
+                    ...next[extrasIdx]!,
+                    workspaceId,
+                    conversationId
+                };
+                set({ extraPanes: next });
             },
 
-            setFocusedPaneIndex: (workspaceId, idx) => {
-                set((s) => ({
-                    focusedPaneIndexByWorkspace: {
-                        ...s.focusedPaneIndexByWorkspace,
-                        [workspaceId]: Math.max(0, idx)
-                    }
-                }));
+            setFocusedPaneIndex: (idx) => {
+                set({ focusedPaneIndex: Math.max(0, idx) });
             },
 
-            setWidthFractions: (workspaceId, fractions) => {
-                set((s) => ({
-                    widthFractionsByWorkspace: {
-                        ...s.widthFractionsByWorkspace,
-                        [workspaceId]: fractions
-                    }
-                }));
+            setWidthFractions: (fractions) => {
+                set({ widthFractions: fractions });
             },
 
             forgetConversation: (conversationId) => {
                 const state = get();
-                let changed = false;
-                const nextExtras: Record<string, SecondaryPane[]> = {
-                    ...state.extraPanesByWorkspace
-                };
-                const nextFractions: Record<string, number[]> = {
-                    ...state.widthFractionsByWorkspace
-                };
-                const nextFocus: Record<string, number> = {
-                    ...state.focusedPaneIndexByWorkspace
-                };
+                const survivors = state.extraPanes.filter(
+                    (p) => p.conversationId !== conversationId
+                );
+                if (survivors.length === state.extraPanes.length) return;
 
-                for (const [wsId, extras] of Object.entries(
-                    state.extraPanesByWorkspace
-                )) {
-                    if (!extras.some((p) => p.conversationId === conversationId))
-                        continue;
-
-                    const filteredExtras = extras.filter(
-                        (p) => p.conversationId !== conversationId
-                    );
-                    nextExtras[wsId] = filteredExtras;
-                    nextFractions[wsId] = reFraction(
-                        state.widthFractionsByWorkspace[wsId] ??
-                            evenFractions(extras.length + 1),
-                        filteredExtras.length + 1
-                    );
-                    const focused =
-                        state.focusedPaneIndexByWorkspace[wsId] ?? 0;
-                    nextFocus[wsId] = Math.min(
-                        focused,
-                        filteredExtras.length
-                    );
-                    changed = true;
-                }
-
-                if (!changed) return;
+                const nextFractions = reFraction(
+                    state.widthFractions.length === state.extraPanes.length + 1
+                        ? state.widthFractions
+                        : evenFractions(state.extraPanes.length + 1),
+                    survivors.length + 1
+                );
+                const nextFocus = Math.min(
+                    state.focusedPaneIndex,
+                    survivors.length
+                );
                 set({
-                    extraPanesByWorkspace: nextExtras,
-                    widthFractionsByWorkspace: nextFractions,
-                    focusedPaneIndexByWorkspace: nextFocus
+                    extraPanes: survivors,
+                    widthFractions: nextFractions,
+                    focusedPaneIndex: nextFocus
                 });
             },
 
-            clearWorkspace: (workspaceId) => {
-                set((s) => {
-                    const nextExtras = { ...s.extraPanesByWorkspace };
-                    const nextFractions = { ...s.widthFractionsByWorkspace };
-                    const nextFocus = { ...s.focusedPaneIndexByWorkspace };
-                    delete nextExtras[workspaceId];
-                    delete nextFractions[workspaceId];
-                    delete nextFocus[workspaceId];
-                    return {
-                        extraPanesByWorkspace: nextExtras,
-                        widthFractionsByWorkspace: nextFractions,
-                        focusedPaneIndexByWorkspace: nextFocus
-                    };
+            forgetWorkspace: (workspaceId) => {
+                const state = get();
+                const survivors = state.extraPanes.filter(
+                    (p) => p.workspaceId !== workspaceId
+                );
+                if (survivors.length === state.extraPanes.length) return;
+
+                const nextFractions = reFraction(
+                    state.widthFractions.length === state.extraPanes.length + 1
+                        ? state.widthFractions
+                        : evenFractions(state.extraPanes.length + 1),
+                    survivors.length + 1
+                );
+                const nextFocus = Math.min(
+                    state.focusedPaneIndex,
+                    survivors.length
+                );
+                set({
+                    extraPanes: survivors,
+                    widthFractions: nextFractions,
+                    focusedPaneIndex: nextFocus
                 });
             }
         }),
         {
-            name: "agnt:split-panes:v1",
+            // v2: split panes were rewritten from per-workspace dictionaries
+            // (`extraPanesByWorkspace` / `widthFractionsByWorkspace` /
+            // `focusedPaneIndexByWorkspace`) into a single global layout
+            // where each pane carries its own `workspaceId`. Bumping the
+            // persist key drops any v1 layouts so we don't try to hydrate
+            // an incompatible shape.
+            name: "agnt:split-panes:v2",
             partialize: (state) => ({
-                extraPanesByWorkspace: state.extraPanesByWorkspace,
-                widthFractionsByWorkspace: state.widthFractionsByWorkspace,
-                focusedPaneIndexByWorkspace: state.focusedPaneIndexByWorkspace
+                extraPanes: state.extraPanes,
+                widthFractions: state.widthFractions,
+                focusedPaneIndex: state.focusedPaneIndex
             })
         }
     )

@@ -14,5 +14,6 @@ export type {
 export {
     PaneScopeProvider,
     usePaneScope,
-    usePaneFocus
+    usePaneFocus,
+    usePaneWorkspaceId
 } from "./pane-scope";

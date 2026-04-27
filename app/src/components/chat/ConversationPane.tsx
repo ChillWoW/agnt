@@ -79,6 +79,16 @@ const SUBAGENT_TYPE_LABEL: Record<SubagentType, string> = {
 };
 
 export interface ConversationPaneProps {
+    /**
+     * Workspace this pane's conversation belongs to. Each pane carries
+     * its own workspace id so the split layout can show conversations
+     * from multiple workspaces simultaneously — the pane no longer
+     * follows the globally "active" workspace.
+     *
+     * `null` is tolerated (loading/uninitialised) but the pane will
+     * render an empty state until a real id is supplied.
+     */
+    workspaceId: string | null;
     /** Conversation rendered inside the pane. */
     conversationId: string;
     /**
@@ -109,6 +119,7 @@ export interface ConversationPaneProps {
  * inside a secondary pane.
  */
 export function ConversationPane({
+    workspaceId,
     conversationId,
     isPrimary = false,
     isFocused = false,
@@ -116,11 +127,16 @@ export function ConversationPane({
     onFocus,
     onClose
 }: ConversationPaneProps) {
-    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-    const activeWorkspace = useWorkspaceStore(
+    // The pane operates entirely against its OWN workspace id, not the
+    // globally-active one — split layouts may render conversations from
+    // multiple workspaces side-by-side. The active workspace is still
+    // used elsewhere in the app (right sidebar, "new agent" home), but
+    // it must not leak into per-pane fetches/sends or every pane would
+    // collapse onto whatever workspace happens to be active right now.
+    const paneWorkspace = useWorkspaceStore(
         (s) =>
             s.workspaces.find(
-                (workspace) => workspace.id === activeWorkspaceId
+                (workspace) => workspace.id === workspaceId
             ) ?? null
     );
 
@@ -152,22 +168,22 @@ export function ConversationPane({
     const scrollToBottomRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
-        if (activeWorkspaceId) {
-            void loadConversation(activeWorkspaceId, conversationId);
+        if (workspaceId) {
+            void loadConversation(workspaceId, conversationId);
         }
-    }, [activeWorkspaceId, conversationId, loadConversation]);
+    }, [workspaceId, conversationId, loadConversation]);
 
     // Subagent pages don't start their own stream (the parent's `task` tool
     // does), so we attach a read-only observer to receive live SSE events.
     useEffect(() => {
-        if (!activeWorkspaceId) return;
+        if (!workspaceId) return;
         if (!conversation?.parent_conversation_id) return;
-        const dispose = observeConversation(activeWorkspaceId, conversationId);
+        const dispose = observeConversation(workspaceId, conversationId);
         return () => {
             dispose();
         };
     }, [
-        activeWorkspaceId,
+        workspaceId,
         conversationId,
         conversation?.parent_conversation_id,
         observeConversation
@@ -175,11 +191,11 @@ export function ConversationPane({
 
     // Ensure the parent conversation row is available for breadcrumbs.
     useEffect(() => {
-        if (!activeWorkspaceId || !parentConversationId) return;
+        if (!workspaceId || !parentConversationId) return;
         if (parentConversation) return;
-        void loadConversation(activeWorkspaceId, parentConversationId);
+        void loadConversation(workspaceId, parentConversationId);
     }, [
-        activeWorkspaceId,
+        workspaceId,
         parentConversationId,
         parentConversation,
         loadConversation
@@ -189,11 +205,11 @@ export function ConversationPane({
     // render metadata (name/type) immediately after a page refresh without
     // needing the original subagent-started SSE event.
     useEffect(() => {
-        if (!activeWorkspaceId) return;
+        if (!workspaceId) return;
         if (conversation?.parent_conversation_id) return;
-        void loadSubagents(activeWorkspaceId, conversationId);
+        void loadSubagents(workspaceId, conversationId);
     }, [
-        activeWorkspaceId,
+        workspaceId,
         conversationId,
         conversation?.parent_conversation_id,
         loadSubagents
@@ -207,7 +223,7 @@ export function ConversationPane({
         mentions: { path: string; type: "file" | "directory" }[],
         useSkillNames?: string[]
     ) => {
-        if (!activeWorkspaceId || !conversation) return;
+        if (!workspaceId || !conversation) return;
         // Mid-stream sends go into the per-conversation prompt queue; the
         // current turn's `finally` will FIFO-drain them via `sendMessage`
         // once the in-flight controller is gone. See
@@ -222,7 +238,7 @@ export function ConversationPane({
             return;
         }
         void sendMessage(
-            activeWorkspaceId,
+            workspaceId,
             conversation.id,
             content,
             attachmentIds,
@@ -248,7 +264,7 @@ export function ConversationPane({
             ? [...messages].reverse().find((m) => m.role === "user")
             : null;
         const restoreContent = triggeringUserMessage?.content ?? "";
-        const workspaceForStop = activeWorkspaceId;
+        const workspaceForStop = workspaceId;
 
         void (async () => {
             const result = await stopGeneration(
@@ -388,7 +404,7 @@ export function ConversationPane({
                                             weight="duotone"
                                         />
                                         <div className="min-w-0 text-dark-100">
-                                            {activeWorkspace?.path ??
+                                            {paneWorkspace?.path ??
                                                 "No workspace selected"}
                                         </div>
                                     </div>
@@ -464,7 +480,7 @@ export function ConversationPane({
                             onSend={handleSend}
                             onStop={handleStop}
                             isStreaming={isStreaming}
-                            workspaceId={activeWorkspaceId}
+                            workspaceId={workspaceId}
                             conversationId={conversation.id}
                             placeholder={
                                 isStreaming
