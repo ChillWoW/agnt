@@ -6,17 +6,26 @@ import { Tooltip } from "@/components/ui";
 import type { Message } from "@/features/conversations/conversation-types";
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
-import { getCachedModels } from "@/features/models";
+import {
+    estimateTurnCostUsd,
+    formatCostUsd,
+    formatTokenCount,
+    getCachedModels,
+    type ModelCatalogEntry
+} from "@/features/models";
 
 function formatDurationSeconds(durationMs: number): string {
     const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
     return totalSeconds + "s";
 }
 
-function formatModelLabel(modelId: string): string {
+function findModel(modelId: string): ModelCatalogEntry | null {
     const models = getCachedModels();
-    const match = models?.find((m) => m.id === modelId);
-    return match?.displayName ?? modelId;
+    return models?.find((m) => m.id === modelId) ?? null;
+}
+
+function formatModelLabel(modelId: string): string {
+    return findModel(modelId)?.displayName ?? modelId;
 }
 
 /**
@@ -108,7 +117,31 @@ export function MessageFooter({ message }: MessageFooterProps) {
     const hasDuration = typeof durationMs === "number" && durationMs >= 0;
     const hasModel = !!(message.model_id && message.model_id.length > 0);
 
-    if (!hasDuration && !hasModel && !message.content) {
+    // Cost is only shown once the turn has finished and the server has
+    // persisted token usage on the assistant row. We re-resolve the model
+    // from the cached catalog so we always price against the latest
+    // pricing.standard rates (see `app/src/features/models/pricing.ts`).
+    const inputTokens =
+        typeof message.input_tokens === "number" ? message.input_tokens : null;
+    const outputTokens =
+        typeof message.output_tokens === "number"
+            ? message.output_tokens
+            : null;
+    const reasoningTokens =
+        typeof message.reasoning_tokens === "number"
+            ? message.reasoning_tokens
+            : null;
+    const model = hasModel ? findModel(message.model_id as string) : null;
+    const cost =
+        model && inputTokens != null && outputTokens != null
+            ? estimateTurnCostUsd(model, {
+                  inputTokens,
+                  outputTokens
+              })
+            : null;
+    const hasCost = cost != null && cost.totalUsd > 0;
+
+    if (!hasDuration && !hasModel && !hasCost && !message.content) {
         return null;
     }
 
@@ -122,6 +155,27 @@ export function MessageFooter({ message }: MessageFooterProps) {
             )}
             {hasModel && (
                 <span>{formatModelLabel(message.model_id as string)}</span>
+            )}
+            {hasCost && (
+                <>
+                    <span className="text-dark-400">-</span>
+                    <Tooltip
+                        side="top"
+                        content={
+                            <CostTooltipContent
+                                model={model as ModelCatalogEntry}
+                                inputTokens={inputTokens as number}
+                                outputTokens={outputTokens as number}
+                                reasoningTokens={reasoningTokens}
+                                cost={cost!}
+                            />
+                        }
+                    >
+                        <span className="cursor-help tabular-nums">
+                            ~{formatCostUsd(cost!.totalUsd)}
+                        </span>
+                    </Tooltip>
+                </>
             )}
             {message.content.length > 0 && (
                 <Tooltip
@@ -147,5 +201,84 @@ export function MessageFooter({ message }: MessageFooterProps) {
                 </Tooltip>
             )}
         </div>
+    );
+}
+
+interface CostTooltipContentProps {
+    model: ModelCatalogEntry;
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number | null;
+    cost: NonNullable<ReturnType<typeof estimateTurnCostUsd>>;
+}
+
+function CostTooltipContent({
+    model,
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
+    cost
+}: CostTooltipContentProps) {
+    return (
+        <div className="flex max-w-xs flex-col gap-1.5 text-[11px] leading-snug">
+            <div className="font-medium text-dark-50">
+                Estimated turn cost (OpenAI API rates)
+            </div>
+            <div className="grid grid-cols-[auto_1fr_auto] gap-x-2 gap-y-0.5 tabular-nums">
+                <span className="text-dark-300">Input</span>
+                <span className="text-dark-200">
+                    {formatTokenCount(inputTokens)} tok ×{" "}
+                    {formatRate(cost.effectiveInputRate)}
+                </span>
+                <span className="text-right text-dark-100">
+                    {formatCostUsd(cost.inputUsd)}
+                </span>
+
+                <span className="text-dark-300">Output</span>
+                <span className="text-dark-200">
+                    {formatTokenCount(outputTokens)} tok ×{" "}
+                    {formatRate(cost.effectiveOutputRate)}
+                </span>
+                <span className="text-right text-dark-100">
+                    {formatCostUsd(cost.outputUsd)}
+                </span>
+
+                {reasoningTokens != null && reasoningTokens > 0 && (
+                    <>
+                        <span className="text-dark-400">↳ reasoning</span>
+                        <span className="col-span-2 text-dark-400">
+                            {formatTokenCount(reasoningTokens)} tok (incl. in
+                            output)
+                        </span>
+                    </>
+                )}
+
+                <span className="col-span-2 mt-0.5 border-t border-dark-700 pt-1 text-dark-200">
+                    Total
+                </span>
+                <span className="mt-0.5 border-t border-dark-700 pt-1 text-right font-medium text-dark-50">
+                    {formatCostUsd(cost.totalUsd)}
+                </span>
+            </div>
+            {cost.longContextApplied && (
+                <div className="text-dark-300">
+                    Long-context multiplier applied (&gt;272K input tokens).
+                </div>
+            )}
+            <div className="text-dark-400">
+                Approximation based on {model.displayName} standard tier.
+            </div>
+        </div>
+    );
+}
+
+function formatRate(usdPerMTok: number): string {
+    return (
+        "$" +
+        usdPerMTok.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }) +
+        "/MTok"
     );
 }
