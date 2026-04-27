@@ -10,6 +10,7 @@ import historyRoutes from "./modules/history/history.routes";
 import modelsRoutes from "./modules/models/models.routes";
 import statsRoutes from "./modules/stats/stats.routes";
 import mcpRoutes from "./modules/mcp/mcp.routes";
+import rulesRoutes from "./modules/rules/rules.routes";
 import { isServerReady } from "./readiness";
 
 const app = new Elysia()
@@ -27,6 +28,7 @@ const app = new Elysia()
     })
     .use(healthRoutes)
     .use(settingsRoutes)
+    .use(rulesRoutes)
     .use(workspacesRoutes)
     .use(historyRoutes)
     .use(modelsRoutes)

@@ -5,6 +5,7 @@ import {
     discoverSkillsForPath,
     type DiscoveredSkills
 } from "../skills/skills.service";
+import { loadRulesForPrompt } from "../rules/rules.service";
 import { buildTodosPromptBlock, listTodos, type Todo } from "./todos";
 import { getSystemContext, type SystemContext } from "./system-context";
 import type { AgenticMode } from "./permissions";
@@ -24,6 +25,7 @@ import type { AgenticMode } from "./permissions";
 //   7. Git safety      — non-negotiable git rules
 //   8. Environment     — OS, user, home dir, workspace, git status, date
 //   9. Available skills (discovered from disk)
+//  10. User rules      — global, always-on user-authored rules
 //
 // Every block above is part of the cached `instructions` blob (the OpenAI
 // Responses API caches against `prompt_cache_key = conversationId`). The
@@ -172,6 +174,39 @@ function escapeXmlAttribute(value: string): string {
         .replace(/>/g, "&gt;");
 }
 
+function escapeXmlText(value: string): string {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+/**
+ * Build the trailing User Rules block. Rules are global, plain-text bodies
+ * created by the user via the Rules settings panel. They get appended at the
+ * very end of the cached `instructions` so they're the last thing the model
+ * reads before tool/system inputs — closest to attention, but still inside
+ * the prompt-cache prefix.
+ *
+ * Returns `""` when there are no non-empty rules so callers can cheaply skip
+ * the whole block.
+ */
+export function buildUserRulesBlock(rules: string[]): string {
+    const trimmed = rules.map((r) => r.trim()).filter((r) => r.length > 0);
+    if (trimmed.length === 0) return "";
+
+    const entries = trimmed
+        .map((body) => `  <rule>\n${escapeXmlText(body)}\n  </rule>`)
+        .join("\n");
+
+    return (
+        "\n\n# User rules\n" +
+        "The following rules were authored by the user in the Rules settings panel. They are global, always-on instructions. " +
+        "Treat them as user-issued policy and follow them throughout the conversation, unless they conflict with the Git safety block (which always wins).\n\n" +
+        `<user_rules>\n${entries}\n</user_rules>`
+    );
+}
+
 export interface AvailableMcpTool {
     name: string;
     description: string;
@@ -263,6 +298,8 @@ type ConversationPromptParts = {
     systemContext: SystemContext;
     skills: DiscoveredSkills;
     skillsBlock: string;
+    rules: string[];
+    rulesBlock: string;
     todos: Todo[];
     todosBlock: string;
     agenticModeBlock: string;
@@ -314,6 +351,13 @@ export function buildConversationPrompt(
     const environmentBlock = buildEnvironmentBlock(systemContext);
     const skillsBlock = buildAvailableSkillsBlock(skills.skills);
 
+    // Global user rules are loaded fresh each turn. Adding/removing/editing
+    // a rule WILL invalidate this conversation's prompt cache for the next
+    // turn, which is acceptable — rules don't churn often, and the same is
+    // already true for skills and the environment block.
+    const rules = loadRulesForPrompt();
+    const rulesBlock = buildUserRulesBlock(rules);
+
     const todos = options.conversationId
         ? listTodos(options.workspaceId, options.conversationId)
         : [];
@@ -321,13 +365,14 @@ export function buildConversationPrompt(
 
     // The order below is intentional. Identity → communication → mode-specific
     // capabilities → universal tool guidance → file editing → long-running
-    // commands → git safety → environment → skills.
+    // commands → git safety → environment → skills → user rules.
     // `prompt` is what goes into the Responses API `instructions` field; it
     // stays stable across turns (modulo midnight / model / mode / workspace
-    // changes) so the OpenAI prompt cache (keyed on conversationId via
-    // `prompt_cache_key`) keeps hitting. The volatile todos block is exposed
-    // separately so callers can inject it as a trailing system input item
-    // in conversation.stream.ts without perturbing the cached prefix.
+    // / rules changes) so the OpenAI prompt cache (keyed on conversationId
+    // via `prompt_cache_key`) keeps hitting. The volatile todos block is
+    // exposed separately so callers can inject it as a trailing system
+    // input item in conversation.stream.ts without perturbing the cached
+    // prefix.
     const prompt =
         identityBlock +
         COMMUNICATION_BLOCK +
@@ -337,7 +382,8 @@ export function buildConversationPrompt(
         LONG_RUNNING_COMMANDS_BLOCK +
         GIT_SAFETY_BLOCK +
         environmentBlock +
-        skillsBlock;
+        skillsBlock +
+        rulesBlock;
 
     return {
         workspacePath: workspace.path,
@@ -353,6 +399,8 @@ export function buildConversationPrompt(
         systemContext,
         skills,
         skillsBlock,
+        rules,
+        rulesBlock,
         todos,
         todosBlock,
         agenticModeBlock: modeBlock,

@@ -5,6 +5,7 @@ import {
     KeyboardIcon,
     PlugsIcon,
     RobotIcon,
+    ScrollIcon,
     ShieldCheckIcon
 } from "@phosphor-icons/react";
 import { HotkeySettings } from "./HotkeySettings";
@@ -12,6 +13,7 @@ import { CodexSettings } from "./CodexSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { McpServersSettings } from "./McpServersSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
+import { RulesSettings } from "./RulesSettings";
 import { ToolPermissionsSettings } from "./ToolPermissionsSettings";
 import { useSettingsStore } from "./settings-store";
 
@@ -24,6 +26,7 @@ export type SettingsCategory = {
 export const settingsCategories: SettingsCategory[] = [
     { key: "hotkeys", label: "Hotkeys", icon: KeyboardIcon },
     { key: "notifications", label: "Notifications", icon: BellIcon },
+    { key: "rules", label: "Rules", icon: ScrollIcon },
     { key: "toolPermissions", label: "Tool permissions", icon: ShieldCheckIcon },
     { key: "mcpServers", label: "MCP servers", icon: PlugsIcon },
     { key: "codex", label: "Codex", icon: RobotIcon },
@@ -51,6 +54,7 @@ export function SettingsPanel() {
                 {activeCategory === "notifications" && (
                     <NotificationsSettings />
                 )}
+                {activeCategory === "rules" && <RulesSettings />}
                 {activeCategory === "diagnostics" && (
                     <DiagnosticsSettings />
                 )}

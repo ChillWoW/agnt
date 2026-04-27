@@ -71,7 +71,7 @@ Auth (`Authorization: Basic app:<password>`) is only enforced when `SERVER_PASSW
   - `conversations/tools/` — agent tool defs + registry (`AGNT_TOOL_DEFS`, `UNGATED_TOOL_NAMES`)
   - `conversations/permissions/` — `buildConversationTools` + `withPermission` gate
   - `conversations/plans/`, `subagents/`, `shell/`, `questions/`, `todos/`
-  - `skills/`, `mcp/`, `lsp/`, `stats/`, `models/`, `health/`, `history/`, `settings/`
+  - `skills/`, `mcp/`, `rules/`, `lsp/`, `stats/`, `models/`, `health/`, `history/`, `settings/`
 
 ### Global config / data
 - `~/.agnt/settings.json` — global app settings (categories: `hotkeys`, `toolPermissions`, `notifications`, `diagnostics`)
@@ -79,6 +79,7 @@ Auth (`Authorization: Basic app:<password>`) is only enforced when `SERVER_PASSW
 - `~/.agnt/stats.db` — append-only stats ledger (NOT touched by conversation deletion)
 - `~/.agnt/plans/plan-<uuid>.md` — plan files
 - `~/.agnt/mcp.json` (global) and `<workspace>/.agnt/mcp.json` (project) — MCP server configs
+- `~/.agnt/rules/<uuid>.md` — global user rules (one body per file, no frontmatter); appended at the end of the cached system prompt
 - Skill discovery roots (later overrides earlier; project always wins): `~/.agnt/skills/`, `~/.agents/skills/`, `~/.claude/skills/`, then the same three under `<workspace>/`
 
 ---
@@ -114,6 +115,7 @@ Add one line under **Maintenance Log**. If nothing in this doc changed, say so e
 
 Keep compact: one line per entry, latest 10 entries only — collapse older into a single summary line.
 
+- 2026-04-27: Added global Rules system. New `server/src/modules/rules/` (CRUD over `~/.agnt/rules/<uuid>.md`), `/rules` HTTP routes, `buildUserRulesBlock` in `conversation.prompt.ts` appended after the skills block, and a "Rules" Settings panel (`app/src/components/settings/RulesSettings.tsx`) backed by `app/src/features/rules/`. System prompt now has 10 ordered blocks.
 - 2026-04-26: Added MCP support — configs at `~/.agnt/mcp.json` (global) and `<workspace>/.agnt/mcp.json` (project); tools exposed as `mcp__<server>__<tool>`; agent mode only.
 - 2026-04-26: Added `/` slash commands in chat input — `/agent`, `/plan`, `/ask`, `/bypass` toggle modes; `/init` expands to a prompt; `/<skill>` auto-loads a skill for the turn.
 - 2026-04-26: Added per-route chat-input draft persistence (Tiptap doc JSON in localStorage, slot keyed by conversation/workspace).
@@ -124,8 +126,7 @@ Keep compact: one line per entry, latest 10 entries only — collapse older into
 - 2026-04-26: Reworked system prompt composition (`conversation.prompt.ts` + `system-context.ts`) — nine ordered blocks (Identity / Communication / Mode / Tool calling / File editing / Long-running commands / Git safety / Environment / Skills).
 - 2026-04-25: Soft-archive flow for conversations (`archived_at` column, sidebar archive button + per-workspace popover with restore + permanent-delete).
 - 2026-04-25: Real interactive terminals in right sidebar via `portable-pty` (Rust) + xterm.js (frontend); separate from the agent's `shell` tool.
-- 2026-04-24: Assistant message footer (generation time + model + hover-reveal copy button); pause-aware clock excludes time blocked on permission/question prompts.
-- pre-2026-04-24: Initial contract; Codex OAuth/SSE streaming; agent tool framework; context meter + auto-compaction; tool permission system; skills; subagents (`task` tool); ungated `question` / `todo_write` / `write_plan` tools; `write` / `str_replace` / `apply_patch` edit tools; `image_gen`; LSP diagnostics; global stats dashboard; notifications + Windows taskbar badge.
+- pre-2026-04-25: Assistant message footer (generation time + model + hover-reveal copy button) with pause-aware clock; initial contract; Codex OAuth/SSE streaming; agent tool framework; context meter + auto-compaction; tool permission system; skills; subagents (`task` tool); ungated `question` / `todo_write` / `write_plan` tools; `write` / `str_replace` / `apply_patch` edit tools; `image_gen`; LSP diagnostics; global stats dashboard; notifications + Windows taskbar badge.
 
 ---
 
