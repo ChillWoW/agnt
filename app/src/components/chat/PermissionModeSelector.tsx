@@ -13,6 +13,7 @@ import {
 } from "@/features/hotkeys";
 import { cn } from "@/lib/cn";
 import { usePermissionMode, type PermissionMode } from "@/features/permissions";
+import { usePaneFocus } from "@/features/split-panes";
 
 interface PermissionModeSelectorProps {
     workspaceId?: string | null;
@@ -40,11 +41,15 @@ export function PermissionModeSelector({
 
     const cycleHotkey = useResolvedHotkeyCombo("models.permission-mode.cycle");
 
+    // Only the focused split pane should react to the chord (see
+    // AgenticModeSelector for the rationale).
+    const isPaneFocused = usePaneFocus();
     useHotkey({
         id: "models.permission-mode.cycle",
         label: "Cycle permission mode",
         description: "Toggle between Ask and Bypass permission modes",
         defaultCombo: "Ctrl+Shift+P",
+        enabled: isPaneFocused,
         handler: () => {
             const next = mode === "ask" ? "bypass" : "ask";
             void setPermissionMode(next);

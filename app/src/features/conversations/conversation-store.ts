@@ -21,6 +21,7 @@ import { usePlanStore, PLAN_FILE_PREFIX } from "@/features/plans";
 import type { Plan } from "@/features/plans";
 import { useRightSidebarStore } from "@/features/right-sidebar/right-sidebar-store";
 import { useOpenedFilesStore } from "@/features/right-sidebar/filetree";
+import { useSplitPaneStore } from "@/features/split-panes";
 import type { Attachment } from "@/features/attachments";
 import { notify } from "@/features/notifications/notify";
 import { isWindowFocused } from "@/features/notifications/focus";
@@ -1593,17 +1594,21 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             workspaceId: string,
             conversationId: string
         ) => {
+            // NOTE: We deliberately do NOT touch `activeConversationId` here.
+            // Split panes mean multiple conversations can be loaded
+            // simultaneously; if every loadConversation set the active id we'd
+            // race between primary and secondary panes. The URL-bound route
+            // (`/conversations/:id`) is the sole writer of `activeConversationId`
+            // (see `ConversationRoute`), and `createConversation` also sets it
+            // for the just-created conversation since it's always navigated to.
             set((state) => {
-                const patch: Partial<ConversationStoreState> = {
-                    activeConversationId: conversationId
-                };
-                if (state.unreadConversationIds[conversationId]) {
-                    patch.unreadConversationIds = omitKey(
+                if (!state.unreadConversationIds[conversationId]) return {};
+                return {
+                    unreadConversationIds: omitKey(
                         state.unreadConversationIds,
                         conversationId
-                    );
-                }
-                return patch;
+                    )
+                };
             });
 
             const state = get();
@@ -1732,6 +1737,12 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             workspaceId: string,
             conversationId: string
         ) => {
+            // Drop this conversation from any split pane currently rendering
+            // it — otherwise the user would be left with a dead "Conversation
+            // not found" pane. Done up-front so the UI updates synchronously
+            // alongside the optimistic active→archived move below.
+            useSplitPaneStore.getState().forgetConversation(conversationId);
+
             // Snapshot the conversation row from the active list so we can
             // optimistically move it into the archived bucket. Fall back to
             // a synthesized stub if (somehow) it's not in the active list
@@ -1921,6 +1932,9 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             usePermissionStore.getState().clearPending(conversationId);
             useQuestionStore.getState().clearPending(conversationId);
             useTodoStore.getState().clearTodos(conversationId);
+            // Drop this conversation from any split pane currently rendering
+            // it (mirrors the archive path).
+            useSplitPaneStore.getState().forgetConversation(conversationId);
             // Hard-delete only — archive intentionally keeps drafts so they
             // come back if the user un-archives.
             clearChatDraft({ kind: "conversation", conversationId });

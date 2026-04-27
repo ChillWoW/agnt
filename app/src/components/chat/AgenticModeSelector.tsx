@@ -13,6 +13,7 @@ import {
 } from "@/features/hotkeys";
 import { cn } from "@/lib/cn";
 import { useAgenticMode, type AgenticMode } from "@/features/plans";
+import { usePaneFocus } from "@/features/split-panes";
 
 interface AgenticModeSelectorProps {
     workspaceId?: string | null;
@@ -40,11 +41,16 @@ export function AgenticModeSelector({
 
     const cycleHotkey = useResolvedHotkeyCombo("models.agentic-mode.cycle");
 
+    // Only the focused split pane should react to chord — otherwise the
+    // most recently mounted pane wins every keystroke since it owns the
+    // newest hotkey registration.
+    const isPaneFocused = usePaneFocus();
     useHotkey({
         id: "models.agentic-mode.cycle",
         label: "Cycle agentic mode",
         description: "Toggle between Agent and Plan modes",
         defaultCombo: "Shift+Tab",
+        enabled: isPaneFocused,
         handler: () => {
             const next = mode === "agent" ? "plan" : "agent";
             void setAgenticMode(next);

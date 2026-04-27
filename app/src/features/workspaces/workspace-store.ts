@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Workspace } from "./workspace-types";
 import * as workspaceApi from "./workspace-api";
+import { useSplitPaneStore } from "@/features/split-panes";
 
 interface WorkspaceStoreState {
     workspaces: Workspace[];
@@ -44,6 +45,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
 
     remove: async (id: string) => {
         await workspaceApi.removeWorkspace(id);
+        // Drop any persisted split-pane layout for the removed workspace so
+        // we don't carry zombie layout state across re-adds.
+        useSplitPaneStore.getState().clearWorkspace(id);
         await get().load();
     },
 

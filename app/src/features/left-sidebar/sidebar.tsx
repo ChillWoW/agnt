@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useLeftSidebarStore } from "./left-sidebar-store";
 import { useHotkey } from "../hotkeys";
@@ -8,6 +8,7 @@ import {
     FolderOpenIcon,
     CaretRightIcon,
     ChatTeardropDotsIcon,
+    ColumnsPlusRightIcon,
     TrashIcon,
     ArchiveIcon,
     ArrowCounterClockwiseIcon,
@@ -41,6 +42,17 @@ import { useWorkspaceStore } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations";
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
+import {
+    MAX_PANES,
+    SPLIT_PANE_DRAG_MIME,
+    useSplitPaneStore
+} from "@/features/split-panes";
+import type { SecondaryPane } from "@/features/split-panes";
+
+// Stable empty array reference for the split-pane selector — returning a
+// fresh `[]` on every render would tear into a `useSyncExternalStore`
+// infinite loop.
+const EMPTY_PANES: SecondaryPane[] = [];
 import type { ElementType } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { AccountButton } from "./account-button";
@@ -52,20 +64,28 @@ interface ConversationRowProps {
     conv: import("@/features/conversations").Conversation;
     workspaceId: string;
     isActive: boolean;
+    isFocusedPane: boolean;
     isUnread: boolean;
     isStreaming: boolean;
     isPendingPermission: boolean;
     isPendingQuestion: boolean;
+    splitFull: boolean;
+    onOpen: (conversationId: string) => void;
+    onSplit: (conversationId: string) => void;
 }
 
 function ConversationRow({
     conv,
     workspaceId,
     isActive,
+    isFocusedPane,
     isUnread,
     isStreaming,
     isPendingPermission,
-    isPendingQuestion
+    isPendingQuestion,
+    splitFull,
+    onOpen,
+    onSplit
 }: ConversationRowProps) {
     const navigate = useNavigate();
     const [isEditing, setIsEditing] = useState(false);
@@ -125,11 +145,35 @@ function ConversationRow({
         void navigate({ to: "/" });
     };
 
-    const navigateToConversation = () => {
-        void navigate({
-            to: "/conversations/$conversationId",
-            params: { conversationId: conv.id }
-        });
+    const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+        if (isEditing) {
+            e.preventDefault();
+            return;
+        }
+        e.dataTransfer.setData(
+            SPLIT_PANE_DRAG_MIME,
+            JSON.stringify({
+                workspaceId,
+                conversationId: conv.id
+            })
+        );
+        e.dataTransfer.effectAllowed = "copy";
+    };
+
+    // Middle-click ⇒ "Open in split". We swallow `mousedown` for button 1
+    // to suppress the Windows autoscroll cursor, then act on `auxclick`
+    // which fires once per middle button press.
+    const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (e.button === 1 && !isEditing) {
+            e.preventDefault();
+        }
+    };
+
+    const handleAuxClick = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (e.button !== 1 || isEditing || splitFull) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onSplit(conv.id);
     };
 
     return (
@@ -138,18 +182,22 @@ function ConversationRow({
                 <div
                     role="button"
                     tabIndex={0}
+                    draggable={!isEditing}
+                    onDragStart={handleDragStart}
                     onClick={() => {
                         if (isEditing) return;
-                        navigateToConversation();
+                        onOpen(conv.id);
                     }}
+                    onMouseDown={handleMouseDown}
+                    onAuxClick={handleAuxClick}
                     onKeyDown={(e) => {
                         if (isEditing) return;
                         if (e.key === "Enter" || e.key === " ") {
-                            navigateToConversation();
+                            onOpen(conv.id);
                         }
                     }}
                     className={cn(
-                        "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
+                        "group relative flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
                         isActive
                             ? "bg-dark-800 text-dark-50"
                             : isUnread
@@ -157,6 +205,12 @@ function ConversationRow({
                               : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
                     )}
                 >
+                    {isFocusedPane ? (
+                        <span
+                            aria-hidden
+                            className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-full bg-dark-50/70"
+                        />
+                    ) : null}
                     {isPendingQuestion ? (
                         <ChatTeardropDotsIcon
                             className="size-3 shrink-0 text-dark-50 animate-pulse"
@@ -210,6 +264,8 @@ function ConversationRow({
                         <Tooltip content="Archive" side="top">
                             <button
                                 type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onAuxClick={(e) => e.stopPropagation()}
                                 onClick={async (e) => {
                                     e.stopPropagation();
                                     await handleArchive();
@@ -229,6 +285,17 @@ function ConversationRow({
                 >
                     Rename
                 </ContextMenu.Item>
+                <ContextMenu.Item
+                    icon={<ColumnsPlusRightIcon className="size-3" />}
+                    disabled={splitFull}
+                    onClick={() => {
+                        if (splitFull) return;
+                        onSplit(conv.id);
+                    }}
+                    shortcut={splitFull ? `Max ${MAX_PANES}` : undefined}
+                >
+                    Open in split
+                </ContextMenu.Item>
                 <ContextMenu.Separator />
                 <ContextMenu.Item
                     icon={<ArchiveIcon className="size-3" />}
@@ -244,6 +311,7 @@ function ConversationRow({
 }
 
 function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
+    const navigate = useNavigate();
     const conversations = useConversationStore(
         (s) => s.conversationsByWorkspace[workspaceId] ?? EMPTY_CONVERSATIONS
     );
@@ -261,6 +329,113 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     );
     const pendingQuestions = useQuestionStore((s) => s.pendingByConversationId);
 
+    // ── Split-pane integration ───────────────────────────────────────────
+    //
+    // When this workspace is the active one, the sidebar reflects every
+    // open pane (primary URL conversation + secondary panes from the split
+    // store) and routes click/Split actions through the split store. When
+    // the workspace is *not* the active one, we fall back to plain
+    // navigation: a click switches workspace and conversation.
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const isActiveWorkspace = activeWorkspaceId === workspaceId;
+
+    const extraPanes = useSplitPaneStore((s) =>
+        isActiveWorkspace
+            ? (s.extraPanesByWorkspace[workspaceId] ?? EMPTY_PANES)
+            : EMPTY_PANES
+    );
+    const focusedPaneIndex = useSplitPaneStore((s) =>
+        isActiveWorkspace
+            ? (s.focusedPaneIndexByWorkspace[workspaceId] ?? 0)
+            : 0
+    );
+    const replaceSecondaryConversation = useSplitPaneStore(
+        (s) => s.replaceSecondaryConversation
+    );
+    const setFocusedPaneIndex = useSplitPaneStore(
+        (s) => s.setFocusedPaneIndex
+    );
+    const addPane = useSplitPaneStore((s) => s.addPane);
+
+    const totalPanes = isActiveWorkspace ? extraPanes.length + 1 : 1;
+    const splitFull = isActiveWorkspace && totalPanes >= MAX_PANES;
+
+    // Convs currently rendered in any pane of THIS workspace. The primary
+    // pane's conversation is whatever the URL points to, mirrored into
+    // `activeConversationId` by the route effect. Secondary panes come
+    // from the split store.
+    const openPaneConvIds = useMemo(() => {
+        if (!isActiveWorkspace) {
+            return new Set<string>(
+                activeConversationId ? [activeConversationId] : []
+            );
+        }
+        const ids = new Set<string>();
+        if (activeConversationId) ids.add(activeConversationId);
+        for (const p of extraPanes) ids.add(p.conversationId);
+        return ids;
+    }, [isActiveWorkspace, activeConversationId, extraPanes]);
+
+    const focusedPaneConvId = useMemo(() => {
+        if (!isActiveWorkspace) return activeConversationId;
+        if (focusedPaneIndex === 0) return activeConversationId ?? null;
+        const extra = extraPanes[focusedPaneIndex - 1];
+        return extra?.conversationId ?? null;
+    }, [
+        isActiveWorkspace,
+        activeConversationId,
+        extraPanes,
+        focusedPaneIndex
+    ]);
+
+    const handleOpen = useCallback(
+        (conversationId: string) => {
+            // Cross-workspace click: just navigate. If the target workspace
+            // happens to already have splits, the next mount of its sidebar
+            // will show them — but we don't try to preserve "which pane
+            // gets replaced" across workspace switches because that gets
+            // confusing fast.
+            if (!isActiveWorkspace) {
+                void navigate({
+                    to: "/conversations/$conversationId",
+                    params: { conversationId }
+                });
+                return;
+            }
+            // Replace the focused pane: primary pane → navigate;
+            // secondary pane → store update.
+            if (focusedPaneIndex === 0) {
+                void navigate({
+                    to: "/conversations/$conversationId",
+                    params: { conversationId }
+                });
+                return;
+            }
+            replaceSecondaryConversation(
+                workspaceId,
+                focusedPaneIndex,
+                conversationId
+            );
+            setFocusedPaneIndex(workspaceId, focusedPaneIndex);
+        },
+        [
+            isActiveWorkspace,
+            focusedPaneIndex,
+            navigate,
+            replaceSecondaryConversation,
+            setFocusedPaneIndex,
+            workspaceId
+        ]
+    );
+
+    const handleSplit = useCallback(
+        (conversationId: string) => {
+            if (!isActiveWorkspace) return;
+            addPane(workspaceId, conversationId);
+        },
+        [isActiveWorkspace, addPane, workspaceId]
+    );
+
     useEffect(() => {
         void useConversationStore.getState().loadConversations(workspaceId);
     }, [workspaceId]);
@@ -272,7 +447,10 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     key={conv.id}
                     conv={conv}
                     workspaceId={workspaceId}
-                    isActive={activeConversationId === conv.id}
+                    isActive={openPaneConvIds.has(conv.id)}
+                    isFocusedPane={
+                        isActiveWorkspace && focusedPaneConvId === conv.id
+                    }
                     isUnread={Boolean(unreadConversationIds[conv.id])}
                     isStreaming={Boolean(streamingConversationIds[conv.id])}
                     isPendingPermission={
@@ -281,6 +459,9 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     isPendingQuestion={
                         (pendingQuestions[conv.id]?.length ?? 0) > 0
                     }
+                    splitFull={splitFull}
+                    onOpen={handleOpen}
+                    onSplit={handleSplit}
                 />
             ))}
         </div>

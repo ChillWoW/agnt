@@ -16,6 +16,7 @@ import { KeybindTooltip } from "../ui";
 import { LeftSidebar, useLeftSidebarStore } from "@/features/left-sidebar";
 import { RightSidebar, useRightSidebarStore } from "@/features/right-sidebar";
 import { useWorkspaceStore } from "@/features/workspaces";
+import { SplitPaneArea } from "./SplitPaneArea";
 
 interface AppLayoutProps {
     children: ReactNode;
@@ -174,8 +175,8 @@ export function AppLayout({ children }: AppLayoutProps) {
 
             <div className="flex flex-1 overflow-hidden">
                 <LeftSidebar />
-                <main className="relative min-h-0 min-w-0 flex-1 overflow-auto">
-                    {children}
+                <main className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+                    <SplitPaneArea>{children}</SplitPaneArea>
                     <SettingsPanel />
                 </main>
                 <RightSidebar />

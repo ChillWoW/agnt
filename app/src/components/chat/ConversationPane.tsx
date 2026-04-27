@@ -1,0 +1,367 @@
+import { Link } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import {
+    ArrowDownIcon,
+    CaretRightIcon,
+    FolderNotchIcon,
+    XIcon
+} from "@phosphor-icons/react";
+import { cn } from "@/lib/cn";
+import { Popover, PopoverContent, PopoverTrigger, Tooltip } from "@/components/ui";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { MessageList } from "@/components/chat/MessageList";
+import { useConversationStore } from "@/features/conversations";
+import type { SubagentType } from "@/features/conversations";
+import { useWorkspaceStore } from "@/features/workspaces";
+
+const SUBAGENT_TYPE_LABEL: Record<SubagentType, string> = {
+    generalPurpose: "generalPurpose",
+    explore: "explore",
+    shell: "shell",
+    docs: "docs",
+    "best-of-n-runner": "best-of-n-runner"
+};
+
+export interface ConversationPaneProps {
+    /** Conversation rendered inside the pane. */
+    conversationId: string;
+    /**
+     * The primary pane is URL-bound; secondary panes live in
+     * `useSplitPaneStore`. Pass `true` for the route-rendered pane and
+     * `false` for every additional pane in the split layout.
+     */
+    isPrimary?: boolean;
+    /** Whether this pane currently has the keyboard/UI focus marker. */
+    isFocused?: boolean;
+    /** Whether any split panes are currently visible at all (>1 pane). */
+    splitActive?: boolean;
+    /** Called when the user clicks anywhere inside the pane chrome. */
+    onFocus?: () => void;
+    /** Called when the user clicks the secondary-pane close button. */
+    onClose?: () => void;
+}
+
+/**
+ * Self-contained chat pane: own conversation hydration, breadcrumbs,
+ * message list, scroll-to-bottom button, and chat input. Used by both the
+ * `/conversations/$conversationId` route (as the primary pane) and the
+ * split-pane layout (as secondary panes).
+ *
+ * State is keyed by `conversationId` rather than by pane id, so the same
+ * Zustand slices that power the rest of the app (streaming, permissions,
+ * questions, drafts) keep working unchanged when a conversation is shown
+ * inside a secondary pane.
+ */
+export function ConversationPane({
+    conversationId,
+    isPrimary = false,
+    isFocused = false,
+    splitActive = false,
+    onFocus,
+    onClose
+}: ConversationPaneProps) {
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const activeWorkspace = useWorkspaceStore(
+        (s) =>
+            s.workspaces.find(
+                (workspace) => workspace.id === activeWorkspaceId
+            ) ?? null
+    );
+
+    const conversation = useConversationStore(
+        (s) => s.conversationsById[conversationId] ?? null
+    );
+    const isLoadingConversation = useConversationStore((s) =>
+        Boolean(s.loadingConversationIds[conversationId])
+    );
+    const isStreaming = useConversationStore((s) =>
+        Boolean(s.streamControllersById[conversationId])
+    );
+    const loadConversation = useConversationStore((s) => s.loadConversation);
+    const loadSubagents = useConversationStore((s) => s.loadSubagents);
+    const sendMessage = useConversationStore((s) => s.sendMessage);
+    const stopGeneration = useConversationStore((s) => s.stopGeneration);
+    const observeConversation = useConversationStore(
+        (s) => s.observeConversation
+    );
+
+    const parentConversationId = conversation?.parent_conversation_id ?? null;
+    const parentConversation = useConversationStore((s) =>
+        parentConversationId
+            ? (s.conversationsById[parentConversationId] ?? null)
+            : null
+    );
+
+    const scrollButtonRef = useRef<HTMLDivElement>(null);
+    const scrollToBottomRef = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+        if (activeWorkspaceId) {
+            void loadConversation(activeWorkspaceId, conversationId);
+        }
+    }, [activeWorkspaceId, conversationId, loadConversation]);
+
+    // Subagent pages don't start their own stream (the parent's `task` tool
+    // does), so we attach a read-only observer to receive live SSE events.
+    useEffect(() => {
+        if (!activeWorkspaceId) return;
+        if (!conversation?.parent_conversation_id) return;
+        const dispose = observeConversation(activeWorkspaceId, conversationId);
+        return () => {
+            dispose();
+        };
+    }, [
+        activeWorkspaceId,
+        conversationId,
+        conversation?.parent_conversation_id,
+        observeConversation
+    ]);
+
+    // Ensure the parent conversation row is available for breadcrumbs.
+    useEffect(() => {
+        if (!activeWorkspaceId || !parentConversationId) return;
+        if (parentConversation) return;
+        void loadConversation(activeWorkspaceId, parentConversationId);
+    }, [
+        activeWorkspaceId,
+        parentConversationId,
+        parentConversation,
+        loadConversation
+    ]);
+
+    // Hydrate known subagents for parent conversations so TaskBlock cards
+    // render metadata (name/type) immediately after a page refresh without
+    // needing the original subagent-started SSE event.
+    useEffect(() => {
+        if (!activeWorkspaceId) return;
+        if (conversation?.parent_conversation_id) return;
+        void loadSubagents(activeWorkspaceId, conversationId);
+    }, [
+        activeWorkspaceId,
+        conversationId,
+        conversation?.parent_conversation_id,
+        loadSubagents
+    ]);
+
+    const handleSend = (
+        content: string,
+        attachmentIds: string[],
+        mentions: { path: string; type: "file" | "directory" }[],
+        useSkillNames?: string[]
+    ) => {
+        if (!activeWorkspaceId || !conversation) return;
+        void sendMessage(
+            activeWorkspaceId,
+            conversation.id,
+            content,
+            attachmentIds,
+            mentions,
+            useSkillNames
+        );
+    };
+
+    const handleStop = () => {
+        stopGeneration(conversationId);
+    };
+
+    const isSubagent = Boolean(conversation?.parent_conversation_id);
+    const subagentType = conversation?.subagent_type as
+        | SubagentType
+        | null
+        | undefined;
+    const subagentName = conversation?.subagent_name ?? "subagent";
+    const parentTitle = parentConversation?.title ?? "Parent conversation";
+
+    let body: React.ReactNode;
+    if (isLoadingConversation && !conversation) {
+        body = (
+            <div className="flex h-full items-center justify-center">
+                <span className="text-sm text-dark-300">Loading...</span>
+            </div>
+        );
+    } else if (!conversation) {
+        body = (
+            <div className="flex h-full items-center justify-center">
+                <span className="text-sm text-dark-300">
+                    Conversation not found
+                </span>
+            </div>
+        );
+    } else {
+        const visibleMessages = conversation.messages.filter(
+            (m) => m.role === "user" || m.role === "assistant"
+        );
+
+        body = (
+            <>
+                <div className="sticky top-0 z-10 shrink-0">
+                    <div className="mx-auto flex items-center gap-1 px-2.5 py-1.5">
+                        {isSubagent && parentConversationId ? (
+                            <div className="flex items-center gap-1 text-xs">
+                                <Link
+                                    to="/conversations/$conversationId"
+                                    params={{
+                                        conversationId: parentConversationId
+                                    }}
+                                    className="max-w-[14rem] truncate rounded-md px-2 py-1 font-medium text-dark-100 hover:bg-dark-900 hover:text-dark-50 transition-colors"
+                                >
+                                    {parentTitle}
+                                </Link>
+                                <CaretRightIcon
+                                    className="size-3 shrink-0 text-dark-400"
+                                    weight="bold"
+                                />
+                                <div className="flex items-center gap-1.5 rounded-md px-2 py-1">
+                                    <span className="truncate font-medium text-dark-50">
+                                        {subagentName}
+                                    </span>
+                                    {subagentType ? (
+                                        <span className="rounded-sm bg-dark-900 px-1.5 py-0.5 text-[10px] font-medium text-dark-200">
+                                            {SUBAGENT_TYPE_LABEL[subagentType]}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : (
+                            <Popover>
+                                <PopoverTrigger
+                                    type="button"
+                                    className="w-auto max-w-full rounded-md text-xs hover:bg-dark-900 px-2.5 py-1 transition-colors"
+                                >
+                                    <span className="truncate font-medium">
+                                        {conversation.title}
+                                    </span>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                    align="start"
+                                    sideOffset={10}
+                                    className="flex flex-col gap-2 text-[11px]"
+                                >
+                                    {conversation.title && (
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-dark-100">
+                                                {conversation.title}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2">
+                                        <FolderNotchIcon
+                                            className="size-3.5 shrink-0 text-dark-300"
+                                            weight="duotone"
+                                        />
+                                        <div className="min-w-0 text-dark-100">
+                                            {activeWorkspace?.path ??
+                                                "No workspace selected"}
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        )}
+
+                        {!isPrimary && onClose ? (
+                            <div className="ml-auto">
+                                <Tooltip content="Close pane" side="bottom">
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onClose();
+                                        }}
+                                        className="flex size-6 items-center justify-center rounded-md text-dark-300 transition-colors hover:bg-dark-800 hover:text-dark-50"
+                                    >
+                                        <XIcon
+                                            className="size-3.5"
+                                            weight="bold"
+                                        />
+                                    </button>
+                                </Tooltip>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+
+                <div
+                    className="min-h-0 flex-1 overflow-hidden"
+                    style={{
+                        WebkitMaskImage:
+                            "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)",
+                        maskImage:
+                            "linear-gradient(to bottom, black calc(100% - 4rem), transparent 100%)"
+                    }}
+                >
+                    <MessageList
+                        messages={visibleMessages}
+                        conversationId={conversation.id}
+                        scrollButtonRef={scrollButtonRef}
+                        scrollToBottomRef={scrollToBottomRef}
+                    />
+                </div>
+
+                <div className="shrink-0">
+                    <div className="mx-auto max-w-3xl px-4 pt-4 pb-2">
+                        <div
+                            ref={scrollButtonRef}
+                            style={{
+                                opacity: 0,
+                                pointerEvents: "none",
+                                transform: "translateY(4px)",
+                                transition:
+                                    "opacity 150ms ease, transform 150ms ease"
+                            }}
+                            className="mb-2 inline-flex"
+                        >
+                            <button
+                                type="button"
+                                onClick={() => scrollToBottomRef.current?.()}
+                                className="flex items-center gap-1.5 rounded-full border border-dark-700 bg-dark-850 px-3 py-1.5 text-xs text-dark-100 shadow-sm transition-colors hover:bg-dark-700 hover:text-dark-50"
+                            >
+                                <ArrowDownIcon
+                                    className="size-3.5"
+                                    weight="bold"
+                                />
+                                Back to bottom
+                            </button>
+                        </div>
+                        <ChatInput
+                            onSend={handleSend}
+                            onStop={handleStop}
+                            isStreaming={isStreaming}
+                            workspaceId={activeWorkspaceId}
+                            conversationId={conversation.id}
+                            placeholder={
+                                isStreaming
+                                    ? "Waiting for response..."
+                                    : "Send a message..."
+                            }
+                        />
+                    </div>
+                </div>
+            </>
+        );
+    }
+
+    // The pane only paints a focus indicator when the layout is actually
+    // split — a single pane never needs the visual cue, so we keep it
+    // visually identical to the pre-split layout in that case.
+    return (
+        <div
+            className={cn(
+                "relative flex h-full min-w-0 flex-col",
+                splitActive && "transition-colors"
+            )}
+            onMouseDown={onFocus}
+            onFocus={onFocus}
+        >
+            {splitActive ? (
+                <div
+                    aria-hidden
+                    className={cn(
+                        "pointer-events-none absolute inset-x-0 top-0 z-20 h-px transition-colors",
+                        isFocused ? "bg-dark-50/40" : "bg-transparent"
+                    )}
+                />
+            ) : null}
+            {body}
+        </div>
+    );
+}

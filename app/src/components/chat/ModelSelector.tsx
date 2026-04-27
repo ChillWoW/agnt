@@ -19,6 +19,7 @@ import {
 } from "@/features/hotkeys";
 import { cn } from "@/lib/cn";
 import { useModelSelection } from "@/features/models";
+import { usePaneFocus } from "@/features/split-panes";
 import type {
     ReasoningEffort,
     ModelSpeed,
@@ -108,12 +109,15 @@ export function ModelSelector({
         "models.reasoning.cycle"
     );
 
+    // Only the focused split pane should react to the chord (see
+    // AgenticModeSelector for the rationale).
+    const isPaneFocused = usePaneFocus();
     useHotkey({
         id: "models.reasoning.cycle",
         label: "Cycle reasoning",
         description: "Cycle through reasoning levels for the selected model",
         defaultCombo: "Ctrl+E",
-        enabled: selectedReasoningEfforts.length > 1,
+        enabled: isPaneFocused && selectedReasoningEfforts.length > 1,
         handler: cycleReasoningEffort
     });
 
