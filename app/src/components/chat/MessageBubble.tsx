@@ -6,7 +6,7 @@ import type {
 } from "@/features/conversations/conversation-types";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
 import { useWorkspaceStore } from "@/features/workspaces";
-import { StreamingDots } from "./StreamingDots";
+import { StreamingPlaceholder } from "./StreamingPlaceholder";
 import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
@@ -146,7 +146,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         return buildTimeline({ ...message, reasoning_parts: reasoningParts });
     })();
 
-    const showStreamingDots =
+    const showStreamingPlaceholder =
         message.isStreaming && !hasContent && !hasToolCalls && !hasReasoning;
 
     return (
@@ -202,8 +202,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     </div>
                 )}
 
-                {showStreamingDots ? (
-                    <StreamingDots />
+                {showStreamingPlaceholder ? (
+                    <StreamingPlaceholder />
                 ) : hasContent ? (
                     isUser ? (
                         <MessageText
