@@ -3,10 +3,12 @@ import type { CompactionResult, ContextSummary } from "./context-types";
 
 export function fetchContextSummary(
     workspaceId: string,
-    conversationId: string
+    conversationId: string,
+    signal?: AbortSignal
 ): Promise<ContextSummary> {
     return api.get<ContextSummary>(
-        `/workspaces/${workspaceId}/conversations/${conversationId}/context`
+        `/workspaces/${workspaceId}/conversations/${conversationId}/context`,
+        { signal }
     );
 }
 

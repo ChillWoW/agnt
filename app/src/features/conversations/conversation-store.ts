@@ -288,6 +288,14 @@ function handleConversationSseEvent(
                     }
                     return { ...prev, messages: [...prev.messages, msg] };
                 });
+                // Server has already INSERTed the user message + linked
+                // attachments to the DB by the time this event fires, so
+                // the next /context fetch will reflect them. Without this,
+                // the meter would freeze at the previous turn's totals
+                // until the whole turn finishes.
+                useConversationStore
+                    .getState()
+                    .bumpContextRefresh(conversationId);
                 break;
             }
 
@@ -723,6 +731,15 @@ function handleConversationSseEvent(
                         return { ...m, tool_invocations };
                     })
                 }));
+                // Server persists output_json (or `error`) into
+                // tool_invocations BEFORE emitting `tool-result` (see
+                // `conversation.stream.ts`), so a fresh /context fetch
+                // here will include the new tool-output tokens. Coalesced
+                // by the 150ms trailing delay in `useContextMeter` so a
+                // burst of parallel tool completions is one fetch.
+                useConversationStore
+                    .getState()
+                    .bumpContextRefresh(conversationId);
                 break;
             }
 

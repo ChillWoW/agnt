@@ -26,8 +26,11 @@ export interface ContextMeterState {
 /**
  * Live context usage. Server is authoritative for history; we only estimate
  * the unsent draft (textarea contents + pending attachments) locally and
- * add it on top. The hook re-fetches whenever the conversation finishes
- * streaming, is compacted, or when refreshToken is bumped.
+ * add it on top. The hook re-fetches on every `refreshToken` bump — the
+ * SSE handler bumps on `user-message`, `tool-result`, `finish`, `abort`,
+ * and `compacted` — with a 150ms trailing coalesce so a burst of tool
+ * completions doesn't fan out into N HTTP calls. Stale in-flight fetches
+ * are aborted via AbortController whenever a newer bump supersedes them.
  */
 export function useContextMeter({
     workspaceId,
@@ -60,26 +63,45 @@ export function useContextMeter({
             return;
         }
 
+        // The effect re-runs on every `refreshToken` bump emitted from the
+        // SSE handler (`user-message`, `tool-result`, `finish`, `abort`,
+        // `compacted`). Tool-heavy turns fire several bumps in quick
+        // succession (e.g. parallel tool completions); trail by ~150ms so
+        // bursts coalesce into a single /context fetch. 150ms is well
+        // below the ~250ms "feels instant" threshold so the meter still
+        // visibly ticks up as each tool call lands.
+        const controller = new AbortController();
         let cancelled = false;
-        setIsLoading(true);
         setError(null);
 
-        fetchContextSummary(workspaceId, conversationId)
-            .then((next) => {
-                if (cancelled) return;
-                setContextSummary(conversationId, next);
-            })
-            .catch((err: unknown) => {
-                if (cancelled) return;
-                setError(err instanceof Error ? err : new Error(String(err)));
-            })
-            .finally(() => {
-                if (cancelled) return;
-                setIsLoading(false);
-            });
+        const timer = window.setTimeout(() => {
+            if (cancelled) return;
+            setIsLoading(true);
+            fetchContextSummary(workspaceId, conversationId, controller.signal)
+                .then((next) => {
+                    if (cancelled) return;
+                    setContextSummary(conversationId, next);
+                })
+                .catch((err: unknown) => {
+                    if (cancelled) return;
+                    if (
+                        err instanceof DOMException &&
+                        err.name === "AbortError"
+                    ) {
+                        return;
+                    }
+                    setError(err instanceof Error ? err : new Error(String(err)));
+                })
+                .finally(() => {
+                    if (cancelled) return;
+                    setIsLoading(false);
+                });
+        }, 150);
 
         return () => {
             cancelled = true;
+            window.clearTimeout(timer);
+            controller.abort();
         };
     }, [workspaceId, conversationId, refreshToken, setContextSummary]);
 
