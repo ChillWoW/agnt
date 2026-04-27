@@ -2,10 +2,21 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ArchiveIcon, CaretRightIcon } from "@phosphor-icons/react";
 import type { Message } from "@/features/conversations/conversation-types";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
-import { useConversationStore } from "@/features/conversations";
+import {
+    useConversationStore,
+    usePromptQueueStore
+} from "@/features/conversations";
+import type { QueuedPrompt } from "@/features/conversations";
 import { MessageBubble } from "./MessageBubble";
+import { QueuedPromptBubble } from "./QueuedPromptBubble";
 
 const SCROLL_THRESHOLD = 80;
+
+// Stable empty fallback so the prompt-queue selector returns the same
+// reference across renders when a conversation has nothing queued. Returning
+// a fresh `[]` on every call breaks `useSyncExternalStore`'s snapshot
+// equality and triggers React's "Maximum update depth exceeded" guard.
+const EMPTY_QUEUE: QueuedPrompt[] = [];
 
 interface MessageListProps {
     messages: Message[];
@@ -24,6 +35,11 @@ export function MessageList({
         conversationId
             ? Boolean(state.compactingByConversationId[conversationId])
             : false
+    );
+    const queuedPrompts = usePromptQueueStore((state) =>
+        conversationId
+            ? (state.queueByConversationId[conversationId] ?? EMPTY_QUEUE)
+            : EMPTY_QUEUE
     );
     const scrollRef = useRef<HTMLDivElement>(null);
     const isAtBottom = useRef(true);
@@ -98,7 +114,7 @@ export function MessageList({
         if (isAtBottom.current) {
             snapToBottom();
         }
-    }, [messages, isCompacting, snapToBottom]);
+    }, [messages, isCompacting, queuedPrompts.length, snapToBottom]);
 
     const renderedItems = useMemo(() => {
         const items: Array<
@@ -158,6 +174,14 @@ export function MessageList({
                         );
                     })}
                     {isCompacting && <CompactionInProgress />}
+                    {conversationId &&
+                        queuedPrompts.map((queued) => (
+                            <QueuedPromptBubble
+                                key={queued.id}
+                                queued={queued}
+                                conversationId={conversationId}
+                            />
+                        ))}
                 </div>
             </div>
         </div>

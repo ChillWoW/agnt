@@ -17,6 +17,7 @@ import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
 import { useTodoStore } from "@/features/todos";
 import type { Todo } from "@/features/todos";
 import { clearDraft as clearChatDraft } from "@/features/chat-drafts";
+import { usePromptQueueStore } from "./prompt-queue";
 import { usePlanStore, PLAN_FILE_PREFIX } from "@/features/plans";
 import type { Plan } from "@/features/plans";
 import { useRightSidebarStore } from "@/features/right-sidebar/right-sidebar-store";
@@ -1165,6 +1166,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
     }
 
     async function runConversationStream(
+        workspaceId: string,
         conversationId: string,
         startRequest: (signal: AbortSignal) => Promise<Response>
     ): Promise<void> {
@@ -1337,6 +1339,29 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     }
                 }));
             }
+
+            // Drain the next queued prompt for this conversation, if any.
+            // The decision (per spec) is to drain on every outcome — including
+            // user-initiated stops and stream errors — so a queued prompt
+            // always gets its turn unless the user explicitly removed it from
+            // the queue. The microtask hop ensures `streamControllersById`
+            // has been cleared before the recursive `sendMessage` re-enters
+            // `runConversationStream` (which would otherwise short-circuit on
+            // the still-present controller).
+            queueMicrotask(() => {
+                const head = usePromptQueueStore
+                    .getState()
+                    .shift(conversationId);
+                if (!head) return;
+                void get().sendMessage(
+                    workspaceId,
+                    conversationId,
+                    head.content,
+                    head.attachmentIds,
+                    head.mentions,
+                    head.useSkillNames
+                );
+            });
         }
     }
 
@@ -1707,7 +1732,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             mentions: conversationApi.MessageMention[] = [],
             useSkillNames: string[] = []
         ) => {
-            await runConversationStream(conversationId, (signal) =>
+            await runConversationStream(workspaceId, conversationId, (signal) =>
                 conversationApi.streamMessage(
                     workspaceId,
                     conversationId,
@@ -1724,7 +1749,7 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             workspaceId: string,
             conversationId: string
         ) => {
-            await runConversationStream(conversationId, (signal) =>
+            await runConversationStream(workspaceId, conversationId, (signal) =>
                 conversationApi.replyToConversation(
                     workspaceId,
                     conversationId,
@@ -1742,6 +1767,9 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             // not found" pane. Done up-front so the UI updates synchronously
             // alongside the optimistic active→archived move below.
             useSplitPaneStore.getState().forgetConversation(conversationId);
+            // Drop any queued prompts for this conversation so they don't
+            // silently fire if the user un-archives later.
+            usePromptQueueStore.getState().clear(conversationId);
 
             // Snapshot the conversation row from the active list so we can
             // optimistically move it into the archived bucket. Fall back to
@@ -1935,6 +1963,9 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
             // Drop this conversation from any split pane currently rendering
             // it (mirrors the archive path).
             useSplitPaneStore.getState().forgetConversation(conversationId);
+            // Drop any queued prompts so they don't try to re-fire against a
+            // deleted conversation id (the next stream would 404).
+            usePromptQueueStore.getState().clear(conversationId);
             // Hard-delete only — archive intentionally keeps drafts so they
             // come back if the user un-archives.
             clearChatDraft({ kind: "conversation", conversationId });

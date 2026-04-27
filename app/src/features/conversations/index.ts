@@ -1,4 +1,6 @@
 export { useConversationStore } from "./conversation-store";
+export { usePromptQueueStore } from "./prompt-queue";
+export type { QueuedPrompt, QueuedPromptInput } from "./prompt-queue";
 export type {
     Conversation,
     ConversationWithMessages,

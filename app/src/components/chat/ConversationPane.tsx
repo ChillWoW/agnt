@@ -10,7 +10,10 @@ import { cn } from "@/lib/cn";
 import { Popover, PopoverContent, PopoverTrigger, Tooltip } from "@/components/ui";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
-import { useConversationStore } from "@/features/conversations";
+import {
+    useConversationStore,
+    usePromptQueueStore
+} from "@/features/conversations";
 import type { SubagentType } from "@/features/conversations";
 import { useWorkspaceStore } from "@/features/workspaces";
 
@@ -150,6 +153,19 @@ export function ConversationPane({
         useSkillNames?: string[]
     ) => {
         if (!activeWorkspaceId || !conversation) return;
+        // Mid-stream sends go into the per-conversation prompt queue; the
+        // current turn's `finally` will FIFO-drain them via `sendMessage`
+        // once the in-flight controller is gone. See
+        // `runConversationStream` in `conversation-store.ts`.
+        if (isStreaming) {
+            usePromptQueueStore.getState().enqueue(conversation.id, {
+                content,
+                attachmentIds,
+                mentions,
+                useSkillNames
+            });
+            return;
+        }
         void sendMessage(
             activeWorkspaceId,
             conversation.id,
@@ -330,7 +346,7 @@ export function ConversationPane({
                             conversationId={conversation.id}
                             placeholder={
                                 isStreaming
-                                    ? "Waiting for response..."
+                                    ? "Add to queue..."
                                     : "Send a message..."
                             }
                         />
