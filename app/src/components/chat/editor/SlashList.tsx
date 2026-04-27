@@ -10,7 +10,9 @@ import {
 import {
     LightningIcon,
     ListBulletsIcon,
+    MagicWandIcon,
     RobotIcon,
+    RocketLaunchIcon,
     ShieldCheckIcon,
     SparkleIcon,
     WrenchIcon,
@@ -85,9 +87,35 @@ const SKILL_ICON: ModeIconConfig = {
     idle: "text-dark-300"
 };
 
+/**
+ * Per-command overrides for prompt-kind entries. Same idea as
+ * `MODE_ICONS`: each built-in prompt command gets its own glyph + tone
+ * so the popover communicates intent at a glance. `/init` reads as
+ * "spin up project docs", hence the rocket. New prompt commands fall
+ * back to a generic magic-wand icon.
+ */
+const PROMPT_ICONS: Record<string, ModeIconConfig> = {
+    init: {
+        Icon: RocketLaunchIcon,
+        weight: "fill",
+        selected: "text-violet-300",
+        idle: "text-violet-500/75"
+    }
+};
+
+const PROMPT_FALLBACK: ModeIconConfig = {
+    Icon: MagicWandIcon,
+    weight: "regular",
+    selected: "text-violet-300",
+    idle: "text-violet-500/75"
+};
+
 function iconConfigFor(cmd: SlashCommand): ModeIconConfig {
     if (cmd.kind === "mode") {
         return MODE_ICONS[cmd.name] ?? MODE_FALLBACK;
+    }
+    if (cmd.kind === "prompt") {
+        return PROMPT_ICONS[cmd.name] ?? PROMPT_FALLBACK;
     }
     return SKILL_ICON;
 }
@@ -121,6 +149,11 @@ const GROUPS: Array<{
         id: "modes",
         heading: "Modes",
         predicate: (cmd) => cmd.kind === "mode"
+    },
+    {
+        id: "prompts",
+        heading: "Prompts",
+        predicate: (cmd) => cmd.kind === "prompt"
     },
     {
         id: "skills",

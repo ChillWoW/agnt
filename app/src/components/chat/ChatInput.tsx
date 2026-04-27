@@ -255,25 +255,44 @@ export function ChatInput({
             // Primary slash-command source: the marked tokens picked from
             // the popover. Mode commands never appear here — they're
             // intercepted in `handleSlashSelect` and fire immediately on
-            // selection — so any name we see in this list is a skill.
-            const skillNamesFromMarks = serialized.slashCommandNames
-                .map((n) => n.toLowerCase())
-                .filter((name) =>
-                    cmds.some(
+            // selection — so any name we see in this list is either a
+            // skill or a prompt-kind command (`/init`). We split them by
+            // kind because skills travel as the 4th `onSend` arg while
+            // prompts are inlined into the message body.
+            const slashNamesFromMarks = serialized.slashCommandNames.map(
+                (n) => n.toLowerCase()
+            );
+            const skillNamesFromMarks = slashNamesFromMarks.filter((name) =>
+                cmds.some(
+                    (c) =>
+                        c.kind === "skill" &&
+                        c.name.toLowerCase() === name
+                )
+            );
+            const promptCmdFromMarks = (() => {
+                for (const name of slashNamesFromMarks) {
+                    const found = cmds.find(
                         (c) =>
-                            c.kind === "skill" &&
+                            c.kind === "prompt" &&
                             c.name.toLowerCase() === name
-                    )
-                );
+                    );
+                    if (found && found.prompt) return found;
+                }
+                return null;
+            })();
 
             // Fallback for typed-but-not-popover paths: the user typed
-            // `/agent` (or `/plan`, etc.) at the start of the message
-            // without clicking the popover, then hit Enter. This branch
-            // catches mode commands typed verbatim and applies the same
-            // immediate-toggle-then-bail behavior the popover provides.
-            // Skill commands fall through to the regular send path.
+            // `/agent` (or `/plan`, `/init`, etc.) at the start of the
+            // message without clicking the popover, then hit Enter. This
+            // branch catches mode commands typed verbatim and applies the
+            // same immediate-toggle-then-bail behavior the popover
+            // provides. Skill and prompt commands fall through to the
+            // regular send path with their respective expansions.
             let textForSend = cleanedText;
-            if (skillNamesFromMarks.length === 0) {
+            if (
+                skillNamesFromMarks.length === 0 &&
+                promptCmdFromMarks === null
+            ) {
                 const { command, rest } =
                     extractLeadingSlashCommand(cleanedText);
                 const matched = command
@@ -302,6 +321,23 @@ export function ChatInput({
                     skillNamesFromMarks.push(matched.name.toLowerCase());
                     textForSend = rest;
                 }
+
+                if (matched && matched.kind === "prompt" && matched.prompt) {
+                    textForSend =
+                        rest.length > 0
+                            ? `${matched.prompt}\n\n${rest}`
+                            : matched.prompt;
+                }
+            } else if (promptCmdFromMarks && promptCmdFromMarks.prompt) {
+                // Popover-selected prompt command: the marked token was
+                // already stripped from `cleanedText` by the editor's
+                // serializer, so anything left is the user's free-form
+                // addendum. Inline the full prompt body and append the
+                // addendum (if any) so extra context isn't lost.
+                textForSend =
+                    cleanedText.length > 0
+                        ? `${promptCmdFromMarks.prompt}\n\n${cleanedText}`
+                        : promptCmdFromMarks.prompt;
             }
 
             const useSkillNames = Array.from(new Set(skillNamesFromMarks));

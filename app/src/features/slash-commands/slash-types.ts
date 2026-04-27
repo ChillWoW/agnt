@@ -1,7 +1,7 @@
 import type { AgenticMode } from "@/features/plans";
 import type { PermissionMode } from "@/features/permissions";
 
-export type SlashCommandKind = "skill" | "mode";
+export type SlashCommandKind = "skill" | "mode" | "prompt";
 
 export type SlashSkillSource = "user" | "project";
 
@@ -15,7 +15,10 @@ export type SlashModeEffect =
 
 /**
  * A single slash-command entry rendered in the popover. Built-in mode
- * commands carry a `mode` effect; skill commands carry a `source`.
+ * commands carry a `mode` effect; skill commands carry a `source`;
+ * prompt commands carry a `prompt` body that replaces the user's
+ * message text on send (so `/init` becomes a long instruction the
+ * model receives even though the user only typed `/init`).
  */
 export interface SlashCommand {
     /**
@@ -32,4 +35,12 @@ export interface SlashCommand {
     mode?: SlashModeEffect;
     /** Only present on skill commands. */
     source?: SlashSkillSource;
+    /**
+     * Only present on built-in prompt commands. The full instruction text
+     * that gets sent to the model in place of the literal `/<name>` token
+     * the user typed. If the user added free-form text alongside the
+     * command, that text is appended after the prompt body so additional
+     * context isn't lost.
+     */
+    prompt?: string;
 }
