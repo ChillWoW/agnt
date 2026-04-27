@@ -5,6 +5,7 @@ import {
     settingsSchema,
     DEFAULT_SETTINGS,
     DEFAULT_DIAGNOSTICS_SETTINGS,
+    DEFAULT_GENERAL_SETTINGS,
     DEFAULT_NOTIFICATIONS_SETTINGS,
     getDefaultToolPermissionSettings,
     type Settings,
@@ -24,6 +25,10 @@ function ensureDir(): void {
 function normalizeSettings(settings: Settings): Settings {
     return {
         ...settings,
+        general: {
+            ...DEFAULT_GENERAL_SETTINGS,
+            ...settings.general
+        },
         hotkeys: {
             bindings: {
                 ...DEFAULT_SETTINGS.hotkeys.bindings,

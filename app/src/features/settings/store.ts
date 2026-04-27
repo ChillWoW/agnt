@@ -8,6 +8,10 @@ import {
 
 function normalizeSettings(raw: Partial<Settings>): Settings {
     return {
+        general: {
+            ...DEFAULT_SETTINGS.general,
+            ...raw.general
+        },
         hotkeys: {
             bindings: {
                 ...DEFAULT_SETTINGS.hotkeys.bindings,

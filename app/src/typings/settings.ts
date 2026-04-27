@@ -62,7 +62,22 @@ export const DEFAULT_DIAGNOSTICS_SETTINGS: DiagnosticsSettings = {
     waitMs: 1500
 };
 
+export type GeneralSettings = {
+    /**
+     * When true (default), file-touching tools (glob, grep, write,
+     * str_replace, apply_patch, shell, diagnostics) refuse paths that
+     * resolve outside the active workspace. When false, those tools accept
+     * any absolute path on the host filesystem.
+     */
+    restrictToolsToWorkspace: boolean;
+};
+
+export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
+    restrictToolsToWorkspace: true
+};
+
 export type Settings = {
+    general: GeneralSettings;
     hotkeys: HotkeySettings;
     toolPermissions: ToolPermissionsSettings;
     notifications: NotificationsSettings;
@@ -72,6 +87,7 @@ export type Settings = {
 export type SettingsCategory = keyof Settings;
 
 export const DEFAULT_SETTINGS: Settings = {
+    general: DEFAULT_GENERAL_SETTINGS,
     hotkeys: {
         bindings: {}
     },

@@ -6,8 +6,10 @@ import {
     PlugsIcon,
     RobotIcon,
     ScrollIcon,
-    ShieldCheckIcon
+    ShieldCheckIcon,
+    SlidersIcon
 } from "@phosphor-icons/react";
+import { GeneralSettings } from "./GeneralSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { CodexSettings } from "./CodexSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
@@ -24,6 +26,7 @@ export type SettingsCategory = {
 };
 
 export const settingsCategories: SettingsCategory[] = [
+    { key: "general", label: "General", icon: SlidersIcon },
     { key: "hotkeys", label: "Hotkeys", icon: KeyboardIcon },
     { key: "notifications", label: "Notifications", icon: BellIcon },
     { key: "rules", label: "Rules", icon: ScrollIcon },
@@ -50,6 +53,7 @@ export function SettingsPanel() {
     return (
         <div className="absolute inset-0 z-30 bg-dark-950">
             <div className="h-full overflow-y-auto">
+                {activeCategory === "general" && <GeneralSettings />}
                 {activeCategory === "hotkeys" && <HotkeySettings />}
                 {activeCategory === "notifications" && (
                     <NotificationsSettings />

@@ -65,7 +65,23 @@ export const DEFAULT_DIAGNOSTICS_SETTINGS: DiagnosticsSettings = {
     waitMs: 1500
 };
 
+export const generalSettingsSchema = z.object({
+    /**
+     * When true (default), file-touching tools (glob, grep, write,
+     * str_replace, apply_patch, shell, diagnostics) refuse paths that resolve
+     * outside the active workspace. When false, those tools accept any
+     * absolute path on the host filesystem. `read_file` is unaffected — it
+     * has always accepted absolute paths.
+     */
+    restrictToolsToWorkspace: z.boolean().default(true)
+});
+
+export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
+    restrictToolsToWorkspace: true
+};
+
 export const settingsSchema = z.object({
+    general: generalSettingsSchema.default(DEFAULT_GENERAL_SETTINGS),
     hotkeys: z
         .object({
             bindings: z.record(z.string(), z.union([z.string(), z.null()])).default({})
@@ -84,6 +100,7 @@ export const settingsSchema = z.object({
     )
 });
 
+export type GeneralSettings = z.infer<typeof generalSettingsSchema>;
 export type HotkeySettings = z.infer<typeof settingsSchema.shape.hotkeys>;
 export type ToolPermissionDecision = z.infer<typeof toolPermissionDecisionSchema>;
 export type ToolPermissionsSettings = z.infer<typeof toolPermissionsSettingsSchema>;
@@ -94,6 +111,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 export type SettingsCategory = keyof Settings;
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
+    "general",
     "hotkeys",
     "toolPermissions",
     "notifications",
@@ -101,6 +119,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
 ] as const;
 
 export const DEFAULT_SETTINGS: Settings = {
+    general: DEFAULT_GENERAL_SETTINGS,
     hotkeys: {
         bindings: {}
     },
@@ -110,6 +129,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const categorySchemas: Record<SettingsCategory, z.ZodType> = {
+    general: generalSettingsSchema,
     hotkeys: settingsSchema.shape.hotkeys,
     toolPermissions: toolPermissionsSettingsSchema,
     notifications: notificationsSettingsSchema,

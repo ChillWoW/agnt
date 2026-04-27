@@ -1,4 +1,6 @@
 import { relative, resolve, sep } from "node:path";
+import { logger } from "../../../lib/logger";
+import { getCategory } from "../../settings/settings.service";
 
 const DEFAULT_IGNORED_DIR_SEGMENTS = [
     "node_modules",
@@ -49,30 +51,62 @@ export interface ResolvedWorkspacePath {
 }
 
 /**
- * Resolve a user-supplied path against the active workspace. Enforces that the
- * final path lives inside the workspace root — this is the safeguard that
- * prevents glob/grep from accidentally walking the whole filesystem.
+ * Read `general.restrictToolsToWorkspace` from settings, defaulting to `true`
+ * if anything goes wrong (best-effort, so a broken settings.json never opens
+ * up the host filesystem on accident).
+ */
+function isWorkspaceRestrictionEnabled(): boolean {
+    try {
+        const general = getCategory("general");
+        if (typeof general?.restrictToolsToWorkspace === "boolean") {
+            return general.restrictToolsToWorkspace;
+        }
+    } catch (error) {
+        logger.error("[workspace-path] failed to load general settings", error);
+    }
+    return true;
+}
+
+/**
+ * Resolve a user-supplied path against the active workspace.
  *
  * Path resolution rules (mirroring read_file):
  *   - leading "/" or "\\"  → workspace-root-relative (e.g. "/src/foo.ts")
- *   - fully absolute path  → accepted only if it is inside the workspace
+ *   - fully absolute path  → kept as-is (subject to the boundary check below)
  *   - relative path        → resolved against the workspace root
  *   - undefined / empty    → workspace root itself
+ *
+ * Boundary check:
+ *   When `general.restrictToolsToWorkspace` is `true` (the default), the
+ *   final absolute path must live inside the workspace root — this is what
+ *   prevents glob/grep/write/etc from accidentally walking the whole disk.
+ *   When the setting is `false`, the boundary check is skipped and any
+ *   fully absolute path on the host is accepted (relative paths still
+ *   resolve against the workspace because they have nothing else to anchor
+ *   to).
  */
 export function resolveWorkspacePath(
     rawPath: string | undefined,
     workspacePath: string | undefined,
     toolName: string
 ): ResolvedWorkspacePath {
+    const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
+    const restrictionEnabled = isWorkspaceRestrictionEnabled();
+
+    // No workspace open: the only thing we can resolve is a fully absolute
+    // path while the restriction is OFF. Everything else still needs a
+    // workspace as an anchor.
     if (!workspacePath) {
+        if (!restrictionEnabled && trimmed.length > 0 && isFullyAbsolute(trimmed)) {
+            const absolute = resolve(trimmed);
+            return { absolute, relative: absolute };
+        }
         throw new Error(
             `Tool "${toolName}" requires an open workspace. Open a workspace folder and try again.`
         );
     }
 
     const root = resolve(workspacePath);
-
-    const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
 
     let absolute: string;
     if (trimmed.length === 0) {
@@ -84,14 +118,15 @@ export function resolveWorkspacePath(
         absolute = resolve(root, stripped);
     }
 
-    if (!isInside(root, absolute)) {
+    if (restrictionEnabled && !isInside(root, absolute)) {
         throw new Error(
             `Tool "${toolName}" refuses path outside the workspace: ${absolute}. ` +
-                `Use a workspace-relative path (e.g. "/src" or "src/foo.ts").`
+                `Use a workspace-relative path (e.g. "/src" or "src/foo.ts"), ` +
+                `or disable "Restrict tools to workspace" in Settings → General.`
         );
     }
 
-    const rel = relative(root, absolute);
+    const rel = isInside(root, absolute) ? relative(root, absolute) : absolute;
     return {
         absolute,
         relative: rel
