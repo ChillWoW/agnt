@@ -123,6 +123,8 @@ interface ConversationStoreState {
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     archiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     unarchiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    pinConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    unpinConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     deleteConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     renameConversation: (
         workspaceId: string,
@@ -2168,14 +2170,18 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                 state.conversationsByWorkspace[workspaceId] ?? [];
             const target = active.find((c) => c.id === conversationId);
             const archivedNow = new Date().toISOString();
+            // Server's archive auto-unpins, mirror it here optimistically
+            // so the row leaves the global Pinned group in lockstep with
+            // the active→archived move below.
             const optimisticArchivedRow: Conversation = target
-                ? { ...target, archived_at: archivedNow }
+                ? { ...target, archived_at: archivedNow, pinned_at: null }
                 : {
                       id: conversationId,
                       title: "Archived conversation",
                       created_at: archivedNow,
                       updated_at: archivedNow,
-                      archived_at: archivedNow
+                      archived_at: archivedNow,
+                      pinned_at: null
                   };
 
             set((s) => {
@@ -2332,6 +2338,146 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                                     (c) => c.id !== conversationId
                                 )
                             ]
+                        }
+                    };
+                });
+                throw error;
+            }
+        },
+
+        pinConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            // Pin state is a single timestamp on the conversation row, so
+            // pinning is a same-list mutation: we just stamp `pinned_at`
+            // and the sidebar's PinnedGroup picks it up via `pinned_at !==
+            // null`. The conversation never leaves `conversationsByWorkspace`
+            // — the workspace list filters pinned rows out at render time
+            // and the global Pinned group filters them in.
+            const state = get();
+            const list = state.conversationsByWorkspace[workspaceId] ?? [];
+            const target = list.find((c) => c.id === conversationId);
+            if (!target) return;
+            // Already pinned: re-pin to bump the timestamp so the row floats
+            // back to the top of the pinned-by-pinned_at-DESC ordering.
+            const previousPinnedAt = target.pinned_at ?? null;
+            const optimisticPinnedAt = new Date().toISOString();
+
+            set((s) => {
+                const existing =
+                    s.conversationsByWorkspace[workspaceId] ?? [];
+                let mutated = false;
+                const next = existing.map((c) => {
+                    if (c.id !== conversationId) return c;
+                    mutated = true;
+                    return { ...c, pinned_at: optimisticPinnedAt };
+                });
+                if (!mutated) return {};
+                return {
+                    conversationsByWorkspace: {
+                        ...s.conversationsByWorkspace,
+                        [workspaceId]: next
+                    }
+                };
+            });
+
+            try {
+                const { pinned_at } = await conversationApi.pinConversation(
+                    workspaceId,
+                    conversationId
+                );
+                // Reconcile with the server's authoritative timestamp.
+                set((s) => {
+                    const existing =
+                        s.conversationsByWorkspace[workspaceId] ?? [];
+                    let mutated = false;
+                    const next = existing.map((c) => {
+                        if (c.id !== conversationId) return c;
+                        if (c.pinned_at === pinned_at) return c;
+                        mutated = true;
+                        return { ...c, pinned_at };
+                    });
+                    if (!mutated) return {};
+                    return {
+                        conversationsByWorkspace: {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: next
+                        }
+                    };
+                });
+            } catch (error) {
+                // Revert to whatever pin state existed before.
+                set((s) => {
+                    const existing =
+                        s.conversationsByWorkspace[workspaceId] ?? [];
+                    let mutated = false;
+                    const next = existing.map((c) => {
+                        if (c.id !== conversationId) return c;
+                        mutated = true;
+                        return { ...c, pinned_at: previousPinnedAt };
+                    });
+                    if (!mutated) return {};
+                    return {
+                        conversationsByWorkspace: {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: next
+                        }
+                    };
+                });
+                throw error;
+            }
+        },
+
+        unpinConversation: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            const state = get();
+            const list = state.conversationsByWorkspace[workspaceId] ?? [];
+            const target = list.find((c) => c.id === conversationId);
+            if (!target) return;
+            const previousPinnedAt = target.pinned_at ?? null;
+            if (previousPinnedAt === null) return;
+
+            set((s) => {
+                const existing =
+                    s.conversationsByWorkspace[workspaceId] ?? [];
+                let mutated = false;
+                const next = existing.map((c) => {
+                    if (c.id !== conversationId) return c;
+                    mutated = true;
+                    return { ...c, pinned_at: null };
+                });
+                if (!mutated) return {};
+                return {
+                    conversationsByWorkspace: {
+                        ...s.conversationsByWorkspace,
+                        [workspaceId]: next
+                    }
+                };
+            });
+
+            try {
+                await conversationApi.unpinConversation(
+                    workspaceId,
+                    conversationId
+                );
+            } catch (error) {
+                set((s) => {
+                    const existing =
+                        s.conversationsByWorkspace[workspaceId] ?? [];
+                    let mutated = false;
+                    const next = existing.map((c) => {
+                        if (c.id !== conversationId) return c;
+                        mutated = true;
+                        return { ...c, pinned_at: previousPinnedAt };
+                    });
+                    if (!mutated) return {};
+                    return {
+                        conversationsByWorkspace: {
+                            ...s.conversationsByWorkspace,
+                            [workspaceId]: next
                         }
                     };
                 });

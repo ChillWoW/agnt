@@ -141,6 +141,24 @@ export function unarchiveConversation(
     );
 }
 
+export function pinConversation(
+    workspaceId: string,
+    conversationId: string
+) {
+    return api.post<{ success: boolean; pinned_at: string }>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/pin`
+    );
+}
+
+export function unpinConversation(
+    workspaceId: string,
+    conversationId: string
+) {
+    return api.post<{ success: boolean }>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/unpin`
+    );
+}
+
 export function fetchArchivedConversations(workspaceId: string) {
     return api.get<{ conversations: Conversation[] }>(
         `/workspaces/${workspaceId}/conversations/archived`

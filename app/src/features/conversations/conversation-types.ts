@@ -122,6 +122,15 @@ export interface Conversation {
     subagent_name?: string | null;
     hidden?: boolean;
     archived_at?: string | null;
+    /**
+     * ISO timestamp the user pinned this conversation, or `null`/undefined
+     * if it isn't pinned. Pinned rows render in the global "Pinned" group
+     * at the top of the sidebar (above all workspace lists) and are
+     * excluded from their owning workspace's normal conversation list.
+     * Archiving a conversation auto-clears `pinned_at` on the server, so
+     * an archived row never appears in the Pinned group.
+     */
+    pinned_at?: string | null;
 }
 
 export interface SubagentStartedEvent {

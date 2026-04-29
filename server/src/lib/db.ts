@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     subagent_type TEXT,
     subagent_name TEXT,
     hidden INTEGER NOT NULL DEFAULT 0,
-    archived_at TEXT
+    archived_at TEXT,
+    pinned_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -183,6 +184,13 @@ function runMigrations(db: Database): void {
         "INTEGER NOT NULL DEFAULT 0"
     );
     addColumnIfMissing(db, "conversations", "archived_at", "TEXT");
+    // Pin state is a single nullable timestamp on the conversation row.
+    // NULL means not pinned; an ISO timestamp means pinned at that moment
+    // (used for `ORDER BY pinned_at DESC` so the most recently pinned row
+    // floats to the top of the global Pinned sidebar group). Mirrors the
+    // archived_at convention so the schema stays consistent and FK
+    // cascades from message/tool-invocation deletion still work for free.
+    addColumnIfMissing(db, "conversations", "pinned_at", "TEXT");
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id, created_at);"
     );
@@ -191,6 +199,9 @@ function runMigrations(db: Database): void {
     );
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_conversations_archived ON conversations(hidden, parent_conversation_id, archived_at, updated_at DESC);"
+    );
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_pinned ON conversations(hidden, parent_conversation_id, pinned_at DESC);"
     );
 
     db.exec(

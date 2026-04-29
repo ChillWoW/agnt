@@ -76,6 +76,7 @@ interface ConversationRow {
     subagent_name: string | null;
     hidden: number;
     archived_at: string | null;
+    pinned_at: string | null;
 }
 
 function conversationFromRow(row: ConversationRow): Conversation {
@@ -88,12 +89,13 @@ function conversationFromRow(row: ConversationRow): Conversation {
         subagent_type: (row.subagent_type ?? null) as Conversation["subagent_type"],
         subagent_name: row.subagent_name,
         hidden: row.hidden === 1,
-        archived_at: row.archived_at
+        archived_at: row.archived_at,
+        pinned_at: row.pinned_at
     };
 }
 
 const CONVERSATION_SELECT =
-    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden, archived_at FROM conversations";
+    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden, archived_at, pinned_at FROM conversations";
 
 export function listConversations(workspaceId: string): Conversation[] {
     const db = getWorkspaceDb(workspaceId);
@@ -327,6 +329,7 @@ export function createConversation(
         subagent_name: null,
         hidden: false,
         archived_at: null,
+        pinned_at: null,
         messages: [
             {
                 id: messageId,
@@ -387,6 +390,7 @@ export function createSubagentConversation(
         subagent_name: params.subagentName,
         hidden: true,
         archived_at: null,
+        pinned_at: null,
         messages: [
             {
                 id: messageId,
@@ -488,11 +492,59 @@ export function archiveConversation(
     }
 
     const now = new Date().toISOString();
+    // Archiving auto-unpins. The Pinned sidebar group is meant to surface
+    // active work; an archived conversation should never appear there. If
+    // the user later un-archives, the conversation comes back unpinned —
+    // the user re-pins explicitly.
     db.query(
-        "UPDATE conversations SET archived_at = ? WHERE id = ?"
+        "UPDATE conversations SET archived_at = ?, pinned_at = NULL WHERE id = ?"
     ).run(now, conversationId);
 
     return { archived_at: now };
+}
+
+export function pinConversation(
+    workspaceId: string,
+    conversationId: string
+): { pinned_at: string } {
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+
+    if (!existing) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    // Always overwrite the timestamp on re-pin so the row floats back to
+    // the top of `ORDER BY pinned_at DESC` even if it was already pinned.
+    const now = new Date().toISOString();
+    db.query("UPDATE conversations SET pinned_at = ? WHERE id = ?").run(
+        now,
+        conversationId
+    );
+
+    return { pinned_at: now };
+}
+
+export function unpinConversation(
+    workspaceId: string,
+    conversationId: string
+): void {
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+
+    if (!existing) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    db.query("UPDATE conversations SET pinned_at = NULL WHERE id = ?").run(
+        conversationId
+    );
 }
 
 export function unarchiveConversation(

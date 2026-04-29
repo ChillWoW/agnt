@@ -9,6 +9,8 @@ import {
     deleteConversation,
     archiveConversation,
     unarchiveConversation,
+    pinConversation,
+    unpinConversation,
     updateConversation
 } from "./conversations.service";
 import {
@@ -322,6 +324,43 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                         error instanceof Error
                             ? error.message
                             : "Failed to unarchive conversation"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/pin",
+        ({ params, set }) => {
+            try {
+                const { pinned_at } = pinConversation(
+                    params.id,
+                    params.conversationId
+                );
+                return { success: true, pinned_at };
+            } catch (error) {
+                set.status = 404;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to pin conversation"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/unpin",
+        ({ params, set }) => {
+            try {
+                unpinConversation(params.id, params.conversationId);
+                return { success: true };
+            } catch (error) {
+                set.status = 404;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to unpin conversation"
                 };
             }
         }

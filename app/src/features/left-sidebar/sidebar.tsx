@@ -14,6 +14,8 @@ import {
     ArrowCounterClockwiseIcon,
     PencilSimpleIcon,
     PlusIcon,
+    PushPinSimpleIcon,
+    PushPinSimpleSlashIcon,
     XIcon,
     MinusIcon,
     ShieldWarningIcon,
@@ -79,6 +81,7 @@ function ConversationRow({
     onOpen,
     onSplit
 }: ConversationRowProps) {
+    const isPinned = Boolean(conv.pinned_at);
     const navigate = useNavigate();
     const [isEditing, setIsEditing] = useState(false);
     const [draft, setDraft] = useState(conv.title);
@@ -135,6 +138,15 @@ function ConversationRow({
             .getState()
             .archiveConversation(workspaceId, conv.id);
         void navigate({ to: "/" });
+    };
+
+    const handleTogglePin = () => {
+        const store = useConversationStore.getState();
+        if (isPinned) {
+            void store.unpinConversation(workspaceId, conv.id);
+        } else {
+            void store.pinConversation(workspaceId, conv.id);
+        }
     };
 
     const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
@@ -216,12 +228,46 @@ function ConversationRow({
                     ) : isStreaming ? (
                         <BinaryMatrix />
                     ) : (
-                        <MinusIcon
-                            className={cn(
-                                "size-3 shrink-0 transition-colors",
-                                isUnread ? "text-dark-50" : "text-dark-200"
-                            )}
-                        />
+                        // Both pinned and unpinned rows render the same
+                        // hover-swap button: `MinusIcon` at rest, pin icon
+                        // on row-hover. Clicking toggles pin state — which
+                        // means the row in the Pinned group unpins, and a
+                        // row in a workspace list pins. Pinned rows already
+                        // live in their own sidebar group, so we don't need
+                        // a persistent indicator on the row itself.
+                        <button
+                            type="button"
+                            aria-label={
+                                isPinned
+                                    ? "Unpin conversation"
+                                    : "Pin conversation"
+                            }
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onAuxClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleTogglePin();
+                            }}
+                            className="relative shrink-0 size-3 cursor-pointer"
+                        >
+                            <MinusIcon
+                                className={cn(
+                                    "absolute inset-0 size-3 transition-opacity",
+                                    "group-hover:opacity-0",
+                                    isUnread
+                                        ? "text-dark-50"
+                                        : "text-dark-200"
+                                )}
+                            />
+                            <PushPinSimpleIcon
+                                className={cn(
+                                    "absolute inset-0 size-3 opacity-0",
+                                    "transition-opacity group-hover:opacity-100",
+                                    "text-dark-300 hover:text-dark-50"
+                                )}
+                                weight={isPinned ? "fill" : "regular"}
+                            />
+                        </button>
                     )}
                     {isEditing ? (
                         <input
@@ -253,24 +299,35 @@ function ConversationRow({
                         <span className="truncate flex-1">{conv.title}</span>
                     )}
                     {!isEditing && (
-                        <Tooltip content="Archive" side="top">
-                            <button
-                                type="button"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onAuxClick={(e) => e.stopPropagation()}
-                                onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await handleArchive();
-                                }}
-                                className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
-                            >
-                                <ArchiveIcon className="size-3" />
-                            </button>
-                        </Tooltip>
+                        <button
+                            type="button"
+                            aria-label="Archive conversation"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onAuxClick={(e) => e.stopPropagation()}
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                await handleArchive();
+                            }}
+                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-400 hover:text-dark-50 p-0.5"
+                        >
+                            <ArchiveIcon className="size-3" />
+                        </button>
                     )}
                 </div>
             </ContextMenu.Trigger>
             <ContextMenu.Content>
+                <ContextMenu.Item
+                    icon={
+                        isPinned ? (
+                            <PushPinSimpleSlashIcon className="size-3" />
+                        ) : (
+                            <PushPinSimpleIcon className="size-3" />
+                        )
+                    }
+                    onClick={handleTogglePin}
+                >
+                    {isPinned ? "Unpin" : "Pin"}
+                </ContextMenu.Item>
                 <ContextMenu.Item
                     icon={<PencilSimpleIcon className="size-3" />}
                     onClick={startEdit}
@@ -454,9 +511,18 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
         void useConversationStore.getState().loadConversations(workspaceId);
     }, [workspaceId]);
 
+    // Pinned rows live in the global Pinned group at the top of the
+    // sidebar, so we hide them from each workspace's normal list (the
+    // pin state is just a `pinned_at` timestamp on the same Conversation
+    // row, no separate bucket needed).
+    const visibleConversations = useMemo(
+        () => conversations.filter((c) => !c.pinned_at),
+        [conversations]
+    );
+
     return (
         <div className="flex flex-col gap-0.5">
-            {conversations.map((conv) => (
+            {visibleConversations.map((conv) => (
                 <ConversationRow
                     key={conv.id}
                     conv={conv}
@@ -837,6 +903,223 @@ function WorkspaceRow({
     );
 }
 
+interface PinnedEntry {
+    conv: import("@/features/conversations").Conversation;
+    workspaceId: string;
+    workspaceName: string;
+}
+
+/**
+ * Renders pinned conversations from every workspace in a single group at
+ * the top of the sidebar (above all workspace lists, below "New Agent").
+ *
+ * Data flow: we read each workspace's `conversationsByWorkspace` bucket
+ * — populated eagerly on sidebar mount in `useEagerLoadAllConversations`
+ * — and pick out rows where `pinned_at` is set. Sorting by `pinned_at
+ * DESC` makes the most recently pinned row float to the top, which
+ * matches the server's `ORDER BY pinned_at DESC` for the workspace list
+ * (since pin state is a single timestamp, "re-pin" is implemented by
+ * overwriting the timestamp).
+ *
+ * The group hides itself entirely when no conversations are pinned, so
+ * the sidebar layout doesn't reserve empty space.
+ */
+function PinnedGroup() {
+    const navigate = useNavigate();
+    const { workspaces } = useWorkspaceStore();
+    const conversationsByWorkspace = useConversationStore(
+        (s) => s.conversationsByWorkspace
+    );
+    const activeConversationId = useConversationStore(
+        (s) => s.activeConversationId
+    );
+    const setConversationWorkspace = useConversationStore(
+        (s) => s.setConversationWorkspace
+    );
+    const unreadConversationIds = useConversationStore(
+        (s) => s.unreadConversationIds
+    );
+    const streamingConversationIds = useConversationStore(
+        (s) => s.streamControllersById
+    );
+    const pendingPermissions = usePermissionStore(
+        (s) => s.pendingByConversationId
+    );
+    const pendingQuestions = useQuestionStore((s) => s.pendingByConversationId);
+
+    const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+    const setActiveWorkspace = useWorkspaceStore((s) => s.setActive);
+
+    const extraPanes = useSplitPaneStore((s) => s.extraPanes);
+    const focusedPaneIndex = useSplitPaneStore((s) => s.focusedPaneIndex);
+    const replaceSecondaryConversation = useSplitPaneStore(
+        (s) => s.replaceSecondaryConversation
+    );
+    const setFocusedPaneIndex = useSplitPaneStore(
+        (s) => s.setFocusedPaneIndex
+    );
+    const addPane = useSplitPaneStore((s) => s.addPane);
+
+    const isCollapsed = useLeftSidebarStore((s) => s.isPinnedGroupCollapsed);
+    const setCollapsed = useLeftSidebarStore(
+        (s) => s.setPinnedGroupCollapsed
+    );
+
+    const totalPanes = extraPanes.length + 1;
+    const splitFull = totalPanes >= MAX_PANES;
+
+    const pinnedEntries = useMemo<PinnedEntry[]>(() => {
+        const out: PinnedEntry[] = [];
+        for (const ws of workspaces) {
+            const list = conversationsByWorkspace[ws.id];
+            if (!list) continue;
+            for (const conv of list) {
+                if (conv.pinned_at) {
+                    out.push({
+                        conv,
+                        workspaceId: ws.id,
+                        workspaceName: ws.name
+                    });
+                }
+            }
+        }
+        // Most recently pinned floats to the top. `pinned_at` is an ISO
+        // timestamp so plain string compare is correct ordering-wise.
+        out.sort((a, b) =>
+            (b.conv.pinned_at ?? "").localeCompare(a.conv.pinned_at ?? "")
+        );
+        return out;
+    }, [workspaces, conversationsByWorkspace]);
+
+    const openPaneConvIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (activeConversationId) ids.add(activeConversationId);
+        for (const p of extraPanes) ids.add(p.conversationId);
+        return ids;
+    }, [activeConversationId, extraPanes]);
+
+    const focusedPaneConvId = useMemo(() => {
+        if (focusedPaneIndex === 0) return activeConversationId;
+        const extra = extraPanes[focusedPaneIndex - 1];
+        return extra ? extra.conversationId : null;
+    }, [activeConversationId, extraPanes, focusedPaneIndex]);
+
+    const handleOpen = useCallback(
+        (entry: PinnedEntry) => {
+            const { workspaceId, conv } = entry;
+            const conversationId = conv.id;
+            if (focusedPaneIndex === 0) {
+                setConversationWorkspace(conversationId, workspaceId);
+                if (activeWorkspaceId !== workspaceId) {
+                    void setActiveWorkspace(workspaceId);
+                }
+                void navigate({
+                    to: "/conversations/$conversationId",
+                    params: { conversationId }
+                });
+                return;
+            }
+            replaceSecondaryConversation(
+                focusedPaneIndex,
+                workspaceId,
+                conversationId
+            );
+            setFocusedPaneIndex(focusedPaneIndex);
+        },
+        [
+            activeWorkspaceId,
+            focusedPaneIndex,
+            navigate,
+            replaceSecondaryConversation,
+            setActiveWorkspace,
+            setConversationWorkspace,
+            setFocusedPaneIndex
+        ]
+    );
+
+    const handleSplit = useCallback(
+        (entry: PinnedEntry) => {
+            addPane(entry.workspaceId, entry.conv.id);
+        },
+        [addPane]
+    );
+
+    if (pinnedEntries.length === 0) return null;
+
+    return (
+        <div className="flex flex-col">
+            <button
+                type="button"
+                onClick={() => setCollapsed(!isCollapsed)}
+                className="group flex w-full items-center gap-1 px-1 py-1 rounded-md text-[11px] text-dark-200 hover:text-dark-50 transition-colors"
+            >
+                <CaretRightIcon
+                    className={cn(
+                        "size-2.5 shrink-0 transition-transform duration-100",
+                        !isCollapsed && "rotate-90"
+                    )}
+                    weight="bold"
+                />
+                <span className="truncate font-medium">Pinned</span>
+            </button>
+            {!isCollapsed && (
+                <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5 flex flex-col gap-0.5">
+                    {pinnedEntries.map((entry) => (
+                        <ConversationRow
+                            key={entry.conv.id}
+                            conv={entry.conv}
+                            workspaceId={entry.workspaceId}
+                            isActive={openPaneConvIds.has(entry.conv.id)}
+                            isFocusedPane={
+                                focusedPaneConvId === entry.conv.id
+                            }
+                            isUnread={Boolean(
+                                unreadConversationIds[entry.conv.id]
+                            )}
+                            isStreaming={Boolean(
+                                streamingConversationIds[entry.conv.id]
+                            )}
+                            isPendingPermission={
+                                (pendingPermissions[entry.conv.id]?.length ??
+                                    0) > 0
+                            }
+                            isPendingQuestion={
+                                (pendingQuestions[entry.conv.id]?.length ??
+                                    0) > 0
+                            }
+                            splitFull={splitFull}
+                            onOpen={() => handleOpen(entry)}
+                            onSplit={() => handleSplit(entry)}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Side-effect hook: ensures every registered workspace has its
+ * conversation list loaded into the store, regardless of whether the
+ * workspace's row is currently expanded in the sidebar. Without this,
+ * collapsed workspaces would never trigger `loadConversations`, and
+ * pinned conversations belonging to those workspaces would silently
+ * disappear from the global Pinned group until the user expanded them.
+ *
+ * Cheap: each call hits one per-workspace SQLite via the server route,
+ * results are cached per workspace id, and follow-up renders short-
+ * circuit on `workspaceId in conversationsByWorkspace`.
+ */
+function useEagerLoadAllConversations() {
+    const workspaces = useWorkspaceStore((s) => s.workspaces);
+    useEffect(() => {
+        const store = useConversationStore.getState();
+        for (const ws of workspaces) {
+            void store.loadConversations(ws.id);
+        }
+    }, [workspaces]);
+}
+
 function WorkspaceSidebarList() {
     const { workspaces, activeWorkspaceId, setActive, remove } =
         useWorkspaceStore();
@@ -1021,6 +1304,12 @@ export function LeftSidebar() {
         activeCategory
     } = useSettingsStore();
 
+    // Pin state lives on each conversation row; the global Pinned group
+    // aggregates pinned rows from every workspace. We need conversation
+    // lists loaded for ALL workspaces (not just the expanded ones) so
+    // pinned rows from collapsed workspaces still show up.
+    useEagerLoadAllConversations();
+
     useHotkey({
         id: "layout.sidebar.toggle",
         label: "Toggle sidebar",
@@ -1085,7 +1374,8 @@ export function LeftSidebar() {
                             <div className="flex h-full flex-col px-2.5 pt-2.5">
                                 <NewAgentButton />
 
-                                <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+                                <div className="mt-3 min-h-0 flex-1 overflow-y-auto flex flex-col gap-2">
+                                    <PinnedGroup />
                                     <WorkspaceSidebarList />
                                 </div>
 
