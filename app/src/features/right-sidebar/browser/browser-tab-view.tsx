@@ -9,14 +9,25 @@ import {
     ArrowLeftIcon,
     ArrowRightIcon,
     ArrowClockwiseIcon,
+    BroomIcon,
+    CookieIcon,
+    CopyIcon,
+    DotsThreeIcon,
     GlobeIcon,
+    LightningIcon,
     XIcon
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import { Menu } from "@/components/ui/Menu";
+import { toast } from "@/components/ui/Toast";
 import {
     backTab,
+    clearTabCache,
+    clearTabCookies,
     forwardTab,
+    hardReloadTab,
     navigateTab,
+    readLiveUrl,
     reloadTab,
     resolveUrl,
     stopTab
@@ -42,6 +53,7 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
     const hostRef = useRef<HTMLDivElement>(null);
     const [draftUrl, setDraftUrl] = useState(tab?.url ?? "");
     const [opened, setOpened] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -83,8 +95,12 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
 
     useEffect(() => {
         if (!opened) return;
-        void setSessionVisible(id, !occluded);
-    }, [opened, occluded, id]);
+        // Native webviews paint over the React DOM in their rect, so any
+        // React-rendered overlay that drops down into the webview area
+        // (the kebab menu being the obvious one) needs the webview
+        // temporarily hidden or the dropdown gets clipped.
+        void setSessionVisible(id, !(occluded || menuOpen));
+    }, [opened, occluded, menuOpen, id]);
 
     const submit = useCallback(() => {
         if (!tab) return;
@@ -93,6 +109,70 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
         void navigateTab(tab.id, resolved);
         inputRef.current?.blur();
     }, [tab, draftUrl]);
+
+    const onCopyUrl = useCallback(async () => {
+        if (!tab) return;
+        const url = await readLiveUrl(tab.id);
+        if (!url) {
+            toast.error({ title: "No URL to copy" });
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(url);
+            toast.success({
+                title: "URL copied",
+                description: url
+            });
+        } catch (err) {
+            toast.error({
+                title: "Couldn't copy",
+                description:
+                    err instanceof Error ? err.message : String(err)
+            });
+        }
+    }, [tab]);
+
+    const onHardReload = useCallback(() => {
+        if (!tab) return;
+        void hardReloadTab(tab.id);
+    }, [tab]);
+
+    const onClearCookies = useCallback(async () => {
+        if (!tab) return;
+        try {
+            const n = await clearTabCookies(tab.id);
+            toast.success({
+                title:
+                    n === 0
+                        ? "No cookies to clear"
+                        : `Cleared ${n} cookie${n === 1 ? "" : "s"}`
+            });
+        } catch (err) {
+            toast.error({
+                title: "Couldn't clear cookies",
+                description:
+                    err instanceof Error ? err.message : String(err)
+            });
+        }
+    }, [tab]);
+
+    const onClearCache = useCallback(async () => {
+        if (!tab) return;
+        try {
+            await clearTabCache(tab.id);
+            toast.success({
+                title: "Cache cleared",
+                description:
+                    "Site storage (localStorage / IndexedDB) was also reset."
+            });
+        } catch (err) {
+            toast.error({
+                title: "Couldn't clear cache",
+                description:
+                    err instanceof Error ? err.message : String(err)
+            });
+        }
+    }, [tab]);
 
     if (!tab) {
         return (
@@ -162,6 +242,49 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
                         )}
                     />
                 </form>
+
+                <Menu open={menuOpen} onOpenChange={setMenuOpen}>
+                    <Menu.Trigger
+                        className={cn(
+                            "flex size-6 shrink-0 items-center justify-center rounded transition-colors",
+                            "text-dark-300 hover:bg-dark-800 hover:text-dark-100",
+                            "data-[popup-open]:bg-dark-800 data-[popup-open]:text-dark-50"
+                        )}
+                    >
+                        <DotsThreeIcon className="size-4" weight="bold" />
+                    </Menu.Trigger>
+                    <Menu.Content side="bottom" align="end">
+                        <Menu.Item
+                            icon={<LightningIcon size={12} />}
+                            disabled={!opened}
+                            onClick={onHardReload}
+                        >
+                            Hard reload
+                        </Menu.Item>
+                        <Menu.Item
+                            icon={<CopyIcon size={12} />}
+                            onClick={() => void onCopyUrl()}
+                        >
+                            Copy current URL
+                        </Menu.Item>
+                        <Menu.Separator />
+                        <Menu.Item
+                            icon={<CookieIcon size={12} />}
+                            disabled={!opened}
+                            onClick={() => void onClearCookies()}
+                        >
+                            Clear browsing cookies
+                        </Menu.Item>
+                        <Menu.Item
+                            icon={<BroomIcon size={12} />}
+                            disabled={!opened}
+                            destructive
+                            onClick={() => void onClearCache()}
+                        >
+                            Clear cache
+                        </Menu.Item>
+                    </Menu.Content>
+                </Menu>
             </div>
 
             {isLoading && (

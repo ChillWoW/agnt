@@ -1,7 +1,11 @@
 import {
     backBrowser,
+    clearBrowserCache,
+    clearBrowserCookies,
     evalBrowser,
     forwardBrowser,
+    getBrowserUrl,
+    hardReloadBrowser,
     navigateBrowser,
     reloadBrowser,
     stopBrowser
@@ -74,6 +78,34 @@ export async function reloadTab(id: string): Promise<void> {
 export async function stopTab(id: string): Promise<void> {
     if (!isBrowserOpened(id)) return;
     await stopBrowser(id);
+}
+
+export async function hardReloadTab(id: string): Promise<void> {
+    if (!isBrowserOpened(id)) return;
+    await hardReloadBrowser(id);
+}
+
+export async function clearTabCookies(id: string): Promise<number> {
+    if (!isBrowserOpened(id)) return 0;
+    return await clearBrowserCookies(id);
+}
+
+export async function clearTabCache(id: string): Promise<void> {
+    if (!isBrowserOpened(id)) return;
+    await clearBrowserCache(id);
+}
+
+// Reads the live URL from the host webview. Falls back to the
+// Zustand-persisted URL if the webview isn't open yet.
+export async function readLiveUrl(id: string): Promise<string> {
+    if (isBrowserOpened(id)) {
+        try {
+            return await getBrowserUrl(id);
+        } catch {
+            // fall through to persisted url
+        }
+    }
+    return useBrowserStore.getState().getTab(id)?.url ?? "";
 }
 
 export async function closeTab(id: string): Promise<string | null> {

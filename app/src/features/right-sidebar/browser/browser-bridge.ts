@@ -48,6 +48,22 @@ export async function stopBrowser(id: string): Promise<void> {
     await invoke("browser_stop", { id });
 }
 
+export async function hardReloadBrowser(id: string): Promise<void> {
+    await invoke("browser_hard_reload", { id });
+}
+
+export async function clearBrowserCookies(id: string): Promise<number> {
+    return await invoke<number>("browser_clear_cookies", { id });
+}
+
+export async function clearBrowserCache(id: string): Promise<void> {
+    await invoke("browser_clear_cache", { id });
+}
+
+export async function getBrowserUrl(id: string): Promise<string> {
+    return await invoke<string>("browser_get_url", { id });
+}
+
 export async function setBrowserBounds(
     id: string,
     x: number,

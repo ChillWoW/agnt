@@ -225,6 +225,80 @@ pub async fn browser_stop(
         .map_err(|e| format!("stop failed: {e}"))
 }
 
+// "Hard reload" performs a fresh top-level navigation to the current URL
+// rather than `location.reload()`. WebView2 / WKWebView don't expose a
+// CDP-style "reload, ignore-cache" toggle to Tauri, so the closest we can
+// get without nuking site data is to ask the engine for a fresh navigate
+// — which goes through the network stack and re-validates resources.
+#[tauri::command]
+pub async fn browser_hard_reload(
+    state: State<'_, BrowserState>,
+    id: String,
+) -> Result<(), String> {
+    let webview =
+        get_webview(&state, &id).ok_or_else(|| "browser tab not found".to_string())?;
+    let current = webview.url().map_err(|e| format!("url failed: {e}"))?;
+    webview
+        .navigate(current)
+        .map_err(|e| format!("navigate failed: {e}"))
+}
+
+// Cookies-only clear. We iterate the global cookie store and delete the
+// cookies one by one because Tauri's coarse `clear_all_browsing_data`
+// would also wipe cache / localStorage / IndexedDB.
+#[tauri::command]
+pub async fn browser_clear_cookies(
+    state: State<'_, BrowserState>,
+    id: String,
+) -> Result<u32, String> {
+    let webview =
+        get_webview(&state, &id).ok_or_else(|| "browser tab not found".to_string())?;
+    let cookies = webview
+        .cookies()
+        .map_err(|e| format!("cookies failed: {e}"))?;
+    let mut cleared = 0u32;
+    for cookie in cookies {
+        if webview.delete_cookie(cookie).is_ok() {
+            cleared += 1;
+        }
+    }
+    Ok(cleared)
+}
+
+// Cache-only clear (best effort). Tauri/Wry only expose a single
+// `clear_all_browsing_data` entry point that wipes cookies + cache +
+// localStorage + IndexedDB together. To approximate "cache only", we
+// snapshot cookies first, run the coarse clear, and re-set the cookies.
+// LocalStorage / IndexedDB are still wiped — document this in the toast
+// so users aren't surprised.
+#[tauri::command]
+pub async fn browser_clear_cache(
+    state: State<'_, BrowserState>,
+    id: String,
+) -> Result<(), String> {
+    let webview =
+        get_webview(&state, &id).ok_or_else(|| "browser tab not found".to_string())?;
+    let cookies = webview.cookies().unwrap_or_default();
+    webview
+        .clear_all_browsing_data()
+        .map_err(|e| format!("clear_all_browsing_data failed: {e}"))?;
+    for cookie in cookies {
+        let _ = webview.set_cookie(cookie);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn browser_get_url(
+    state: State<'_, BrowserState>,
+    id: String,
+) -> Result<String, String> {
+    let webview =
+        get_webview(&state, &id).ok_or_else(|| "browser tab not found".to_string())?;
+    let url = webview.url().map_err(|e| format!("url failed: {e}"))?;
+    Ok(url.to_string())
+}
+
 #[tauri::command]
 pub async fn browser_set_bounds(
     state: State<'_, BrowserState>,
