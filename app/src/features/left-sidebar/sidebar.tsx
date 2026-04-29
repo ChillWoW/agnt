@@ -58,7 +58,6 @@ interface ConversationRowProps {
     conv: import("@/features/conversations").Conversation;
     workspaceId: string;
     isActive: boolean;
-    isFocusedPane: boolean;
     isUnread: boolean;
     isStreaming: boolean;
     isPendingPermission: boolean;
@@ -72,7 +71,6 @@ function ConversationRow({
     conv,
     workspaceId,
     isActive,
-    isFocusedPane,
     isUnread,
     isStreaming,
     isPendingPermission,
@@ -201,7 +199,7 @@ function ConversationRow({
                         }
                     }}
                     className={cn(
-                        "group relative flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
+                        "group flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
                         isActive
                             ? "bg-dark-850 text-dark-50"
                             : isUnread
@@ -209,12 +207,6 @@ function ConversationRow({
                               : "text-dark-300 hover:bg-dark-850 hover:text-dark-100"
                     )}
                 >
-                    {isFocusedPane ? (
-                        <span
-                            aria-hidden
-                            className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-full bg-dark-50/70"
-                        />
-                    ) : null}
                     {isPendingQuestion ? (
                         <ChatTeardropDotsIcon
                             className="size-3 shrink-0 text-dark-50 animate-pulse"
@@ -426,26 +418,6 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
         return ids;
     }, [activeConversationId, activeWorkspaceId, workspaceId, extraPanes]);
 
-    const focusedPaneConvId = useMemo(() => {
-        if (focusedPaneIndex === 0) {
-            // The primary pane is URL-bound; only show as focused on
-            // this workspace if the active conversation actually
-            // belongs here.
-            return activeWorkspaceId === workspaceId
-                ? (activeConversationId ?? null)
-                : null;
-        }
-        const extra = extraPanes[focusedPaneIndex - 1];
-        if (!extra) return null;
-        return extra.workspaceId === workspaceId ? extra.conversationId : null;
-    }, [
-        activeWorkspaceId,
-        workspaceId,
-        activeConversationId,
-        extraPanes,
-        focusedPaneIndex
-    ]);
-
     const handleOpen = useCallback(
         (conversationId: string) => {
             // Replace the focused pane with the clicked conversation.
@@ -519,10 +491,6 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
                     conv={conv}
                     workspaceId={workspaceId}
                     isActive={openPaneConvIds.has(conv.id)}
-                    // `focusedPaneConvId` is already null when the
-                    // focused pane belongs to a different workspace, so
-                    // a simple equality check is enough.
-                    isFocusedPane={focusedPaneConvId === conv.id}
                     isUnread={Boolean(unreadConversationIds[conv.id])}
                     isStreaming={Boolean(streamingConversationIds[conv.id])}
                     isPendingPermission={
@@ -985,12 +953,6 @@ function PinnedGroup() {
         return ids;
     }, [activeConversationId, extraPanes]);
 
-    const focusedPaneConvId = useMemo(() => {
-        if (focusedPaneIndex === 0) return activeConversationId;
-        const extra = extraPanes[focusedPaneIndex - 1];
-        return extra ? extra.conversationId : null;
-    }, [activeConversationId, extraPanes, focusedPaneIndex]);
-
     const handleOpen = useCallback(
         (entry: PinnedEntry) => {
             const { workspaceId, conv } = entry;
@@ -1057,7 +1019,6 @@ function PinnedGroup() {
                             conv={entry.conv}
                             workspaceId={entry.workspaceId}
                             isActive={openPaneConvIds.has(entry.conv.id)}
-                            isFocusedPane={focusedPaneConvId === entry.conv.id}
                             isUnread={Boolean(
                                 unreadConversationIds[entry.conv.id]
                             )}
