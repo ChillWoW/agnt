@@ -270,3 +270,17 @@ export function getModels(): ModelCatalogEntry[] {
 export function getModelById(modelId: string): ModelCatalogEntry | null {
     return MODELS.find((model) => model.id === modelId) ?? null;
 }
+
+/**
+ * The catalog-derived default model id. Mirrors the UI's
+ * `getDefaultSelection` (`app/src/features/models/use-model-selection.ts`)
+ * which picks the first entry with `status: "recommended"`. Keeping this
+ * derivation centralized prevents a class of "UI shows model X but server
+ * silently falls back to model Y" bugs whenever the catalog gains a new
+ * recommended model — both sides update from the same source of truth.
+ */
+export function getDefaultModelId(): string {
+    const recommended = MODELS.find((model) => model.status === "recommended");
+    const fallback = recommended ?? MODELS[0] ?? null;
+    return fallback?.id ?? "gpt-5.5";
+}
