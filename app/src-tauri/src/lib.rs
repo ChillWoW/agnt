@@ -1,3 +1,4 @@
+mod browser;
 mod terminals;
 
 use std::sync::{Arc, Mutex};
@@ -9,6 +10,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::CommandChild;
 #[cfg(not(debug_assertions))]
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
+use browser::BrowserState;
 use terminals::TerminalsState;
 
 // In release builds the Rust host owns the sidecar process: it is spawned
@@ -133,6 +135,7 @@ pub fn run() {
             child: Arc::new(Mutex::new(None)),
         })
         .manage(TerminalsState::default())
+        .manage(BrowserState::default())
         .setup(|_app| {
             #[cfg(not(debug_assertions))]
             spawn_sidecar(&_app.handle());
@@ -144,7 +147,19 @@ pub fn run() {
             terminals::terminal_write,
             terminals::terminal_resize,
             terminals::terminal_close,
-            terminals::terminal_list_alive
+            terminals::terminal_list_alive,
+            browser::browser_open,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_stop,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_close,
+            browser::browser_list_alive,
+            browser::browser_eval,
+            browser::browser_meta_report
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
@@ -153,6 +168,8 @@ pub fn run() {
                 kill_existing_server(&server_state);
                 let term_state = app.state::<TerminalsState>();
                 terminals::kill_all(&term_state);
+                let browser_state = app.state::<BrowserState>();
+                browser::close_all(&browser_state);
             }
         })
         .run(tauri::generate_context!())

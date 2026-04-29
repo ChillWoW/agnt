@@ -6,7 +6,8 @@ export type SystemTabId = "git" | "browser" | "terminal" | "filetree";
 
 export type ActiveView =
     | { kind: "system"; id: SystemTabId }
-    | { kind: "file"; path: string };
+    | { kind: "file"; path: string }
+    | { kind: "browser"; id: string };
 
 export interface OpenedFile {
     path: string;
@@ -44,8 +45,10 @@ export const useOpenedFilesStore = create<OpenedFilesState>()((set, get) => ({
     setWorkspace: (id) => {
         if (id === get().workspaceId) return;
         const currentActive = get().active;
+        // Browser tabs are global, so they survive a workspace switch.
+        // Only file-bound active views fall back to the default.
         const nextActive: ActiveView =
-            currentActive.kind === "system" ? currentActive : DEFAULT_ACTIVE;
+            currentActive.kind === "file" ? DEFAULT_ACTIVE : currentActive;
         set({
             workspaceId: id,
             active: nextActive,
