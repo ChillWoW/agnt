@@ -36,7 +36,7 @@ import { LeftSidebarButton } from "./left-sidebar-button";
 import { BinaryMatrix } from "./binary-matrix";
 import { settingsCategories } from "@/components/settings/SettingsPanel";
 import { useSettingsStore } from "@/components/settings";
-import { useWorkspaceStore } from "@/features/workspaces";
+import { useWorkspaceStore, HOME_WORKSPACE_ID } from "@/features/workspaces";
 import { useConversationStore } from "@/features/conversations";
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
@@ -672,6 +672,9 @@ function WorkspaceRow({
     const pendingDelete = pendingDeleteId
         ? archived.find((c) => c.id === pendingDeleteId)
         : null;
+    // Home workspace is always present and pinned to the top — drag and
+    // the "Close workspace" action don't apply to it.
+    const isHome = ws.id === HOME_WORKSPACE_ID;
 
     return (
         <div
@@ -679,11 +682,11 @@ function WorkspaceRow({
                 "flex flex-col transition-opacity",
                 isDragging && "opacity-40"
             )}
-            draggable
-            onDragStart={() => onDragStart(ws.id)}
-            onDragOver={(e) => onDragOver(e, ws.id)}
-            onDrop={(e) => onDrop(e, ws.id)}
-            onDragEnd={onDragEnd}
+            draggable={!isHome}
+            onDragStart={isHome ? undefined : () => onDragStart(ws.id)}
+            onDragOver={isHome ? undefined : (e) => onDragOver(e, ws.id)}
+            onDrop={isHome ? undefined : (e) => onDrop(e, ws.id)}
+            onDragEnd={isHome ? undefined : onDragEnd}
         >
             {isDropBefore && (
                 <div className="h-0.5 rounded-full bg-dark-400 mx-1 mb-0.5" />
@@ -792,14 +795,18 @@ function WorkspaceRow({
                     >
                         View archived
                     </ContextMenu.Item>
-                    <ContextMenu.Separator />
-                    <ContextMenu.Item
-                        destructive
-                        icon={<XIcon className="size-3" />}
-                        onClick={() => onRemove(ws.id)}
-                    >
-                        Close workspace
-                    </ContextMenu.Item>
+                    {!isHome && (
+                        <>
+                            <ContextMenu.Separator />
+                            <ContextMenu.Item
+                                destructive
+                                icon={<XIcon className="size-3" />}
+                                onClick={() => onRemove(ws.id)}
+                            >
+                                Close workspace
+                            </ContextMenu.Item>
+                        </>
+                    )}
                 </ContextMenu.Content>
             </ContextMenu>
 
@@ -856,6 +863,13 @@ function WorkspaceSidebarList() {
     }
 
     const sortedWorkspaces = [...workspaces].sort((a, b) => {
+        // Home is always pinned to index 0, regardless of any
+        // user-driven drag-reorder. The user cannot move it in the UI
+        // (drag handlers on its row are disabled), but we still force
+        // it here so we don't depend on `workspaceOrder` happening to
+        // include the home id.
+        if (a.id === HOME_WORKSPACE_ID) return -1;
+        if (b.id === HOME_WORKSPACE_ID) return 1;
         const ai = workspaceOrder.indexOf(a.id);
         const bi = workspaceOrder.indexOf(b.id);
         if (ai === -1 && bi === -1) return 0;

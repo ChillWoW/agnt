@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+// Reserved id for the always-present "Home" workspace, which points at the
+// OS user home directory. Stable across machines so per-workspace SQLite,
+// state, and history all key off the same id. Format is a valid UUIDv4 so
+// it passes the existing `z.string().uuid()` constraint without us having
+// to relax the schema.
+export const HOME_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
+export const HOME_WORKSPACE_NAME = "Home";
+
 export const workspaceSchema = z.object({
     id: z.string().uuid(),
     name: z.string(),

@@ -9,3 +9,4 @@ export {
     type MentionEntryType
 } from "./mention-search";
 export type { Workspace, WorkspacesData } from "./workspace-types";
+export { HOME_WORKSPACE_ID } from "./workspace-types";

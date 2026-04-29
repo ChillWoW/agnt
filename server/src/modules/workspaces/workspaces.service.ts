@@ -1,9 +1,11 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { getHomePath } from "../../lib/homedir";
 import {
     workspacesRegistrySchema,
-    DEFAULT_REGISTRY,
+    HOME_WORKSPACE_ID,
+    HOME_WORKSPACE_NAME,
     type Workspace,
     type WorkspacesRegistry
 } from "./workspaces.types";
@@ -19,24 +21,79 @@ function ensureDir(dir: string): void {
     }
 }
 
+/**
+ * Mutates `registry` in place so the "Home" workspace is always present and
+ * always pinned to index 0, with its `path` refreshed to the current OS
+ * home directory (handles users moving their account between machines).
+ *
+ * Returns true if anything changed, so callers can persist the registry.
+ */
+function ensureHomeWorkspace(registry: WorkspacesRegistry): boolean {
+    const osHome = homedir();
+    const now = new Date().toISOString();
+    let changed = false;
+
+    const existingIndex = registry.workspaces.findIndex(
+        (w) => w.id === HOME_WORKSPACE_ID
+    );
+
+    if (existingIndex === -1) {
+        const home: Workspace = {
+            id: HOME_WORKSPACE_ID,
+            name: HOME_WORKSPACE_NAME,
+            path: osHome,
+            createdAt: now,
+            lastOpenedAt: now
+        };
+        registry.workspaces.unshift(home);
+        ensureDir(join(WORKSPACES_DIR, HOME_WORKSPACE_ID));
+        changed = true;
+    } else {
+        const home = registry.workspaces[existingIndex]!;
+        if (home.path !== osHome) {
+            home.path = osHome;
+            changed = true;
+        }
+        if (home.name !== HOME_WORKSPACE_NAME) {
+            home.name = HOME_WORKSPACE_NAME;
+            changed = true;
+        }
+        if (existingIndex !== 0) {
+            registry.workspaces.splice(existingIndex, 1);
+            registry.workspaces.unshift(home);
+            changed = true;
+        }
+    }
+
+    if (registry.activeWorkspaceId === null) {
+        registry.activeWorkspaceId = HOME_WORKSPACE_ID;
+        changed = true;
+    }
+
+    return changed;
+}
+
 export function loadRegistry(): WorkspacesRegistry {
+    let registry: WorkspacesRegistry;
+
     try {
         const raw = readFileSync(REGISTRY_PATH, "utf8");
         const json = JSON.parse(raw);
         const result = workspacesRegistrySchema.safeParse(json);
 
-        if (result.success) {
-            return result.data;
-        }
-
-        const patched = workspacesRegistrySchema.parse(json);
-        saveRegistry(patched);
-        return patched;
+        registry = result.success
+            ? result.data
+            : workspacesRegistrySchema.parse(json);
     } catch {
         ensureDir(dirname(REGISTRY_PATH));
-        saveRegistry(DEFAULT_REGISTRY);
-        return DEFAULT_REGISTRY;
+        registry = workspacesRegistrySchema.parse({});
     }
+
+    const changed = ensureHomeWorkspace(registry);
+    if (changed) {
+        saveRegistry(registry);
+    }
+    return registry;
 }
 
 export function saveRegistry(registry: WorkspacesRegistry): void {
@@ -97,6 +154,10 @@ export function addWorkspace(folderPath: string): Workspace {
 }
 
 export function removeWorkspace(id: string): void {
+    if (id === HOME_WORKSPACE_ID) {
+        throw new Error("The Home workspace cannot be closed.");
+    }
+
     const registry = loadRegistry();
     const index = registry.workspaces.findIndex((w) => w.id === id);
 
