@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { toApiErrorMessage } from "@/lib/api";
+import { toast } from "@/components/ui";
 import * as mcpApi from "./mcp-api";
 import type {
     McpConfig,
@@ -101,6 +102,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
     upsertServer: async (workspaceId, scope, name, server) => {
         const current = await mcpApi.fetchMcpConfig(workspaceId, scope);
+        const isUpdate = name in current.mcpServers;
         const next: McpConfig = {
             mcpServers: {
                 ...current.mcpServers,
@@ -108,28 +110,65 @@ export const useMcpStore = create<McpState>((set, get) => ({
             }
         };
         await get().saveConfig(workspaceId, scope, next);
+        toast.success({
+            title: isUpdate
+                ? `Updated ${name}`
+                : `Added ${name}`,
+            description:
+                scope === "global"
+                    ? "Available everywhere on this machine."
+                    : "Scoped to the current workspace."
+        });
     },
 
     deleteServer: async (workspaceId, scope, name) => {
-        const current = await mcpApi.fetchMcpConfig(workspaceId, scope);
-        const next: Record<string, McpRawServerConfig> = {
-            ...current.mcpServers
-        };
-        delete next[name];
-        await get().saveConfig(workspaceId, scope, { mcpServers: next });
+        try {
+            const current = await mcpApi.fetchMcpConfig(workspaceId, scope);
+            const next: Record<string, McpRawServerConfig> = {
+                ...current.mcpServers
+            };
+            delete next[name];
+            await get().saveConfig(workspaceId, scope, { mcpServers: next });
+            toast.success({ title: `Removed ${name}` });
+        } catch (error) {
+            toast.error({
+                title: `Couldn't remove ${name}`,
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to delete MCP server"
+                )
+            });
+            throw error;
+        }
     },
 
     setServerDisabled: async (workspaceId, scope, name, disabled) => {
-        const current = await mcpApi.fetchMcpConfig(workspaceId, scope);
-        const existing = current.mcpServers[name];
-        if (!existing) return;
-        const next: McpConfig = {
-            mcpServers: {
-                ...current.mcpServers,
-                [name]: { ...existing, disabled }
-            }
-        };
-        await get().saveConfig(workspaceId, scope, next);
+        try {
+            const current = await mcpApi.fetchMcpConfig(workspaceId, scope);
+            const existing = current.mcpServers[name];
+            if (!existing) return;
+            const next: McpConfig = {
+                mcpServers: {
+                    ...current.mcpServers,
+                    [name]: { ...existing, disabled }
+                }
+            };
+            await get().saveConfig(workspaceId, scope, next);
+            toast.success({
+                title: disabled ? `Disabled ${name}` : `Enabled ${name}`
+            });
+        } catch (error) {
+            toast.error({
+                title: disabled
+                    ? `Couldn't disable ${name}`
+                    : `Couldn't enable ${name}`,
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to update MCP server"
+                )
+            });
+            throw error;
+        }
     },
 
     refreshServer: async (workspaceId, name) => {
@@ -143,10 +182,27 @@ export const useMcpStore = create<McpState>((set, get) => ({
                 );
                 set({ data: { ...data, servers } });
             }
+            if (updated.status === "ready") {
+                toast.success({
+                    title: `${name} reconnected`,
+                    description: `${updated.toolCount} tool${updated.toolCount === 1 ? "" : "s"} available.`
+                });
+            } else if (updated.status === "error") {
+                toast.error({
+                    title: `${name} failed to reconnect`,
+                    description: updated.error ?? undefined
+                });
+            }
             return updated;
         } catch (error) {
-            set({
-                error: toApiErrorMessage(error, "Failed to refresh MCP server")
+            const message = toApiErrorMessage(
+                error,
+                "Failed to refresh MCP server"
+            );
+            set({ error: message });
+            toast.error({
+                title: `Couldn't refresh ${name}`,
+                description: message
             });
             return null;
         }

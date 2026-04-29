@@ -5,6 +5,8 @@ import * as workspaceApi from "./workspace-api";
 // avoid a circular module load: workspaces/index → workspace-store →
 // split-panes/index → pane-scope → workspaces/index.
 import { useSplitPaneStore } from "@/features/split-panes/split-pane-store";
+import { toast } from "@/components/ui";
+import { toApiErrorMessage } from "@/lib/api";
 
 interface WorkspaceStoreState {
     workspaces: Workspace[];
@@ -36,24 +38,59 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
     },
 
     add: async (path: string) => {
-        const workspace = await workspaceApi.addWorkspace(path);
-        const { workspaces } = get();
-        const exists = workspaces.some((w) => w.id === workspace.id);
+        try {
+            const workspace = await workspaceApi.addWorkspace(path);
+            const { workspaces } = get();
+            const exists = workspaces.some((w) => w.id === workspace.id);
 
-        set({
-            workspaces: exists ? workspaces : [...workspaces, workspace],
-            activeWorkspaceId: workspace.id
-        });
+            set({
+                workspaces: exists ? workspaces : [...workspaces, workspace],
+                activeWorkspaceId: workspace.id
+            });
+
+            toast.success({
+                title: exists
+                    ? `Switched to ${workspace.name}`
+                    : `Opened ${workspace.name}`,
+                description: workspace.path
+            });
+        } catch (error) {
+            toast.error({
+                title: "Couldn't open workspace",
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to add workspace"
+                )
+            });
+            throw error;
+        }
     },
 
     remove: async (id: string) => {
-        await workspaceApi.removeWorkspace(id);
-        // Drop any open split panes that belonged to the removed workspace
-        // so we don't carry orphan panes pointing at a workspace that's no
-        // longer reachable. (Other workspaces' panes are unaffected since
-        // the layout is global.)
-        useSplitPaneStore.getState().forgetWorkspace(id);
-        await get().load();
+        const removed = get().workspaces.find((w) => w.id === id);
+        try {
+            await workspaceApi.removeWorkspace(id);
+            // Drop any open split panes that belonged to the removed workspace
+            // so we don't carry orphan panes pointing at a workspace that's no
+            // longer reachable. (Other workspaces' panes are unaffected since
+            // the layout is global.)
+            useSplitPaneStore.getState().forgetWorkspace(id);
+            await get().load();
+            toast.success({
+                title: removed
+                    ? `Closed ${removed.name}`
+                    : "Workspace closed"
+            });
+        } catch (error) {
+            toast.error({
+                title: "Couldn't close workspace",
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to remove workspace"
+                )
+            });
+            throw error;
+        }
     },
 
     setActive: async (id: string) => {

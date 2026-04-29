@@ -4,7 +4,13 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { useConversationStore } from "@/features/conversations";
 import { useWorkspaceStore } from "@/features/workspaces";
 import { StatsPanel } from "@/components/stats";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui";
+import {
+    Popover,
+    PopoverTrigger,
+    PopoverContent,
+    toast
+} from "@/components/ui";
+import { toApiErrorMessage } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
 import { getCachedPermissionMode } from "@/features/permissions";
@@ -43,13 +49,25 @@ function HomeRoute() {
         // so a concurrent route change can't shift it under us.
         const carriedPermissionMode = getCachedPermissionMode();
 
-        const conversation = await createConversation(
-            activeWorkspaceId,
-            message,
-            attachmentIds,
-            mentions,
-            useSkillNames
-        );
+        let conversation;
+        try {
+            conversation = await createConversation(
+                activeWorkspaceId,
+                message,
+                attachmentIds,
+                mentions,
+                useSkillNames
+            );
+        } catch (error) {
+            toast.error({
+                title: "Couldn't start conversation",
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to create conversation"
+                )
+            });
+            return;
+        }
 
         // Carry the permission mode shown on `/` into the new conversation as
         // its own override. The home screen displays a cached mode that may

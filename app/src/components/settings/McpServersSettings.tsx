@@ -39,7 +39,8 @@ import {
     ModalDescription,
     ModalTitle,
     Select,
-    Switch
+    Switch,
+    toast
 } from "@/components/ui";
 
 const STATUS_CONFIG: Record<
@@ -772,6 +773,12 @@ function ScopeSection({
             }
             await saveConfig(workspaceId, scope, parsed);
             setRawMode(false);
+            toast.success({
+                title:
+                    scope === "global"
+                        ? "Saved global MCP config"
+                        : "Saved workspace MCP config"
+            });
         } catch (error) {
             setRawError(toApiErrorMessage(error, "Invalid JSON"));
         } finally {

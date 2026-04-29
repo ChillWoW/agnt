@@ -5,3 +5,4 @@ export {
     waitForServerConnection
 } from "./monitor";
 export { useServerConnection } from "./useServerConnection";
+export { ServerConnectionToaster } from "./ServerConnectionToaster";

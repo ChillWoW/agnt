@@ -5,7 +5,8 @@ import {
     RocketLaunchIcon,
     NotepadIcon
 } from "@phosphor-icons/react";
-import { Button } from "@/components/ui";
+import { Button, toast } from "@/components/ui";
+import { toApiErrorMessage } from "@/lib/api";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 import { usePlanStore } from "./plan-store";
 import { useAgenticMode } from "./use-agentic-mode";
@@ -69,13 +70,26 @@ export function PlanPanel() {
 
             await setAgenticMode("agent");
 
+            toast.success({
+                title: "Building from plan",
+                description: result.todos
+                    ? `${result.todos.length} todo${result.todos.length === 1 ? "" : "s"} queued.`
+                    : undefined
+            });
+
             void sendMessage(
                 activeWorkspaceId,
                 activeConversationId,
                 "Build according to the plan. The todos have been set up — start working through them."
             );
-        } catch {
-            // build failed; user can retry
+        } catch (error) {
+            toast.error({
+                title: "Couldn't build from plan",
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to build from plan"
+                )
+            });
         }
     }, [
         activeWorkspaceId,

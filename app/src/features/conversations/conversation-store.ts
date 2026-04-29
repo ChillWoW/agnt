@@ -26,6 +26,7 @@ import { useSplitPaneStore } from "@/features/split-panes";
 import type { Attachment } from "@/features/attachments";
 import { notify } from "@/features/notifications/notify";
 import { isWindowFocused } from "@/features/notifications/focus";
+import { toast } from "@/components/ui";
 import type {
     CompactedSseEvent,
     ContextSummary,
@@ -1218,6 +1219,14 @@ function handleConversationSseEvent(
                         (m) => !(m.role === "assistant" && m.isStreaming)
                     )
                 }));
+                const message =
+                    typeof (data as { message?: unknown }).message === "string"
+                        ? ((data as { message: string }).message)
+                        : "The model run failed mid-stream.";
+                toast.error({
+                    title: "Generation failed",
+                    description: message
+                });
                 break;
             }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyIcon, CheckIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { BinaryMatrix } from "@/features/left-sidebar/binary-matrix";
-import { Tooltip } from "@/components/ui";
+import { Tooltip, toast } from "@/components/ui";
 import type { Message } from "@/features/conversations/conversation-types";
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
@@ -97,8 +97,14 @@ export function MessageFooter({ message }: MessageFooterProps) {
             await navigator.clipboard.writeText(message.content);
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
-        } catch {
-            // clipboard may be unavailable; fail silently
+        } catch (error) {
+            toast.error({
+                title: "Couldn't copy message",
+                description:
+                    error instanceof Error
+                        ? error.message
+                        : "Clipboard unavailable."
+            });
         }
     }, [message.content]);
 

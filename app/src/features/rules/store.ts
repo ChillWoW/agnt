@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, toApiErrorMessage } from "@/lib/api";
+import { toast } from "@/components/ui";
 import type { Rule } from "@/typings/rules";
 
 // ─── Rules store ──────────────────────────────────────────────────────────────
@@ -70,10 +71,18 @@ export const useRulesStore = create<RulesState>((set, get) => ({
                 body: { body }
             });
             set({ rules: sortByUpdatedDesc([created, ...previous]) });
+            toast.success({
+                title: "Rule added",
+                description:
+                    "It will be appended to every system prompt."
+            });
             return created;
         } catch (error) {
-            set({
-                error: toApiErrorMessage(error, "Failed to create rule")
+            const message = toApiErrorMessage(error, "Failed to create rule");
+            set({ error: message });
+            toast.error({
+                title: "Couldn't save rule",
+                description: message
             });
             return null;
         }
@@ -100,10 +109,13 @@ export const useRulesStore = create<RulesState>((set, get) => ({
                     )
                 )
             });
+            toast.success({ title: "Rule saved" });
         } catch (error) {
-            set({
-                rules: previous,
-                error: toApiErrorMessage(error, "Failed to save rule")
+            const message = toApiErrorMessage(error, "Failed to save rule");
+            set({ rules: previous, error: message });
+            toast.error({
+                title: "Couldn't save rule",
+                description: message
             });
         }
     },
@@ -117,10 +129,13 @@ export const useRulesStore = create<RulesState>((set, get) => ({
 
         try {
             await api.delete(`/rules/${id}`);
+            toast.success({ title: "Rule deleted" });
         } catch (error) {
-            set({
-                rules: previous,
-                error: toApiErrorMessage(error, "Failed to delete rule")
+            const message = toApiErrorMessage(error, "Failed to delete rule");
+            set({ rules: previous, error: message });
+            toast.error({
+                title: "Couldn't delete rule",
+                description: message
             });
         }
     }

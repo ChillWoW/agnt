@@ -31,8 +31,10 @@ import {
     ModalClose,
     Popover,
     PopoverTrigger,
-    PopoverContent
+    PopoverContent,
+    toast
 } from "@/components/ui";
+import { toApiErrorMessage } from "@/lib/api";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LeftSidebarButton } from "./left-sidebar-button";
 import { BinaryMatrix } from "./binary-matrix";
@@ -119,9 +121,21 @@ function ConversationRow({
             setDraft(conv.title);
             return;
         }
-        void useConversationStore
-            .getState()
-            .renameConversation(workspaceId, conv.id, next);
+        void (async () => {
+            try {
+                await useConversationStore
+                    .getState()
+                    .renameConversation(workspaceId, conv.id, next);
+            } catch (error) {
+                toast.error({
+                    title: "Couldn't rename conversation",
+                    description: toApiErrorMessage(
+                        error,
+                        "Failed to rename conversation"
+                    )
+                });
+            }
+        })();
     };
 
     const cancelEdit = () => {
@@ -132,18 +146,80 @@ function ConversationRow({
     };
 
     const handleArchive = async () => {
-        await useConversationStore
-            .getState()
-            .archiveConversation(workspaceId, conv.id);
-        void navigate({ to: "/" });
+        const titleSnapshot = conv.title;
+        try {
+            await useConversationStore
+                .getState()
+                .archiveConversation(workspaceId, conv.id);
+            void navigate({ to: "/" });
+            toast.success({
+                title: "Conversation archived",
+                description: titleSnapshot,
+                action: {
+                    label: "Undo",
+                    onClick: () => {
+                        void (async () => {
+                            try {
+                                await useConversationStore
+                                    .getState()
+                                    .unarchiveConversation(
+                                        workspaceId,
+                                        conv.id
+                                    );
+                            } catch (error) {
+                                toast.error({
+                                    title: "Couldn't undo archive",
+                                    description: toApiErrorMessage(
+                                        error,
+                                        "Failed to restore conversation"
+                                    )
+                                });
+                            }
+                        })();
+                    }
+                }
+            });
+        } catch (error) {
+            toast.error({
+                title: "Couldn't archive conversation",
+                description: toApiErrorMessage(
+                    error,
+                    "Failed to archive conversation"
+                )
+            });
+        }
     };
 
     const handleTogglePin = () => {
         const store = useConversationStore.getState();
         if (isPinned) {
-            void store.unpinConversation(workspaceId, conv.id);
+            void (async () => {
+                try {
+                    await store.unpinConversation(workspaceId, conv.id);
+                } catch (error) {
+                    toast.error({
+                        title: "Couldn't unpin",
+                        description: toApiErrorMessage(
+                            error,
+                            "Failed to unpin conversation"
+                        )
+                    });
+                }
+            })();
         } else {
-            void store.pinConversation(workspaceId, conv.id);
+            void (async () => {
+                try {
+                    await store.pinConversation(workspaceId, conv.id);
+                } catch (error) {
+                    toast.error({
+                        title: "Couldn't pin",
+                        description: toApiErrorMessage(
+                            error,
+                            "Failed to pin conversation"
+                        )
+                    });
+                }
+            })();
         }
     };
 
@@ -628,12 +704,30 @@ function WorkspaceArchivedList({
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    void useConversationStore
-                                        .getState()
-                                        .unarchiveConversation(
-                                            workspaceId,
-                                            conv.id
-                                        );
+                                    const titleSnapshot = conv.title;
+                                    void (async () => {
+                                        try {
+                                            await useConversationStore
+                                                .getState()
+                                                .unarchiveConversation(
+                                                    workspaceId,
+                                                    conv.id
+                                                );
+                                            toast.success({
+                                                title: "Conversation restored",
+                                                description: titleSnapshot
+                                            });
+                                        } catch (error) {
+                                            toast.error({
+                                                title: "Couldn't restore conversation",
+                                                description:
+                                                    toApiErrorMessage(
+                                                        error,
+                                                        "Failed to restore conversation"
+                                                    )
+                                            });
+                                        }
+                                    })();
                                 }}
                                 className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-dark-200 hover:text-dark-50 p-0.5"
                             >
@@ -852,9 +946,27 @@ function WorkspaceRow({
                 title={pendingDelete?.title ?? ""}
                 onConfirm={() => {
                     if (!pendingDeleteId) return;
-                    void useConversationStore
-                        .getState()
-                        .deleteConversation(ws.id, pendingDeleteId);
+                    const titleSnapshot = pendingDelete?.title ?? "";
+                    const targetId = pendingDeleteId;
+                    void (async () => {
+                        try {
+                            await useConversationStore
+                                .getState()
+                                .deleteConversation(ws.id, targetId);
+                            toast.success({
+                                title: "Conversation deleted",
+                                description: titleSnapshot
+                            });
+                        } catch (error) {
+                            toast.error({
+                                title: "Couldn't delete conversation",
+                                description: toApiErrorMessage(
+                                    error,
+                                    "Failed to delete conversation"
+                                )
+                            });
+                        }
+                    })();
                     setPendingDeleteId(null);
                 }}
             />

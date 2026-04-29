@@ -4,6 +4,7 @@ import { AppToaster } from "@/components/ui";
 import { HotkeysProvider } from "@/features/hotkeys";
 import { AuthBootstrap } from "@/features/auth";
 import { NotificationsBootstrap } from "@/features/notifications";
+import { ServerConnectionToaster } from "@/features/server";
 
 export const Route = createRootRoute({
     component: RootLayout
@@ -14,6 +15,7 @@ function RootLayout() {
         <HotkeysProvider>
             <AuthBootstrap />
             <NotificationsBootstrap />
+            <ServerConnectionToaster />
             <AppLayout>
                 <Outlet />
             </AppLayout>

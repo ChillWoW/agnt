@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, toApiErrorMessage } from "@/lib/api";
+import { toast } from "@/components/ui";
 import {
     DEFAULT_SETTINGS,
     type Settings,
@@ -101,9 +102,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             });
         } catch (error) {
             // Rollback on failure
+            const message = toApiErrorMessage(error, "Failed to save settings");
             set({
                 settings: previous,
-                error: toApiErrorMessage(error, "Failed to save settings")
+                error: message
+            });
+            toast.error({
+                title: "Couldn't save settings",
+                description: message
             });
         }
     },
