@@ -25,8 +25,21 @@ const MAX_BLOCK_MS = 600_000;
 const DB_FLUSH_MS = 500;
 /** Or flush sooner if we've buffered this much new output since last flush. */
 const DB_FLUSH_BYTES = 4 * 1024;
-/** Cap on inline output returned to the model (chars, not bytes). */
-const MAX_INLINE_OUTPUT_CHARS = 200_000;
+/**
+ * Cap on inline output returned to the model (chars, not bytes).
+ *
+ * Kept intentionally small — full stdout/stderr is always persisted at
+ * `log_path` and the model can `read_file` it on demand. This budget is
+ * just the "drive-by glance" that rides inline in the tool result.
+ */
+const MAX_INLINE_OUTPUT_CHARS = 25_000;
+/**
+ * When the buffer is over budget we keep this many chars from the head
+ * (startup banner / first error often lives here) and spend the rest on
+ * the tail (exit message, final stack trace, etc.). Head + tail must be
+ * less than `MAX_INLINE_OUTPUT_CHARS`.
+ */
+const INLINE_HEAD_CHARS = 4_000;
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -104,10 +117,13 @@ const TOOL_DESCRIPTION =
 
 function truncateForModel(text: string): string {
     if (text.length <= MAX_INLINE_OUTPUT_CHARS) return text;
-    const keep = MAX_INLINE_OUTPUT_CHARS - 200;
+    const head = text.slice(0, INLINE_HEAD_CHARS);
+    const tailBudget = MAX_INLINE_OUTPUT_CHARS - INLINE_HEAD_CHARS - 200;
+    const tail = text.slice(text.length - tailBudget);
+    const dropped = text.length - head.length - tail.length;
     return (
-        text.slice(0, keep) +
-        `\n[... truncated ${text.length - keep} chars; read full output from log_path ...]`
+        `${head}\n[... truncated ${dropped} chars from the middle; ` +
+        `read full output from log_path ...]\n${tail}`
     );
 }
 

@@ -18,7 +18,14 @@ import type {
 
 const DEFAULT_BLOCK_MS = 30_000;
 const MAX_BLOCK_MS = 600_000;
-const MAX_INLINE_OUTPUT_CHARS = 200_000;
+/**
+ * Cap on inline `new_output` returned to the model. Kept small — the full
+ * job output is always persisted at `snapshot.log_path` and the model can
+ * `read_file` it on demand.
+ */
+const MAX_INLINE_OUTPUT_CHARS = 25_000;
+/** Chars kept from the head of the buffer; the rest of the budget is tail. */
+const INLINE_HEAD_CHARS = 4_000;
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -77,10 +84,13 @@ const TOOL_DESCRIPTION =
 
 function truncateForModel(text: string): string {
     if (text.length <= MAX_INLINE_OUTPUT_CHARS) return text;
-    const keep = MAX_INLINE_OUTPUT_CHARS - 200;
+    const head = text.slice(0, INLINE_HEAD_CHARS);
+    const tailBudget = MAX_INLINE_OUTPUT_CHARS - INLINE_HEAD_CHARS - 200;
+    const tail = text.slice(text.length - tailBudget);
+    const dropped = text.length - head.length - tail.length;
     return (
-        text.slice(0, keep) +
-        `\n[... truncated ${text.length - keep} chars; read full output from log_path ...]`
+        `${head}\n[... truncated ${dropped} chars from the middle; ` +
+        `read full output from log_path ...]\n${tail}`
     );
 }
 
