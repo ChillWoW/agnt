@@ -42,22 +42,29 @@ export function parseMentionsFromContent(content: string): MessageMention[] {
 
 /**
  * Build the `<workspace_mentions>` instruction block that is prepended to the
- * user message when it contains @-mentions. The block forces the model to
- * inspect referenced paths via its read_file / glob / grep tools rather than
- * hallucinating their contents.
+ * user message when it contains @-mentions of *directories*.
+ *
+ * NOTE: File mentions are intentionally excluded here — the stream layer
+ * eagerly invokes `read_file` for each mentioned file (mirroring the slash-
+ * skill flow that pre-loads `SKILL.md` bodies) and emits a synthetic
+ * `read_file` tool invocation per file, so the model already sees the file
+ * contents through its tool-call replay. Re-listing files in this block
+ * would just nudge the model to re-read what it already has.
+ *
+ * Directories don't fit the eager-load pattern (size unbounded; "reading"
+ * a folder isn't a single tool call), so we keep the instruction nudge for
+ * them: the model is reminded to use `glob` / `grep` / `read_file` to
+ * inspect referenced folders.
  */
 export function buildMentionsInstructionBlock(
     mentions: MessageMention[]
 ): string {
-    if (mentions.length === 0) return "";
-    const lines = mentions.map((m) =>
-        m.type === "directory"
-            ? `- dir:  ${m.path}`
-            : `- file: ${m.path}`
-    );
+    const dirs = mentions.filter((m) => m.type === "directory");
+    if (dirs.length === 0) return "";
+    const lines = dirs.map((m) => `- dir:  ${m.path}`);
     return [
         "<workspace_mentions>",
-        "The user referenced these workspace paths. You MUST inspect them with your `read_file`, `glob`, and `grep` tools before answering. Do NOT assume their contents. Paths are relative to the workspace root.",
+        "The user referenced these workspace directories. You MUST inspect them with your `glob`, `grep`, and `read_file` tools before answering. Do NOT assume their contents. Paths are relative to the workspace root.",
         ...lines,
         "</workspace_mentions>"
     ].join("\n");
@@ -66,6 +73,7 @@ export function buildMentionsInstructionBlock(
 export function estimateMentionsBlockTokens(
     mentions: MessageMention[]
 ): number {
-    if (mentions.length === 0) return 0;
-    return mentions.length * 10 + 40;
+    const dirs = mentions.filter((m) => m.type === "directory");
+    if (dirs.length === 0) return 0;
+    return dirs.length * 10 + 40;
 }

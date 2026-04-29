@@ -1109,22 +1109,24 @@ function PinnedGroup() {
 
     return (
         <div className="flex flex-col">
-            <button
-                type="button"
-                onClick={() => setCollapsed(!isCollapsed)}
-                className="group flex w-full items-center gap-1 px-1 py-1 rounded-md text-[11px] text-dark-200 hover:text-dark-50 transition-colors"
-            >
-                <CaretRightIcon
-                    className={cn(
-                        "size-2.5 shrink-0 transition-transform duration-100",
-                        !isCollapsed && "rotate-90"
-                    )}
-                    weight="bold"
-                />
-                <span className="truncate font-medium">Pinned</span>
-            </button>
+            <div className="group flex items-center gap-1 px-1 py-1 rounded-md text-[11px] transition-colors min-w-0 w-full">
+                <button
+                    type="button"
+                    onClick={() => setCollapsed(!isCollapsed)}
+                    className="flex items-center gap-1 min-w-0 flex-1 text-left text-dark-200 hover:text-dark-50"
+                >
+                    <span className="truncate font-medium">Pinned</span>
+                    <CaretRightIcon
+                        className={cn(
+                            "size-2.5 shrink-0 opacity-0 transition-all duration-100 group-hover:opacity-100",
+                            !isCollapsed && "rotate-90"
+                        )}
+                        weight="bold"
+                    />
+                </button>
+            </div>
             {!isCollapsed && (
-                <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5 flex flex-col gap-0.5">
+                <div className="mt-0.5 flex flex-col gap-0.5">
                     {pinnedEntries.map((entry) => (
                         <ConversationRow
                             key={entry.conv.id}

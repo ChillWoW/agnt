@@ -96,6 +96,11 @@ import {
     type Skill
 } from "../skills/skills.service";
 import { getMcpToolDefs } from "../mcp/mcp.service";
+import {
+    createReadFileToolDef,
+    type ReadFileOutput,
+    type ReadFileTextOutput
+} from "./tools/read-file";
 export { DEFAULT_MODEL };
 
 const DEFAULT_SUBAGENT_MODEL = "gpt-5.4-mini";
@@ -1223,7 +1228,8 @@ async function runStreamTextIntoController({
     modelMessages,
     abortSignal,
     subagentOverrides,
-    useSkillNames
+    useSkillNames,
+    eagerReadMentions
 }: {
     controller: SseStreamController;
     workspaceId: string;
@@ -1241,6 +1247,17 @@ async function runStreamTextIntoController({
      * `instructions` below.
      */
     useSkillNames?: string[];
+    /**
+     * Optional list of `@`-mentioned workspace paths the user referenced in
+     * the triggering user message. File-typed mentions are eagerly read via
+     * `read_file` before the model run starts so the contents appear in
+     * the chat as a synthetic `read_file` tool card AND are inlined as a
+     * trailing per-turn system block (mirrors the slash-skill flow). The
+     * matching `<workspace_mentions>` instruction block in
+     * `buildModelMessages` only nudges for *directory* mentions now —
+     * file mentions are fully handled here.
+     */
+    eagerReadMentions?: MessageMention[];
 }): Promise<void> {
     const db = getWorkspaceDb(workspaceId);
     const { modelName, reasoningEffort, fastMode, permissionMode, agenticMode } =
@@ -1825,6 +1842,164 @@ async function runStreamTextIntoController({
                 "[stream] No skills resolved for slash-command request",
                 { conversationId, requested: useSkillNames }
             );
+        }
+
+        // Eagerly resolve `@file` mentions by invoking `read_file` per file
+        // and injecting the result the same way the slash-skill flow injects
+        // SKILL.md bodies. Mirrors that flow:
+        //  - The freshly-read content is appended as a trailing per-turn
+        //    `role: "system"` message so this turn's model call sees it
+        //    immediately (cache-safe — same reasoning as the active-skills
+        //    block; we keep `instructions` bit-identical).
+        //  - A synthetic `read_file` tool invocation is persisted on the
+        //    assistant placeholder and emitted via SSE so the chat UI shows
+        //    a tool card, AND so future turns replay the read result via
+        //    `buildAssistantMessagesForTurn` instead of needing the system
+        //    block again.
+        //
+        // Directory mentions are NOT eager-read here — `read_file` is a file
+        // tool, and listing a folder's tree is unbounded. Those still go
+        // through `buildMentionsInstructionBlock` which now nudges the model
+        // to inspect them with `glob` / `grep` / `read_file` itself.
+        const fileMentions = (eagerReadMentions ?? []).filter(
+            (m) => m.type === "file"
+        );
+        if (fileMentions.length > 0) {
+            const readFileExec = createReadFileToolDef(workspacePath).execute;
+
+            interface EagerRead {
+                mention: MessageMention;
+                output: ReadFileOutput | null;
+                error: string | null;
+            }
+            const reads: EagerRead[] = [];
+
+            for (const mention of fileMentions) {
+                try {
+                    const output = await readFileExec({
+                        path: mention.path
+                    });
+                    reads.push({ mention, output, error: null });
+                } catch (error) {
+                    const message =
+                        error instanceof Error
+                            ? error.message
+                            : String(error);
+                    logger.error(
+                        "[stream] Eager mention read_file failed",
+                        { path: mention.path },
+                        error
+                    );
+                    reads.push({ mention, output: null, error: message });
+                }
+            }
+
+            const successfulTextReads = reads.filter(
+                (r): r is EagerRead & { output: ReadFileTextOutput } =>
+                    r.output !== null && r.output.kind === "text"
+            );
+
+            // Per-turn system block: we only inline TEXT reads (image / PDF
+            // bytes are persisted on the synthetic invocation and replayed
+            // via `toModelOutput`). The model reads the inlined text in its
+            // first step; subsequent turns see the same content via the
+            // replayed tool result.
+            if (successfulTextReads.length > 0) {
+                const blocks = successfulTextReads
+                    .map(({ mention, output }) => {
+                        const path = mention.path
+                            .replace(/&/g, "&amp;")
+                            .replace(/"/g, "&quot;")
+                            .replace(/</g, "&lt;")
+                            .replace(/>/g, "&gt;");
+                        const body = output.content
+                            .replace(/&/g, "&amp;")
+                            .replace(/</g, "&lt;")
+                            .replace(/>/g, "&gt;");
+                        const meta =
+                            output.lineCount === 0
+                                ? "empty"
+                                : `lines ${output.startLine}-${output.endLine} of ${output.lineCount}${output.truncated ? " (truncated)" : ""}`;
+                        return `<read path="${path}" meta="${meta}">\n${body}\n</read>`;
+                    })
+                    .join("\n\n");
+
+                const block =
+                    `## Active File Reads\n` +
+                    `The user referenced the files below in their message via ` +
+                    `\`@<path>\` mentions. Their contents have already been ` +
+                    `loaded for you (no extra \`read_file\` call needed). Use ` +
+                    `them as primary context for this turn.\n\n` +
+                    `<active_reads>\n${blocks}\n</active_reads>`;
+
+                modelMessagesWithTodos = [
+                    ...modelMessagesWithTodos,
+                    {
+                        role: "system" as const,
+                        content: block
+                    }
+                ];
+            }
+
+            // Persist + emit a synthetic `read_file` tool invocation per
+            // mention (success or failure). This makes the chat UI show a
+            // ToolCallCard immediately AND ensures future turns replay the
+            // read through the tool-result path in `buildModelMessages`.
+            for (const { mention, output, error } of reads) {
+                const invocationId = crypto.randomUUID();
+                const messageSeq = allocateMessageSeq();
+                const createdAt = new Date().toISOString();
+                const toolCallId = `mention-${invocationId}`;
+
+                const input = { path: mention.path };
+                const status: ToolInvocationStatus =
+                    error !== null ? "error" : "success";
+
+                db.query(
+                    "INSERT INTO tool_invocations (id, message_id, tool_name, input_json, output_json, error, status, created_at, message_seq) VALUES (?, ?, 'read_file', ?, ?, ?, ?, ?, ?)"
+                ).run(
+                    invocationId,
+                    assistantMsgId,
+                    safeStringify(input),
+                    output !== null ? safeStringify(output) : null,
+                    error,
+                    status,
+                    createdAt,
+                    messageSeq
+                );
+
+                controller.enqueue(
+                    sseEvent("tool-call", {
+                        id: invocationId,
+                        messageId: assistantMsgId,
+                        toolCallId,
+                        toolName: "read_file",
+                        input,
+                        status,
+                        createdAt,
+                        messageSeq
+                    })
+                );
+                controller.enqueue(
+                    sseEvent("tool-result", {
+                        messageId: assistantMsgId,
+                        toolCallId,
+                        toolName: "read_file",
+                        output: output ?? null,
+                        error,
+                        status
+                    })
+                );
+            }
+
+            logger.log("[stream] Eagerly loaded mentioned files", {
+                conversationId,
+                requested: fileMentions.map((m) => m.path),
+                resolved: successfulTextReads.map((r) => r.mention.path),
+                failed: reads
+                    .filter((r) => r.error !== null)
+                    .map((r) => r.mention.path)
+            });
         }
 
         const result = streamText({
@@ -2673,9 +2848,18 @@ export async function streamReplyToLastMessage(
         // generation progress.
         const triggeringUserMsgRow = db
             .query(
-                "SELECT id FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1"
+                "SELECT id, content FROM messages WHERE conversation_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1"
             )
-            .get(conversationId) as { id: string } | null;
+            .get(conversationId) as { id: string; content: string } | null;
+
+        // Re-derive `@`-mentions from the persisted user message text so the
+        // post-create `/reply` path eagerly loads file mentions identically
+        // to `streamConversationReply` (the structured `mentions` array is
+        // not threaded through the create-then-reply boundary; serialised
+        // text is the source of truth on this path).
+        const eagerReadMentions = triggeringUserMsgRow
+            ? parseMentionsFromContent(triggeringUserMsgRow.content)
+            : [];
 
         const cancellation = attachStreamCancellation(
             conversationId,
@@ -2693,7 +2877,8 @@ export async function streamReplyToLastMessage(
                 assistantCreatedAt,
                 modelMessages,
                 abortSignal: cancellation.signal,
-                useSkillNames
+                useSkillNames,
+                eagerReadMentions
             });
         } finally {
             cancellation.release();
@@ -2898,7 +3083,8 @@ export async function streamConversationReply(
                 assistantCreatedAt,
                 modelMessages,
                 abortSignal: cancellation.signal,
-                useSkillNames
+                useSkillNames,
+                eagerReadMentions: mentions
             });
         } finally {
             cancellation.release();
@@ -3035,6 +3221,16 @@ export async function streamRegenerateLastTurn(
             conversationId
         );
 
+        // Re-derive `@`-mentions from the regenerated turn's user message so
+        // the new assistant alternative gets the same eager `read_file`
+        // tool cards + inlined contents the original turn would have had.
+        const regenerateTriggerUser = [...history]
+            .reverse()
+            .find((m) => m.role === "user");
+        const eagerReadMentions = regenerateTriggerUser
+            ? parseMentionsFromContent(regenerateTriggerUser.content)
+            : [];
+
         // Stage 2: flip the active branch to the new alternative and
         // insert the placeholder so subsequent SSE deltas land in the
         // visible view.
@@ -3111,7 +3307,8 @@ export async function streamRegenerateLastTurn(
                 assistantCreatedAt: newAssistantCreatedAt,
                 modelMessages,
                 abortSignal: cancellation.signal,
-                useSkillNames
+                useSkillNames,
+                eagerReadMentions
             });
         } finally {
             cancellation.release();
@@ -3443,7 +3640,8 @@ export async function streamEditAndRegenerate(
                 assistantCreatedAt: newAssistantCreatedAt,
                 modelMessages,
                 abortSignal: cancellation.signal,
-                useSkillNames
+                useSkillNames,
+                eagerReadMentions: mentions
             });
         } finally {
             cancellation.release();
@@ -3458,9 +3656,6 @@ export async function streamEditAndRegenerate(
             })
         );
 
-        // Suppress unused-variable warnings until a future change consumes
-        // mentions for the edit flow.
-        void mentions;
     });
 }
 
