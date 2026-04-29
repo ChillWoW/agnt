@@ -122,6 +122,36 @@ interface ConversationStoreState {
         useSkillNames?: string[]
     ) => Promise<void>;
     replyToConversation: (workspaceId: string, conversationId: string) => Promise<void>;
+    /**
+     * Regenerate the latest assistant turn as a new branch alternative.
+     * Streams via the same SSE machinery as `replyToConversation`.
+     */
+    regenerateLastTurn: (
+        workspaceId: string,
+        conversationId: string
+    ) => Promise<void>;
+    /**
+     * Edit the latest user message and regenerate the assistant reply.
+     * Both rows fork into a new branch alternative.
+     */
+    editLastMessage: (
+        workspaceId: string,
+        conversationId: string,
+        content: string,
+        attachmentIds?: string[],
+        mentions?: conversationApi.MessageMention[],
+        useSkillNames?: string[]
+    ) => Promise<void>;
+    /**
+     * Switch which branch alternative is visible on the conversation's
+     * latest turn. Replaces local message state with the server's
+     * branch-filtered view.
+     */
+    switchBranch: (
+        workspaceId: string,
+        conversationId: string,
+        index: number
+    ) => Promise<void>;
     archiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     unarchiveConversation: (workspaceId: string, conversationId: string) => Promise<void>;
     pinConversation: (workspaceId: string, conversationId: string) => Promise<void>;
@@ -1239,6 +1269,52 @@ function handleConversationSseEvent(
                 onSubagentFinished(data as unknown as SubagentFinishedEvent);
                 break;
             }
+
+            case "branch-cutover": {
+                // Server tells us which messages to drop from the visible
+                // view because we're about to switch into a freshly-
+                // created branch alternative. The dropped rows stay in
+                // the DB at their original branch indexes so the
+                // navigator can flip back to them later.
+                const hideIds = Array.isArray(data.hide_message_ids)
+                    ? (data.hide_message_ids as string[])
+                    : [];
+                if (hideIds.length === 0) break;
+                const hideSet = new Set(hideIds);
+                updateConversation((prev) => ({
+                    ...prev,
+                    messages: prev.messages.filter(
+                        (m) => !hideSet.has(m.id)
+                    )
+                }));
+                break;
+            }
+
+            case "branch-info": {
+                // Server pushes the conversation's current branch state so
+                // the assistant footer's `< n / m >` navigator updates
+                // mid-stream (regenerate / edit-and-regenerate emit one
+                // immediately after creating the placeholder, and again
+                // after `finish`). `null` clears the navigator (e.g. after
+                // `streamConversationReply` seals an active branch).
+                const rawBranchInfo = data.branch_info as
+                    | {
+                          groupId: string;
+                          activeIndex: number;
+                          total: number;
+                      }
+                    | null
+                    | undefined;
+                updateConversation((prev) => ({
+                    ...prev,
+                    branch_info: rawBranchInfo ?? null,
+                    active_branch_group_id:
+                        rawBranchInfo?.groupId ?? null,
+                    active_branch_index:
+                        rawBranchInfo?.activeIndex ?? 0
+                }));
+                break;
+            }
         }
 }
 
@@ -1275,6 +1351,39 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                 }
             };
         });
+    }
+
+    /**
+     * Pull the canonical conversation from the server and replace local
+     * state. Used by regenerate / edit-and-regenerate after the SSE
+     * stream finishes (success OR error) to reconcile any messages we
+     * hid via `branch-cutover` but didn't get back during the stream.
+     * Failures are swallowed — the worst case is the user reloads the
+     * conversation.
+     */
+    async function reloadConversationAfterBranchOp(
+        workspaceId: string,
+        conversationId: string
+    ): Promise<void> {
+        try {
+            const fresh = await conversationApi.fetchConversation(
+                workspaceId,
+                conversationId
+            );
+            set((state) => ({
+                conversationsById: {
+                    ...state.conversationsById,
+                    [conversationId]: fresh
+                },
+                workspaceIdByConversationId: {
+                    ...state.workspaceIdByConversationId,
+                    [conversationId]: workspaceId
+                }
+            }));
+        } catch {
+            // ignore — the in-memory state is good enough; user can
+            // refresh manually if anything looks stuck.
+        }
     }
 
     /**
@@ -2154,6 +2263,101 @@ export const useConversationStore = create<ConversationStoreState>()((set, get) 
                     signal
                 )
             );
+        },
+
+        regenerateLastTurn: async (
+            workspaceId: string,
+            conversationId: string
+        ) => {
+            try {
+                await runConversationStream(
+                    workspaceId,
+                    conversationId,
+                    (signal) =>
+                        conversationApi.regenerateLastTurn(
+                            workspaceId,
+                            conversationId,
+                            signal
+                        )
+                );
+            } finally {
+                // Force-refetch the canonical conversation after the stream
+                // ends. On the happy path this is a no-op-ish reconcile; on
+                // the error path it brings back the survivor branch the
+                // client hid via `branch-cutover` and undoes any partial
+                // branch state.
+                await reloadConversationAfterBranchOp(
+                    workspaceId,
+                    conversationId
+                );
+            }
+        },
+
+        editLastMessage: async (
+            workspaceId: string,
+            conversationId: string,
+            content: string,
+            attachmentIds: string[] = [],
+            mentions: conversationApi.MessageMention[] = [],
+            useSkillNames: string[] = []
+        ) => {
+            try {
+                await runConversationStream(
+                    workspaceId,
+                    conversationId,
+                    (signal) =>
+                        conversationApi.editAndRegenerate(
+                            workspaceId,
+                            conversationId,
+                            content,
+                            signal,
+                            attachmentIds,
+                            mentions,
+                            useSkillNames
+                        )
+                );
+            } finally {
+                await reloadConversationAfterBranchOp(
+                    workspaceId,
+                    conversationId
+                );
+            }
+        },
+
+        switchBranch: async (
+            workspaceId: string,
+            conversationId: string,
+            index: number
+        ) => {
+            try {
+                const fresh = await conversationApi.switchBranch(
+                    workspaceId,
+                    conversationId,
+                    index
+                );
+                set((state) => ({
+                    conversationsById: {
+                        ...state.conversationsById,
+                        [conversationId]: fresh
+                    },
+                    workspaceIdByConversationId: {
+                        ...state.workspaceIdByConversationId,
+                        [conversationId]: workspaceId
+                    }
+                }));
+                // Reload context so the meter reflects the new branch's
+                // token totals (different alternatives have different
+                // assistant content + tool calls).
+                get().bumpContextRefresh(conversationId);
+            } catch (error) {
+                toast.error({
+                    title: "Couldn't switch branch",
+                    description:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error."
+                });
+            }
         },
 
         archiveConversation: async (

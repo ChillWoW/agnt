@@ -10,6 +10,12 @@ type SdkToolResultOutput = SdkToolResultPart["output"];
 import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { getWorkspace } from "../workspaces/workspaces.service";
+import {
+    branchFilteredMessagesClause,
+    computeBranchInfo,
+    readBranchState,
+    sealBranches
+} from "./conversations.service";
 import { createCodexWsModel } from "./codex-websocket-provider";
 import {
     buildStreamResponse,
@@ -2611,11 +2617,12 @@ export async function streamReplyToLastMessage(
             0
         );
 
+        const branchClause = branchFilteredMessagesClause(db, conversationId);
         const history = db
             .query(
-                "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+                `SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0${branchClause.whereClause} ORDER BY created_at ASC`
             )
-            .all(conversationId) as Message[];
+            .all(conversationId, ...branchClause.params) as Message[];
 
         logger.log("[stream] Loaded", history.length, "messages for context");
 
@@ -2734,6 +2741,22 @@ export async function streamConversationReply(
             controller
         });
 
+        // 0) Seal any active branch group into permanent history before the
+        //    new user message is appended. This deletes every non-active
+        //    alternative and clears branch metadata from the survivor so the
+        //    new turn becomes the next row in linear history.
+        const hadActiveBranchGroup =
+            readBranchState(db, conversationId).groupId !== null;
+        sealBranches(db, conversationId);
+        if (hadActiveBranchGroup) {
+            controller.enqueue(
+                sseEvent("branch-info", {
+                    conversation_id: conversationId,
+                    branch_info: null
+                })
+            );
+        }
+
         // 1) Persist + emit the user message immediately so the UI shows
         //    feedback before the (potentially slow) summarization call.
         const userMsgId = crypto.randomUUID();
@@ -2816,11 +2839,15 @@ export async function streamConversationReply(
         //    the new (smaller) conversation state. Filtering on `compacted=0`
         //    drops the rows that were just marked compacted and keeps the
         //    summary system row that compactConversation inserted.
+        // The branch filter is a no-op here in practice — `streamConversationReply`
+        // already sealed any active branch before this point — but we apply
+        // it for consistency in case a future flow lands here mid-branch.
+        const branchClause = branchFilteredMessagesClause(db, conversationId);
         const history = db
             .query(
-                "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+                `SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0${branchClause.whereClause} ORDER BY created_at ASC`
             )
-            .all(conversationId) as Message[];
+            .all(conversationId, ...branchClause.params) as Message[];
 
         logger.log(
             "[stream] Loaded",
@@ -2880,6 +2907,564 @@ export async function streamConversationReply(
 }
 
 /**
+ * Regenerate the latest assistant turn as a new branch alternative.
+ *
+ * - Promotes the current latest assistant message into a branch group at
+ *   index 0 (if not already in one).
+ * - Inserts a fresh assistant placeholder at the next branch index.
+ * - Updates the conversation's `active_branch_*` to point at the new index.
+ * - Streams the response using the same machinery as a regular reply, but
+ *   the history is built from messages older than the latest assistant
+ *   row (the new placeholder row is intentionally excluded from history).
+ *
+ * Emits a `branch-info` SSE event after `assistant-start` so the client
+ * footer renders the navigator immediately, and another after `finish`
+ * with the post-stream total in case the count changed.
+ */
+export async function streamRegenerateLastTurn(
+    workspaceId: string,
+    conversationId: string,
+    abortSignal?: AbortSignal
+): Promise<Response> {
+    logger.log("[stream] streamRegenerateLastTurn start", {
+        workspaceId,
+        conversationId
+    });
+
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+    if (!existing) {
+        logger.error("[stream] Conversation not found:", conversationId);
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    return buildStreamResponse(async (rawController) => {
+        const controller = wrapControllerWithBroadcast(
+            rawController,
+            conversationId
+        );
+
+        // Resolve the latest assistant row under the currently-active
+        // branch view so the new alternative slots in alongside it.
+        const activeClause = branchFilteredMessagesClause(db, conversationId);
+        const latestAssistant = db
+            .query(
+                `SELECT id, branch_group_id, branch_index FROM messages WHERE conversation_id = ? AND role = 'assistant'${activeClause.whereClause} ORDER BY created_at DESC LIMIT 1`
+            )
+            .get(conversationId, ...activeClause.params) as
+            | {
+                  id: string;
+                  branch_group_id: string | null;
+                  branch_index: number;
+              }
+            | null;
+
+        if (!latestAssistant) {
+            controller.enqueue(
+                sseEvent("error", {
+                    message: "No assistant message to regenerate."
+                })
+            );
+            return;
+        }
+
+        // Stage 1: Promote the existing assistant row into a branch
+        // group if it isn't already in one, but DON'T flip
+        // `active_branch_index` to the new alternative yet — the
+        // compaction + history-loading queries below need to see the
+        // currently-visible branch, not the empty one we're about to
+        // create. The active index gets updated in stage 2 right
+        // before the new placeholder is inserted.
+        let groupId = latestAssistant.branch_group_id;
+        let newBranchIndex: number;
+        const stage1 = db.transaction(() => {
+            if (!groupId) {
+                groupId = crypto.randomUUID();
+                db.query(
+                    "UPDATE messages SET branch_group_id = ?, branch_index = 0 WHERE id = ?"
+                ).run(groupId, latestAssistant.id);
+                // Keep `active_branch_index = 0` so the survivor stays
+                // visible while we build history.
+                db.query(
+                    "UPDATE conversations SET active_branch_group_id = ?, active_branch_index = 0 WHERE id = ?"
+                ).run(groupId, conversationId);
+                newBranchIndex = 1;
+            } else {
+                const maxRow = db
+                    .query(
+                        "SELECT MAX(branch_index) AS maxIdx FROM messages WHERE branch_group_id = ?"
+                    )
+                    .get(groupId) as { maxIdx: number | null };
+                newBranchIndex = (maxRow?.maxIdx ?? 0) + 1;
+            }
+        });
+        stage1();
+
+        // Auto-compact while the branch view still points at the
+        // currently-visible alternative (so the compactor sees real
+        // history, not the empty placeholder branch).
+        await runAutoCompactionForStream(
+            workspaceId,
+            conversationId,
+            controller,
+            0
+        );
+
+        // Build history from the currently-visible branch view, minus
+        // the latest assistant row (which is what we're "replacing"
+        // with the new alternative).
+        const previousIndex = latestAssistant.branch_index ?? 0;
+        const history = db
+            .query(
+                `SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 AND id != ? AND (branch_group_id IS NULL OR (branch_group_id = ? AND branch_index = ?)) ORDER BY created_at ASC`
+            )
+            .all(
+                conversationId,
+                latestAssistant.id,
+                groupId!,
+                previousIndex
+            ) as Message[];
+
+        const modelMessages = buildModelMessages(workspaceId, history);
+
+        const useSkillNames = readSkillNamesFromLatestUserMessage(
+            db,
+            conversationId
+        );
+
+        // Stage 2: flip the active branch to the new alternative and
+        // insert the placeholder so subsequent SSE deltas land in the
+        // visible view.
+        const newAssistantMsgId = crypto.randomUUID();
+        const newAssistantCreatedAt = new Date().toISOString();
+        const stage2 = db.transaction(() => {
+            db.query(
+                "UPDATE conversations SET active_branch_index = ?, updated_at = ? WHERE id = ?"
+            ).run(
+                newBranchIndex!,
+                new Date().toISOString(),
+                conversationId
+            );
+            db.query(
+                "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted, branch_group_id, branch_index) VALUES (?, ?, ?, ?, ?, 0, ?, ?)"
+            ).run(
+                newAssistantMsgId,
+                conversationId,
+                "assistant",
+                "",
+                newAssistantCreatedAt,
+                groupId!,
+                newBranchIndex!
+            );
+        });
+        stage2();
+
+        // Tell the client to hide the previously-visible assistant row
+        // before we emit `assistant-start` for the new placeholder. The
+        // hidden row stays in the DB at its original branch index so the
+        // navigator can flip back to it.
+        controller.enqueue(
+            sseEvent("branch-cutover", {
+                conversation_id: conversationId,
+                hide_message_ids: [latestAssistant.id]
+            })
+        );
+
+        controller.enqueue(
+            sseEvent("assistant-start", {
+                id: newAssistantMsgId,
+                role: "assistant" as const,
+                conversation_id: conversationId,
+                created_at: newAssistantCreatedAt
+            })
+        );
+
+        // Emit current branch info so the navigator renders straight away.
+        const branchInfoEarly = computeBranchInfo(db, conversationId);
+        controller.enqueue(
+            sseEvent("branch-info", {
+                conversation_id: conversationId,
+                branch_info: branchInfoEarly
+            })
+        );
+
+        // Don't pass a userMsgId — the early-stop discard flow would
+        // delete the original user prompt, which is shared with the
+        // surviving branch. For regeneration we only ever want to
+        // discard the new assistant placeholder.
+        const cancellation = attachStreamCancellation(
+            conversationId,
+            workspaceId,
+            null,
+            newAssistantMsgId,
+            abortSignal
+        );
+        try {
+            await runStreamTextIntoController({
+                controller,
+                workspaceId,
+                conversationId,
+                assistantMsgId: newAssistantMsgId,
+                assistantCreatedAt: newAssistantCreatedAt,
+                modelMessages,
+                abortSignal: cancellation.signal,
+                useSkillNames
+            });
+        } finally {
+            cancellation.release();
+        }
+
+        // If the new placeholder was deleted (stream error / empty
+        // abort), the active branch index now points at a deleted row.
+        // Reset it to a surviving alternative so the navigator stays
+        // consistent. This relies on `runStreamTextIntoController`'s
+        // error path running `DELETE FROM messages WHERE id = ?` for
+        // empty placeholders.
+        recoverBranchIndexAfterStream(db, conversationId, newAssistantMsgId);
+
+        // Re-emit branch info post-stream so the navigator total
+        // updates if anything shifted.
+        const branchInfoLate = computeBranchInfo(db, conversationId);
+        controller.enqueue(
+            sseEvent("branch-info", {
+                conversation_id: conversationId,
+                branch_info: branchInfoLate
+            })
+        );
+    });
+}
+
+/**
+ * Helper: after a regenerate / edit stream completes, the new
+ * assistant placeholder may have been deleted by the error path. If
+ * the conversation's `active_branch_index` now points at a deleted
+ * alternative, fall back to the highest remaining index in the same
+ * group so the navigator stays consistent. If no alternatives remain
+ * (all rows deleted), clear branch state entirely.
+ */
+function recoverBranchIndexAfterStream(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string,
+    expectedAssistantMsgId: string
+): void {
+    const placeholder = db
+        .query("SELECT id FROM messages WHERE id = ?")
+        .get(expectedAssistantMsgId);
+    if (placeholder) return; // happy path: placeholder still exists
+
+    const state = readBranchState(db, conversationId);
+    if (!state.groupId) return;
+
+    const survivors = db
+        .query(
+            "SELECT DISTINCT branch_index FROM messages WHERE branch_group_id = ? ORDER BY branch_index DESC"
+        )
+        .all(state.groupId) as { branch_index: number }[];
+
+    if (survivors.length === 0) {
+        db.query(
+            "UPDATE conversations SET active_branch_group_id = NULL, active_branch_index = 0 WHERE id = ?"
+        ).run(conversationId);
+        return;
+    }
+
+    // Prefer the immediately-prior alternative; fall back to the
+    // highest available index. `survivors` is sorted DESC, so the first
+    // entry whose index is lower than the current `state.index` is the
+    // closest predecessor.
+    const firstSurvivor = survivors[0];
+    if (!firstSurvivor) return;
+    const target =
+        survivors.find((row) => row.branch_index < state.index)
+            ?.branch_index ?? firstSurvivor.branch_index;
+
+    db.query(
+        "UPDATE conversations SET active_branch_index = ? WHERE id = ?"
+    ).run(target, conversationId);
+}
+
+/**
+ * Edit the latest user message and regenerate the assistant reply. Both
+ * the user row and the assistant row become a new branch alternative — so
+ * the user can switch between the original prompt + reply and the edited
+ * prompt + new reply via the navigator.
+ *
+ * Behavior:
+ * - Find the latest user + latest assistant rows in the active branch view.
+ * - Promote them into a branch group at their current index (or 0 if no
+ *   group existed yet) and insert fresh user + assistant placeholder rows
+ *   at the next index.
+ * - Stream the response on top of history that ends with the *new* user
+ *   message (so the model sees the edited prompt).
+ */
+export async function streamEditAndRegenerate(
+    workspaceId: string,
+    conversationId: string,
+    editedContent: string,
+    abortSignal?: AbortSignal,
+    attachmentIds: string[] = [],
+    mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
+): Promise<Response> {
+    logger.log("[stream] streamEditAndRegenerate start", {
+        workspaceId,
+        conversationId,
+        editedContentLength: editedContent.length
+    });
+
+    const db = getWorkspaceDb(workspaceId);
+
+    const existing = db
+        .query("SELECT id FROM conversations WHERE id = ?")
+        .get(conversationId);
+    if (!existing) {
+        logger.error("[stream] Conversation not found:", conversationId);
+        throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    return buildStreamResponse(async (rawController) => {
+        const controller = wrapControllerWithBroadcast(
+            rawController,
+            conversationId
+        );
+        startTitleGenerationForController({
+            workspaceId,
+            conversationId,
+            controller
+        });
+
+        const activeClause = branchFilteredMessagesClause(db, conversationId);
+        const latestUser = db
+            .query(
+                `SELECT id, branch_group_id, branch_index FROM messages WHERE conversation_id = ? AND role = 'user'${activeClause.whereClause} ORDER BY created_at DESC LIMIT 1`
+            )
+            .get(conversationId, ...activeClause.params) as
+            | {
+                  id: string;
+                  branch_group_id: string | null;
+                  branch_index: number;
+              }
+            | null;
+
+        if (!latestUser) {
+            controller.enqueue(
+                sseEvent("error", {
+                    message: "No user message to edit."
+                })
+            );
+            return;
+        }
+
+        const latestAssistant = db
+            .query(
+                `SELECT id, branch_group_id, branch_index FROM messages WHERE conversation_id = ? AND role = 'assistant'${activeClause.whereClause} ORDER BY created_at DESC LIMIT 1`
+            )
+            .get(conversationId, ...activeClause.params) as
+            | {
+                  id: string;
+                  branch_group_id: string | null;
+                  branch_index: number;
+              }
+            | null;
+
+        // Promote both rows into a branch group, then insert the edited
+        // user + new assistant placeholder at the next branch index. The
+        // assistant row is optional (if for some reason there isn't one
+        // yet — an unusual but possible state during a crashed first
+        // turn), the new branch only carries a user row until the stream
+        // finishes.
+        let groupId =
+            latestUser.branch_group_id ??
+            latestAssistant?.branch_group_id ??
+            null;
+        let newBranchIndex: number;
+
+        const tx = db.transaction(() => {
+            if (!groupId) {
+                groupId = crypto.randomUUID();
+                db.query(
+                    "UPDATE messages SET branch_group_id = ?, branch_index = 0 WHERE id = ?"
+                ).run(groupId, latestUser.id);
+                if (latestAssistant) {
+                    db.query(
+                        "UPDATE messages SET branch_group_id = ?, branch_index = 0 WHERE id = ?"
+                    ).run(groupId, latestAssistant.id);
+                }
+                newBranchIndex = 1;
+            } else {
+                const maxRow = db
+                    .query(
+                        "SELECT MAX(branch_index) AS maxIdx FROM messages WHERE branch_group_id = ?"
+                    )
+                    .get(groupId) as { maxIdx: number | null };
+                newBranchIndex = (maxRow?.maxIdx ?? 0) + 1;
+            }
+
+            db.query(
+                "UPDATE conversations SET active_branch_group_id = ?, active_branch_index = ?, updated_at = ? WHERE id = ?"
+            ).run(
+                groupId,
+                newBranchIndex,
+                new Date().toISOString(),
+                conversationId
+            );
+        });
+        tx();
+
+        // Tell the client to hide the previously-visible user + assistant
+        // rows before we emit any events for the new branch's messages.
+        // Both rows stay in the DB at their original branch indexes so
+        // the navigator can flip back to them.
+        const hideIds: string[] = [latestUser.id];
+        if (latestAssistant) hideIds.push(latestAssistant.id);
+        controller.enqueue(
+            sseEvent("branch-cutover", {
+                conversation_id: conversationId,
+                hide_message_ids: hideIds
+            })
+        );
+
+        // Insert the new user message FIRST, then auto-compact (so the
+        // edited prompt counts against the budget), then build history
+        // (which will include the new user row), then insert the
+        // assistant placeholder, then stream.
+        const newUserMsgId = crypto.randomUUID();
+        const newUserCreatedAt = new Date().toISOString();
+        const skillNamesJson =
+            useSkillNames.length > 0 ? JSON.stringify(useSkillNames) : null;
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted, use_skill_names, branch_group_id, branch_index) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)"
+        ).run(
+            newUserMsgId,
+            conversationId,
+            "user",
+            editedContent,
+            newUserCreatedAt,
+            skillNamesJson,
+            groupId!,
+            newBranchIndex!
+        );
+
+        recordStatUserMessage({
+            workspaceId,
+            conversationId,
+            messageId: newUserMsgId,
+            createdAt: newUserCreatedAt
+        });
+
+        const linkedAttachments =
+            attachmentIds.length > 0
+                ? linkAttachmentsToMessage(
+                      workspaceId,
+                      attachmentIds,
+                      conversationId,
+                      newUserMsgId
+                  )
+                : [];
+
+        controller.enqueue(
+            sseEvent("user-message", {
+                id: newUserMsgId,
+                role: "user" as const,
+                content: editedContent,
+                conversation_id: conversationId,
+                created_at: newUserCreatedAt,
+                attachments: linkedAttachments
+            })
+        );
+
+        // Emit branch info early so the user-side bubble already shows
+        // the navigator before the assistant turn lands.
+        controller.enqueue(
+            sseEvent("branch-info", {
+                conversation_id: conversationId,
+                branch_info: computeBranchInfo(db, conversationId)
+            })
+        );
+
+        await runAutoCompactionForStream(
+            workspaceId,
+            conversationId,
+            controller,
+            0
+        );
+
+        // History under the new branch index includes only the new user
+        // message (the survivor's row is at a different branch_index),
+        // plus all non-branched messages older than the branch group.
+        const branchClause = branchFilteredMessagesClause(db, conversationId);
+        const history = db
+            .query(
+                `SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0${branchClause.whereClause} ORDER BY created_at ASC`
+            )
+            .all(conversationId, ...branchClause.params) as Message[];
+
+        const modelMessages = buildModelMessages(workspaceId, history);
+
+        const newAssistantMsgId = crypto.randomUUID();
+        const newAssistantCreatedAt = new Date().toISOString();
+        db.query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, compacted, branch_group_id, branch_index) VALUES (?, ?, ?, ?, ?, 0, ?, ?)"
+        ).run(
+            newAssistantMsgId,
+            conversationId,
+            "assistant",
+            "",
+            newAssistantCreatedAt,
+            groupId!,
+            newBranchIndex!
+        );
+
+        controller.enqueue(
+            sseEvent("assistant-start", {
+                id: newAssistantMsgId,
+                role: "assistant" as const,
+                conversation_id: conversationId,
+                created_at: newAssistantCreatedAt
+            })
+        );
+
+        const cancellation = attachStreamCancellation(
+            conversationId,
+            workspaceId,
+            newUserMsgId,
+            newAssistantMsgId,
+            abortSignal
+        );
+        try {
+            await runStreamTextIntoController({
+                controller,
+                workspaceId,
+                conversationId,
+                assistantMsgId: newAssistantMsgId,
+                assistantCreatedAt: newAssistantCreatedAt,
+                modelMessages,
+                abortSignal: cancellation.signal,
+                useSkillNames
+            });
+        } finally {
+            cancellation.release();
+        }
+
+        recoverBranchIndexAfterStream(db, conversationId, newAssistantMsgId);
+
+        controller.enqueue(
+            sseEvent("branch-info", {
+                conversation_id: conversationId,
+                branch_info: computeBranchInfo(db, conversationId)
+            })
+        );
+
+        // Suppress unused-variable warnings until a future change consumes
+        // mentions for the edit flow.
+        void mentions;
+    });
+}
+
+/**
  * Drive a subagent stream to completion. The parent `task` tool calls this
  * and awaits the returned promise; when it resolves, the parent receives
  * the subagent's final assistant text as the tool result.
@@ -2919,11 +3504,12 @@ export async function runSubagentStream(params: {
         .get(conversationId) as ParentRow | null;
     const parentConversationId = parentRow?.parent_conversation_id ?? null;
 
+    const branchClause = branchFilteredMessagesClause(db, conversationId);
     const history = db
         .query(
-            "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+            `SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0${branchClause.whereClause} ORDER BY created_at ASC`
         )
-        .all(conversationId) as Message[];
+        .all(conversationId, ...branchClause.params) as Message[];
 
     const modelMessages = buildModelMessages(workspaceId, history);
 

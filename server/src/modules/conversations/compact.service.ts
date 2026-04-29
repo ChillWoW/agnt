@@ -6,6 +6,7 @@ import { getModelById } from "../models/models.service";
 import { createCodexClient } from "./codex-client";
 import { computeContextSummary, type ContextSummary } from "./context.service";
 import { DEFAULT_MODEL } from "./conversation.constants";
+import { branchFilteredMessagesClause } from "./conversations.service";
 
 /** Most recent N messages kept verbatim across a compaction. */
 export const COMPACT_KEEP_RECENT = 6;
@@ -299,11 +300,12 @@ export async function compactConversation(
         throw new Error(`Conversation not found: ${conversationId}`);
     }
 
+    const branchClause = branchFilteredMessagesClause(db, conversationId);
     const rows = db
         .query(
-            "SELECT id, role, content, created_at, compacted FROM messages WHERE conversation_id = ? AND compacted = 0 ORDER BY created_at ASC"
+            `SELECT id, role, content, created_at, compacted FROM messages WHERE conversation_id = ? AND compacted = 0${branchClause.whereClause} ORDER BY created_at ASC`
         )
-        .all(conversationId) as MessageRow[];
+        .all(conversationId, ...branchClause.params) as MessageRow[];
 
     if (rows.length === 0) {
         const context = computeContextSummary(workspaceId, conversationId);

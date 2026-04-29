@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     subagent_name TEXT,
     hidden INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
-    pinned_at TEXT
+    pinned_at TEXT,
+    active_branch_group_id TEXT,
+    active_branch_index INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -36,7 +38,9 @@ CREATE TABLE IF NOT EXISTS messages (
     summary_of_until TEXT,
     model_id TEXT,
     generation_duration_ms INTEGER,
-    use_skill_names TEXT
+    use_skill_names TEXT,
+    branch_group_id TEXT,
+    branch_index INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS state_entries (
@@ -113,6 +117,13 @@ CREATE INDEX IF NOT EXISTS idx_reasoning_parts_message ON message_reasoning_part
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_attachments_pending ON attachments(conversation_id, message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_todos_conversation ON todos(conversation_id, sort_index);
+-- NOTE: idx_messages_branch_group is created at the end of runMigrations,
+-- not here. The index references branch_group_id / branch_index columns
+-- that runMigrations adds via addColumnIfMissing for databases created
+-- before the branching feature shipped. Putting the index here would
+-- make db.exec(SCHEMA) throw "no such column: branch_group_id" against
+-- any existing messages table on first run, before the migrations get a
+-- chance to add the columns.
 
 CREATE TABLE IF NOT EXISTS plans (
     id TEXT PRIMARY KEY,
@@ -171,6 +182,23 @@ function runMigrations(db: Database): void {
     // so the names survive the round-trip from createConversation to the
     // first stream. Always NULL on assistant/system rows.
     addColumnIfMissing(db, "messages", "use_skill_names", "TEXT");
+    // Branching: messages belonging to a branch group share the same
+    // `branch_group_id` UUID and differ only in `branch_index`. Non-branched
+    // rows have NULL `branch_group_id` and are always visible. Only the
+    // latest turn of a conversation can be in a branch group; sending a new
+    // user message seals the active branch and clears these columns on the
+    // surviving rows. See `branchFilteredMessagesQuery` in
+    // `conversations.service.ts`.
+    addColumnIfMissing(db, "messages", "branch_group_id", "TEXT");
+    addColumnIfMissing(
+        db,
+        "messages",
+        "branch_index",
+        "INTEGER NOT NULL DEFAULT 0"
+    );
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_messages_branch_group ON messages(branch_group_id, branch_index);"
+    );
 
     addColumnIfMissing(db, "attachments", "estimated_tokens", "INTEGER");
 
@@ -191,6 +219,16 @@ function runMigrations(db: Database): void {
     // archived_at convention so the schema stays consistent and FK
     // cascades from message/tool-invocation deletion still work for free.
     addColumnIfMissing(db, "conversations", "pinned_at", "TEXT");
+    // Branching state: which branch group is currently "active" (visible) on
+    // this conversation, and which alternative within it. NULL group means
+    // no branching. Cleared when a new user message seals the branch.
+    addColumnIfMissing(db, "conversations", "active_branch_group_id", "TEXT");
+    addColumnIfMissing(
+        db,
+        "conversations",
+        "active_branch_index",
+        "INTEGER NOT NULL DEFAULT 0"
+    );
     db.exec(
         "CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(parent_conversation_id, created_at);"
     );

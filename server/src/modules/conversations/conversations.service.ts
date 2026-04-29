@@ -10,6 +10,7 @@ import {
 import { closeSession as closeCodexWsSession } from "./codex-ws-session";
 import { DEFAULT_CONVERSATION_TITLE } from "./conversation.constants";
 import type {
+    BranchInfo,
     Conversation,
     ConversationWithMessages,
     Message,
@@ -77,6 +78,8 @@ interface ConversationRow {
     hidden: number;
     archived_at: string | null;
     pinned_at: string | null;
+    active_branch_group_id: string | null;
+    active_branch_index: number;
 }
 
 function conversationFromRow(row: ConversationRow): Conversation {
@@ -90,12 +93,119 @@ function conversationFromRow(row: ConversationRow): Conversation {
         subagent_name: row.subagent_name,
         hidden: row.hidden === 1,
         archived_at: row.archived_at,
-        pinned_at: row.pinned_at
+        pinned_at: row.pinned_at,
+        active_branch_group_id: row.active_branch_group_id,
+        active_branch_index: row.active_branch_index ?? 0
     };
 }
 
 const CONVERSATION_SELECT =
-    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden, archived_at, pinned_at FROM conversations";
+    "SELECT id, title, created_at, updated_at, parent_conversation_id, subagent_type, subagent_name, hidden, archived_at, pinned_at, active_branch_group_id, active_branch_index FROM conversations";
+
+/**
+ * Resolve the current branch state for a conversation. Returns the active
+ * branch group id + index, or NULL if the conversation has no active branch
+ * group (the common case). Used by `branchFilteredMessagesQuery` and by the
+ * regenerate / edit / switch flows.
+ */
+export interface BranchState {
+    groupId: string | null;
+    index: number;
+}
+
+export function readBranchState(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string
+): BranchState {
+    const row = db
+        .query(
+            "SELECT active_branch_group_id, active_branch_index FROM conversations WHERE id = ?"
+        )
+        .get(conversationId) as
+        | { active_branch_group_id: string | null; active_branch_index: number }
+        | null;
+    if (!row) return { groupId: null, index: 0 };
+    return {
+        groupId: row.active_branch_group_id ?? null,
+        index: row.active_branch_index ?? 0
+    };
+}
+
+/**
+ * Build a SQL fragment + bound parameters for filtering `messages` rows to
+ * just the ones visible under the conversation's currently-active branch.
+ *
+ * Non-branched rows (`branch_group_id IS NULL`) are always visible.
+ * Branched rows are visible only when their group + index match the
+ * conversation's `active_branch_*` columns.
+ *
+ * Use as part of any message-loading query, e.g.:
+ *
+ * ```ts
+ * const { whereClause, params } = branchFilteredMessagesClause(db, conversationId);
+ * db.query(`SELECT ... FROM messages WHERE conversation_id = ? ${whereClause} ORDER BY ...`)
+ *   .all(conversationId, ...params)
+ * ```
+ *
+ * The `whereClause` always begins with ` AND ` so it can be appended to an
+ * existing WHERE without further conditional logic.
+ */
+export interface BranchFilterClause {
+    /** Always begins with ` AND ` (or empty when no filter is needed). */
+    whereClause: string;
+    /** Positional parameters to splice in after the caller's existing args. */
+    params: (string | number)[];
+}
+
+export function branchFilteredMessagesClause(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string,
+    options: { tableAlias?: string } = {}
+): BranchFilterClause {
+    const state = readBranchState(db, conversationId);
+    const prefix = options.tableAlias ? `${options.tableAlias}.` : "";
+
+    if (!state.groupId) {
+        // No active branch group: hide any orphaned branched rows so a
+        // half-finished branch (e.g. from a crashed request) never leaks
+        // back into history.
+        return {
+            whereClause: ` AND ${prefix}branch_group_id IS NULL`,
+            params: []
+        };
+    }
+
+    return {
+        whereClause: ` AND (${prefix}branch_group_id IS NULL OR (${prefix}branch_group_id = ? AND ${prefix}branch_index = ?))`,
+        params: [state.groupId, state.index]
+    };
+}
+
+/**
+ * Compute the `BranchInfo` summary for the conversation's active branch
+ * group, or NULL when no group is active. Distinct branch indexes ≥ 1 means
+ * the navigator should render. Used by `getConversation` so the response
+ * carries the branch state alongside the message list.
+ */
+export function computeBranchInfo(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string
+): BranchInfo | null {
+    const state = readBranchState(db, conversationId);
+    if (!state.groupId) return null;
+    const row = db
+        .query(
+            "SELECT COUNT(DISTINCT branch_index) AS count FROM messages WHERE branch_group_id = ?"
+        )
+        .get(state.groupId) as { count: number } | null;
+    const total = row?.count ?? 0;
+    if (total <= 0) return null;
+    return {
+        groupId: state.groupId,
+        activeIndex: state.index,
+        total
+    };
+}
 
 export function listConversations(workspaceId: string): Conversation[] {
     const db = getWorkspaceDb(workspaceId);
@@ -159,13 +269,16 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         summary_of_until: string | null;
         model_id: string | null;
         generation_duration_ms: number | null;
+        branch_group_id: string | null;
+        branch_index: number;
     }
 
+    const branchClause = branchFilteredMessagesClause(db, conversationId);
     const rows = db
         .query(
-            "SELECT id, conversation_id, role, content, reasoning_content, reasoning_started_at, reasoning_ended_at, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until, model_id, generation_duration_ms FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            `SELECT id, conversation_id, role, content, reasoning_content, reasoning_started_at, reasoning_ended_at, created_at, input_tokens, output_tokens, reasoning_tokens, total_tokens, compacted, summary_of_until, model_id, generation_duration_ms, branch_group_id, branch_index FROM messages WHERE conversation_id = ?${branchClause.whereClause} ORDER BY created_at ASC`
         )
-        .all(conversationId) as MessageRow[];
+        .all(conversationId, ...branchClause.params) as MessageRow[];
 
     const messages: Message[] = rows.map((row) => ({
         id: row.id,
@@ -187,11 +300,15 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         compacted: row.compacted === 1,
         summary_of_until: row.summary_of_until,
         model_id: row.model_id,
-        generation_duration_ms: row.generation_duration_ms
+        generation_duration_ms: row.generation_duration_ms,
+        branch_group_id: row.branch_group_id,
+        branch_index: row.branch_index ?? 0
     }));
 
+    const branchInfo = computeBranchInfo(db, conversationId);
+
     if (messages.length === 0) {
-        return { ...conversation, messages };
+        return { ...conversation, messages, branch_info: branchInfo };
     }
 
     const messageIds = messages.map((m) => m.id);
@@ -256,7 +373,87 @@ export function getConversation(workspaceId: string, conversationId: string): Co
         return enriched;
     });
 
-    return { ...conversation, messages: messagesWithTools };
+    return {
+        ...conversation,
+        messages: messagesWithTools,
+        branch_info: branchInfo
+    };
+}
+
+/**
+ * Apply a branch index switch atomically and return the freshly-loaded
+ * conversation. Throws if the requested index is out of range for the
+ * conversation's currently-active branch group, or if there is no group.
+ */
+export function switchBranch(
+    workspaceId: string,
+    conversationId: string,
+    index: number
+): ConversationWithMessages {
+    const db = getWorkspaceDb(workspaceId);
+
+    const state = readBranchState(db, conversationId);
+    if (!state.groupId) {
+        throw new Error(
+            `Conversation ${conversationId} has no active branch group`
+        );
+    }
+
+    const totalRow = db
+        .query(
+            "SELECT COUNT(DISTINCT branch_index) AS count FROM messages WHERE branch_group_id = ?"
+        )
+        .get(state.groupId) as { count: number } | null;
+    const total = totalRow?.count ?? 0;
+
+    if (!Number.isInteger(index) || index < 0 || index >= total) {
+        throw new Error(
+            `Invalid branch index ${index} (group has ${total} alternatives)`
+        );
+    }
+
+    db.query(
+        "UPDATE conversations SET active_branch_index = ?, updated_at = ? WHERE id = ?"
+    ).run(index, new Date().toISOString(), conversationId);
+
+    return getConversation(workspaceId, conversationId);
+}
+
+/**
+ * Seal the conversation's active branch (if any) into permanent history:
+ * delete every alternative whose `branch_index` differs from the active
+ * one, clear `branch_group_id` / `branch_index` on the surviving rows, and
+ * clear the conversation's `active_branch_*` columns. Used by
+ * `streamConversationReply` so a regular follow-up message commits whichever
+ * alternative the user was looking at and discards the rest.
+ *
+ * No-op when no branch group is active.
+ */
+export function sealBranches(
+    db: ReturnType<typeof getWorkspaceDb>,
+    conversationId: string
+): void {
+    const state = readBranchState(db, conversationId);
+    if (!state.groupId) return;
+
+    const tx = db.transaction(() => {
+        // Drop every non-active alternative. FK cascades wipe their tool
+        // invocations / reasoning parts / attachments automatically.
+        db.query(
+            "DELETE FROM messages WHERE branch_group_id = ? AND branch_index != ?"
+        ).run(state.groupId!, state.index);
+
+        // Re-graft the surviving alternative into permanent history.
+        db.query(
+            "UPDATE messages SET branch_group_id = NULL, branch_index = 0 WHERE branch_group_id = ?"
+        ).run(state.groupId!);
+
+        db.query(
+            "UPDATE conversations SET active_branch_group_id = NULL, active_branch_index = 0 WHERE id = ?"
+        ).run(conversationId);
+    });
+
+    tx();
 }
 
 export function createConversation(

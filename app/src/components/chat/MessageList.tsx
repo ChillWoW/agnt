@@ -152,6 +152,23 @@ export function MessageList({
         return items;
     }, [messages]);
 
+    // Identify the latest visible (non-compacted) user / assistant rows so
+    // `MessageBubble` can render the edit pencil and the regenerate +
+    // branch-navigator footer controls only on those bubbles. Branching
+    // is only ever offered on the very last turn — older messages are
+    // immutable.
+    const { latestUserId, latestAssistantId } = useMemo(() => {
+        let userId: string | null = null;
+        let assistantId: string | null = null;
+        for (const item of renderedItems) {
+            if (item.kind !== "message") continue;
+            if (item.message.role === "user") userId = item.message.id;
+            else if (item.message.role === "assistant")
+                assistantId = item.message.id;
+        }
+        return { latestUserId: userId, latestAssistantId: assistantId };
+    }, [renderedItems]);
+
     return (
         <div className="relative h-full overflow-hidden">
             <div ref={scrollRef} className="h-full overflow-y-auto">
@@ -170,6 +187,12 @@ export function MessageList({
                             <MessageBubble
                                 key={item.message.id}
                                 message={item.message}
+                                isLatestUser={
+                                    item.message.id === latestUserId
+                                }
+                                isLatestAssistant={
+                                    item.message.id === latestAssistantId
+                                }
                             />
                         );
                     })}

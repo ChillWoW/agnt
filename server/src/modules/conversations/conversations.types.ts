@@ -61,7 +61,15 @@ export const messageSchema = z.object({
     reasoning_tokens: z.number().int().nonnegative().nullable().optional(),
     total_tokens: z.number().int().nonnegative().nullable().optional(),
     compacted: z.boolean().optional(),
-    summary_of_until: z.string().nullable().optional()
+    summary_of_until: z.string().nullable().optional(),
+    branch_group_id: z.string().uuid().nullable().optional(),
+    branch_index: z.number().int().nonnegative().optional()
+});
+
+export const branchInfoSchema = z.object({
+    groupId: z.string().uuid(),
+    activeIndex: z.number().int().nonnegative(),
+    total: z.number().int().positive()
 });
 
 export const messageMentionTypeSchema = z.enum(["file", "directory"]);
@@ -92,11 +100,14 @@ export const conversationSchema = z.object({
     subagent_name: z.string().nullable().optional(),
     hidden: z.boolean().optional(),
     archived_at: z.string().nullable().optional(),
-    pinned_at: z.string().nullable().optional()
+    pinned_at: z.string().nullable().optional(),
+    active_branch_group_id: z.string().uuid().nullable().optional(),
+    active_branch_index: z.number().int().nonnegative().optional()
 });
 
 export const conversationWithMessagesSchema = conversationSchema.extend({
-    messages: z.array(messageSchema)
+    messages: z.array(messageSchema),
+    branch_info: branchInfoSchema.nullable().optional()
 });
 
 export type MessageRole = z.infer<typeof messageRoleSchema>;
@@ -109,3 +120,4 @@ export type Message = z.infer<typeof messageSchema>;
 export type SubagentType = z.infer<typeof subagentTypeSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type ConversationWithMessages = z.infer<typeof conversationWithMessagesSchema>;
+export type BranchInfo = z.infer<typeof branchInfoSchema>;

@@ -13,6 +13,7 @@ import {
 import { estimateAttachmentTokens } from "./context.attachments";
 import { DEFAULT_MODEL } from "./conversation.constants";
 import { buildConversationPrompt } from "./conversation.prompt";
+import { branchFilteredMessagesClause } from "./conversations.service";
 
 /** Threshold used by auto-compaction (85% of context window). */
 export const COMPACT_THRESHOLD = 0.85;
@@ -162,11 +163,12 @@ export function computeContextSummary(
     const model = resolveModel(workspaceId, conversationId);
     const contextWindow = model.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
+    const branchClause = branchFilteredMessagesClause(db, conversationId);
     const rows = db
         .query(
-            "SELECT id, role, content, reasoning_tokens, compacted, created_at, summary_of_until FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+            `SELECT id, role, content, reasoning_tokens, compacted, created_at, summary_of_until FROM messages WHERE conversation_id = ?${branchClause.whereClause} ORDER BY created_at ASC`
         )
-        .all(conversationId) as MessageTokensRow[];
+        .all(conversationId, ...branchClause.params) as MessageTokensRow[];
 
     const activeRows = rows.filter((row) => row.compacted === 0);
     const compactedRows = rows.filter((row) => row.compacted === 1);

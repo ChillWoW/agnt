@@ -9,6 +9,7 @@ import {
     DEFAULT_TITLE_GENERATION_MODEL,
     MAX_CONVERSATION_TITLE_LENGTH
 } from "./conversation.constants";
+import { branchFilteredMessagesClause } from "./conversations.service";
 
 const TITLE_GENERATION_TIMEOUT_MS = 15000;
 
@@ -186,11 +187,12 @@ function loadConversationExcerpt(
 ): MessageRow[] {
     const db = getWorkspaceDb(workspaceId);
 
+    const branchClause = branchFilteredMessagesClause(db, conversationId);
     return db
         .query(
-            "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 AND length(trim(content)) > 0 ORDER BY created_at ASC LIMIT 4"
+            `SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? AND compacted = 0 AND length(trim(content)) > 0${branchClause.whereClause} ORDER BY created_at ASC LIMIT 4`
         )
-        .all(conversationId) as MessageRow[];
+        .all(conversationId, ...branchClause.params) as MessageRow[];
 }
 
 function updateConversationTitleIfPlaceholder(

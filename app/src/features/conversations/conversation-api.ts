@@ -71,6 +71,62 @@ export function replyToConversation(
     );
 }
 
+/**
+ * Regenerate the latest assistant turn as a new branch alternative. The
+ * previous response stays in the DB at branch index 0; the new alternative
+ * is appended at the next index and immediately becomes the active one.
+ */
+export function regenerateLastTurn(
+    workspaceId: string,
+    conversationId: string,
+    signal?: AbortSignal
+): Promise<Response> {
+    return api.post<Response>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/regenerate`,
+        { parseAs: "response", signal }
+    );
+}
+
+/**
+ * Edit the latest user message and regenerate the assistant reply. Both
+ * rows are forked into a new branch alternative the user can switch
+ * between via the assistant footer's navigator.
+ */
+export function editAndRegenerate(
+    workspaceId: string,
+    conversationId: string,
+    content: string,
+    signal?: AbortSignal,
+    attachmentIds: string[] = [],
+    mentions: MessageMention[] = [],
+    useSkillNames: string[] = []
+): Promise<Response> {
+    return api.post<Response>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/edit-and-regenerate`,
+        {
+            body: { content, attachmentIds, mentions, useSkillNames },
+            parseAs: "response",
+            signal
+        }
+    );
+}
+
+/**
+ * Switch which branch alternative is visible on the conversation's
+ * latest turn. Returns the freshly-loaded conversation (with branch-
+ * filtered messages) so the caller can replace local state in-place.
+ */
+export function switchBranch(
+    workspaceId: string,
+    conversationId: string,
+    index: number
+): Promise<ConversationWithMessages> {
+    return api.post<ConversationWithMessages>(
+        `/workspaces/${workspaceId}/conversations/${conversationId}/switch-branch`,
+        { body: { index } }
+    );
+}
+
 export interface CancelStreamResult {
     success: boolean;
     stopped: boolean;

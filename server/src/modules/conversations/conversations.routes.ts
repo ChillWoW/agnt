@@ -11,11 +11,14 @@ import {
     unarchiveConversation,
     pinConversation,
     unpinConversation,
+    switchBranch,
     updateConversation
 } from "./conversations.service";
 import {
     cancelConversationStream,
     streamConversationReply,
+    streamEditAndRegenerate,
+    streamRegenerateLastTurn,
     streamReplyToLastMessage
 } from "./conversation.stream";
 import { getWorkspaceDb } from "../../lib/db";
@@ -562,6 +565,116 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
             };
         }
     })
+    .post(
+        "/:id/conversations/:conversationId/regenerate",
+        async ({ params, request, set }) => {
+            // Regenerate the latest assistant turn as a new branch
+            // alternative. The previous response stays in the DB at
+            // `branch_index = 0` so the user can flip back to it via the
+            // navigator.
+            try {
+                return streamRegenerateLastTurn(
+                    params.id,
+                    params.conversationId,
+                    request.signal
+                );
+            } catch (error) {
+                set.status =
+                    error instanceof Error &&
+                    error.message.includes("not found")
+                        ? 404
+                        : 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to regenerate"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/edit-and-regenerate",
+        async ({ params, body, request, set }) => {
+            // Edit the latest user message and regenerate the assistant
+            // reply. Both rows fork into a new branch alternative.
+            try {
+                const {
+                    content,
+                    attachmentIds,
+                    mentions,
+                    useSkillNames
+                } = (body ?? {}) as {
+                    content?: unknown;
+                    attachmentIds?: unknown;
+                    mentions?: unknown;
+                    useSkillNames?: unknown;
+                };
+
+                if (typeof content !== "string" || content.length === 0) {
+                    set.status = 400;
+                    return {
+                        error: "Missing or invalid 'content' field"
+                    };
+                }
+
+                const ids = Array.isArray(attachmentIds)
+                    ? (attachmentIds.filter(
+                          (id) => typeof id === "string"
+                      ) as string[])
+                    : [];
+
+                const parsedMentions = sanitizeMentions(mentions);
+                const parsedSkillNames = sanitizeSkillNames(useSkillNames);
+
+                return streamEditAndRegenerate(
+                    params.id,
+                    params.conversationId,
+                    content,
+                    request.signal,
+                    ids,
+                    parsedMentions,
+                    parsedSkillNames
+                );
+            } catch (error) {
+                set.status =
+                    error instanceof Error &&
+                    error.message.includes("not found")
+                        ? 404
+                        : 500;
+                return {
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to edit and regenerate"
+                };
+            }
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/switch-branch",
+        ({ params, body, set }) => {
+            try {
+                const { index } = (body ?? {}) as { index?: unknown };
+                if (typeof index !== "number" || !Number.isInteger(index)) {
+                    set.status = 400;
+                    return { error: "Missing or invalid 'index' field" };
+                }
+                return switchBranch(params.id, params.conversationId, index);
+            } catch (error) {
+                const message =
+                    error instanceof Error ? error.message : "Failed to switch branch";
+                set.status =
+                    message.includes("not found") ||
+                    message.includes("no active branch group")
+                        ? 404
+                        : message.includes("Invalid branch index")
+                          ? 400
+                          : 500;
+                return { error: message };
+            }
+        }
+    )
     .get(
         "/:id/conversations/:conversationId/todos",
         ({ params, set }) => {

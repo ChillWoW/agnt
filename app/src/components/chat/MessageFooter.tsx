@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CopyIcon, CheckIcon } from "@phosphor-icons/react";
+import {
+    ArrowsClockwiseIcon,
+    CheckIcon,
+    CopyIcon
+} from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { BinaryMatrix } from "@/features/left-sidebar/binary-matrix";
 import { Tooltip, toast } from "@/components/ui";
 import type { Message } from "@/features/conversations/conversation-types";
+import { useConversationStore } from "@/features/conversations";
+import { usePaneWorkspaceId } from "@/features/split-panes";
 import { usePermissionStore } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
 import {
@@ -13,6 +19,7 @@ import {
     getCachedModels,
     type ModelCatalogEntry
 } from "@/features/models";
+import { BranchNavigator } from "./BranchNavigator";
 
 function formatDurationSeconds(durationMs: number): string {
     const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
@@ -82,9 +89,18 @@ function useLiveGenerationMs(conversationId: string, startedAtIso: string) {
 
 interface MessageFooterProps {
     message: Message;
+    /**
+     * True for the most recent assistant message in the conversation.
+     * Only the latest assistant footer renders the regenerate button +
+     * branch navigator — older turns are immutable.
+     */
+    isLatestAssistant?: boolean;
 }
 
-export function MessageFooter({ message }: MessageFooterProps) {
+export function MessageFooter({
+    message,
+    isLatestAssistant = false
+}: MessageFooterProps) {
     const isStreaming = !!message.isStreaming;
     const { elapsedMs } = useLiveGenerationMs(
         message.conversation_id,
@@ -107,6 +123,37 @@ export function MessageFooter({ message }: MessageFooterProps) {
             });
         }
     }, [message.content]);
+
+    const conversationStreaming = useConversationStore((s) =>
+        Boolean(s.streamControllersById[message.conversation_id])
+    );
+    const branchInfo = useConversationStore(
+        (s) => s.conversationsById[message.conversation_id]?.branch_info ?? null
+    );
+    // Subagent conversations are driven by their parent's `task` tool, not
+    // by direct user input — branching them would orphan the parent's
+    // tool result, so we hide the regenerate / branch UI entirely.
+    const isSubagent = useConversationStore(
+        (s) =>
+            !!s.conversationsById[message.conversation_id]
+                ?.parent_conversation_id
+    );
+    const regenerateLastTurn = useConversationStore(
+        (s) => s.regenerateLastTurn
+    );
+    const workspaceId = usePaneWorkspaceId();
+    const branchControlsAllowed = isLatestAssistant && !isSubagent;
+
+    const handleRegenerate = useCallback(() => {
+        if (!workspaceId) return;
+        if (conversationStreaming) return;
+        void regenerateLastTurn(workspaceId, message.conversation_id);
+    }, [
+        conversationStreaming,
+        message.conversation_id,
+        regenerateLastTurn,
+        workspaceId
+    ]);
 
     if (isStreaming) {
         return (
@@ -147,12 +194,32 @@ export function MessageFooter({ message }: MessageFooterProps) {
             : null;
     const hasCost = cost != null && cost.totalUsd > 0;
 
-    if (!hasDuration && !hasModel && !hasCost && !message.content) {
+    const showBranchControls =
+        branchControlsAllowed &&
+        (branchInfo != null || message.content.length > 0);
+
+    if (
+        !hasDuration &&
+        !hasModel &&
+        !hasCost &&
+        !message.content &&
+        !showBranchControls
+    ) {
         return null;
     }
 
+    // Whole footer is hover-revealed (or focus-revealed for keyboard users)
+    // so finished assistant turns stay visually clean unless the user
+    // points at them. The `min-h-[1.25rem]` placeholder prevents layout
+    // jump when the footer pops in/out on hover.
     return (
-        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-dark-300">
+        <div
+            className={cn(
+                "mt-0.5 flex min-h-[1.25rem] items-center gap-2 text-[11px] text-dark-300 transition-opacity",
+                "opacity-0 focus-within:opacity-100 group-hover/message:opacity-100",
+                copied && "opacity-100"
+            )}
+        >
             {hasDuration && (
                 <span>{formatDurationSeconds(durationMs as number)}</span>
             )}
@@ -192,11 +259,7 @@ export function MessageFooter({ message }: MessageFooterProps) {
                         type="button"
                         onClick={handleCopy}
                         aria-label="Copy message"
-                        className={cn(
-                            "ml-0.5 flex size-5.5 items-center justify-center rounded text-dark-300 transition-opacity hover:bg-dark-800 hover:text-dark-50",
-                            "opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100",
-                            copied && "opacity-100"
-                        )}
+                        className="ml-0.5 flex size-5.5 items-center justify-center rounded text-dark-300 hover:bg-dark-800 hover:text-dark-50"
                     >
                         {copied ? (
                             <CheckIcon className="size-3" weight="bold" />
@@ -205,6 +268,33 @@ export function MessageFooter({ message }: MessageFooterProps) {
                         )}
                     </button>
                 </Tooltip>
+            )}
+            {branchControlsAllowed && (
+                <Tooltip content="Regenerate response" side="top">
+                    <button
+                        type="button"
+                        onClick={handleRegenerate}
+                        aria-label="Regenerate response"
+                        disabled={conversationStreaming}
+                        className={cn(
+                            "flex size-5.5 items-center justify-center rounded text-dark-300 hover:bg-dark-800 hover:text-dark-50",
+                            conversationStreaming &&
+                                "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-dark-300"
+                        )}
+                    >
+                        <ArrowsClockwiseIcon
+                            className="size-3"
+                            weight="bold"
+                        />
+                    </button>
+                </Tooltip>
+            )}
+            {branchControlsAllowed && branchInfo && branchInfo.total > 1 && (
+                <BranchNavigator
+                    branchInfo={branchInfo}
+                    conversationId={message.conversation_id}
+                    isStreaming={conversationStreaming}
+                />
             )}
         </div>
     );

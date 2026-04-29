@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { cn } from "@/lib/cn";
 import type {
     Message,
@@ -5,6 +6,7 @@ import type {
     ToolInvocation
 } from "@/features/conversations/conversation-types";
 import { resolveAttachmentContentUrl } from "@/features/attachments";
+import { useConversationStore } from "@/features/conversations";
 import { usePaneWorkspaceId } from "@/features/split-panes";
 import { StreamingPlaceholder } from "./StreamingPlaceholder";
 import { ToolCallCard } from "./ToolCallCard";
@@ -12,11 +14,24 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { WorkedSummary, type WorkedEntry } from "./WorkedSummary";
 import { MarkdownRenderer } from "@/components/markdown/markdown-renderer";
 import { MessageAttachments } from "./MessageAttachments";
+import { MessageEditor } from "./MessageEditor";
 import { MessageFooter } from "./MessageFooter";
 import { MessageText } from "./MessageText";
+import { UserMessageFooter } from "./UserMessageFooter";
 
 interface MessageBubbleProps {
     message: Message;
+    /**
+     * True when this is the latest user message in the conversation. Only
+     * the latest user bubble exposes the edit pencil + inline editor.
+     */
+    isLatestUser?: boolean;
+    /**
+     * True when this is the latest assistant message in the conversation.
+     * Forwards through to `MessageFooter` so it renders the regenerate
+     * button + branch navigator on this bubble only.
+     */
+    isLatestAssistant?: boolean;
 }
 
 type TimelineEntry =
@@ -90,7 +105,11 @@ function hasAnyReasoningText(parts: ReasoningPart[] | undefined): boolean {
     return !!parts?.some((part) => part.text.length > 0);
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({
+    message,
+    isLatestUser = false,
+    isLatestAssistant = false
+}: MessageBubbleProps) {
     const isUser = message.role === "user";
     const hasContent = message.content.trim().length > 0;
     const toolInvocations = message.tool_invocations ?? [];
@@ -102,6 +121,38 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     // from multiple workspaces side-by-side, and using the active
     // workspace here would cross-wire attachment URLs.
     const workspaceId = usePaneWorkspaceId();
+
+    const [isEditing, setIsEditing] = useState(false);
+    const editLastMessage = useConversationStore((s) => s.editLastMessage);
+    const conversationStreaming = useConversationStore((s) =>
+        Boolean(s.streamControllersById[message.conversation_id])
+    );
+    const isSubagent = useConversationStore(
+        (s) =>
+            !!s.conversationsById[message.conversation_id]
+                ?.parent_conversation_id
+    );
+
+    // The edit affordance is only ever offered on the latest user bubble,
+    // only while the conversation is idle (editing mid-stream would race
+    // with the in-flight reply), and never inside subagent panes (the
+    // parent's `task` tool drives those — branching would orphan the
+    // tool result on the parent side).
+    const canEdit =
+        isUser && isLatestUser && !conversationStreaming && !isSubagent;
+
+    const handleSaveEdit = useCallback(
+        (content: string) => {
+            if (!workspaceId) return;
+            setIsEditing(false);
+            void editLastMessage(workspaceId, message.conversation_id, content);
+        },
+        [editLastMessage, message.conversation_id, workspaceId]
+    );
+
+    const handleCancelEdit = useCallback(() => {
+        setIsEditing(false);
+    }, []);
 
     const reasoningParts: ReasoningPart[] = (() => {
         if (message.reasoning_parts && message.reasoning_parts.length > 0) {
@@ -185,21 +236,60 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     const showStreamingPlaceholder =
         message.isStreaming && !hasContent && !hasToolCalls && !hasReasoning;
 
+    if (isUser) {
+        return (
+            <div className="group/message mb-4 flex justify-end">
+                <div
+                    className={cn(
+                        "flex min-w-0 flex-col items-end",
+                        isEditing ? "w-full max-w-3xl" : "max-w-[85%]"
+                    )}
+                >
+                    {hasAttachments && workspaceId && (
+                        <MessageAttachments
+                            attachments={attachments}
+                            workspaceId={workspaceId}
+                            resolveUrl={(id) =>
+                                resolveAttachmentContentUrl(workspaceId, id)
+                            }
+                            isUser
+                        />
+                    )}
+                    <div
+                        className={cn(
+                            "min-w-0 rounded-md border border-dark-700 bg-dark-850 px-2.5 py-0.5 text-xs leading-relaxed text-dark-50",
+                            isEditing && "w-full"
+                        )}
+                    >
+                        {isEditing ? (
+                            <MessageEditor
+                                initialContent={message.content}
+                                onSave={handleSaveEdit}
+                                onCancel={handleCancelEdit}
+                                isSubmitting={conversationStreaming}
+                            />
+                        ) : hasContent ? (
+                            <MessageText
+                                content={message.content}
+                                className="py-1 text-dark-50"
+                            />
+                        ) : null}
+                    </div>
+                    {!isEditing && (
+                        <UserMessageFooter
+                            message={message}
+                            canEdit={canEdit}
+                            onEditClick={() => setIsEditing(true)}
+                        />
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div
-            className={cn(
-                "mb-4 flex",
-                isUser ? "justify-end" : "justify-start"
-            )}
-        >
-            <div
-                className={cn(
-                    "min-w-0 text-xs leading-relaxed",
-                    isUser
-                        ? "max-w-[85%] rounded-md border border-dark-700 bg-dark-850 px-2.5 py-0.5 text-dark-50"
-                        : "group/message w-full text-dark-50"
-                )}
-            >
+        <div className="group/message mb-4 flex justify-start">
+            <div className="min-w-0 w-full text-xs leading-relaxed text-dark-50">
                 {hasAttachments && workspaceId && (
                     <MessageAttachments
                         attachments={attachments}
@@ -207,7 +297,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         resolveUrl={(id) =>
                             resolveAttachmentContentUrl(workspaceId, id)
                         }
-                        isUser={isUser}
+                        isUser={false}
                     />
                 )}
 
@@ -251,22 +341,18 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 {showStreamingPlaceholder ? (
                     <StreamingPlaceholder />
                 ) : hasContent ? (
-                    isUser ? (
-                        <MessageText
+                    <div>
+                        <MarkdownRenderer
                             content={message.content}
-                            className="py-1 text-dark-50"
+                            isStreaming={message.isStreaming}
                         />
-                    ) : (
-                        <div>
-                            <MarkdownRenderer
-                                content={message.content}
-                                isStreaming={message.isStreaming}
-                            />
-                        </div>
-                    )
+                    </div>
                 ) : null}
 
-                {!isUser && <MessageFooter message={message} />}
+                <MessageFooter
+                    message={message}
+                    isLatestAssistant={isLatestAssistant}
+                />
             </div>
         </div>
     );

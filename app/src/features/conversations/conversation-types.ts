@@ -103,6 +103,28 @@ export interface Message {
      * derives a live counter from `created_at` (see `MessageFooter`).
      */
     generation_duration_ms?: number | null;
+    /**
+     * UUID linking sibling alternatives within a branch group. NULL on
+     * non-branched messages (the common case). Populated when the user
+     * regenerates the latest assistant turn or edits the latest user
+     * message — both flows fork the latest turn into multiple alternatives
+     * the user can switch between via the assistant footer's
+     * `< n / m >` navigator.
+     */
+    branch_group_id?: string | null;
+    /** 0-based position within the branch group. */
+    branch_index?: number;
+}
+
+/**
+ * Latest-turn branch summary used by the assistant footer's navigator.
+ * Present on a `ConversationWithMessages` whenever the conversation has an
+ * active branch group; absent otherwise.
+ */
+export interface BranchInfo {
+    groupId: string;
+    activeIndex: number;
+    total: number;
 }
 
 export type SubagentType =
@@ -131,6 +153,15 @@ export interface Conversation {
      * an archived row never appears in the Pinned group.
      */
     pinned_at?: string | null;
+    /**
+     * Currently-active branch group on this conversation. NULL means no
+     * branching is in flight; a UUID means the conversation's latest turn
+     * has multiple alternatives, of which `active_branch_index` is the
+     * visible one. Cleared when the user sends a new follow-up message
+     * (the server seals the active branch into permanent history).
+     */
+    active_branch_group_id?: string | null;
+    active_branch_index?: number;
 }
 
 export interface SubagentStartedEvent {
@@ -158,4 +189,10 @@ export interface SubagentFinishedEvent {
 
 export interface ConversationWithMessages extends Conversation {
     messages: Message[];
+    /**
+     * Branch summary for the conversation's currently-active branch group.
+     * Server omits/null-sets this whenever no branching is in flight; the
+     * UI uses its presence to render the assistant footer's navigator.
+     */
+    branch_info?: BranchInfo | null;
 }
