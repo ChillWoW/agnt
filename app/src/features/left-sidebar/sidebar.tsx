@@ -203,10 +203,10 @@ function ConversationRow({
                     className={cn(
                         "group relative flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors min-w-0 w-full text-left cursor-pointer",
                         isActive
-                            ? "bg-dark-800 text-dark-50"
+                            ? "bg-dark-850 text-dark-50"
                             : isUnread
-                              ? "text-dark-50 hover:bg-dark-800"
-                              : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                              ? "text-dark-50 hover:bg-dark-850"
+                              : "text-dark-300 hover:bg-dark-850 hover:text-dark-100"
                     )}
                 >
                     {isFocusedPane ? (
@@ -254,9 +254,7 @@ function ConversationRow({
                                 className={cn(
                                     "absolute inset-0 size-3 transition-opacity",
                                     "group-hover:opacity-0",
-                                    isUnread
-                                        ? "text-dark-50"
-                                        : "text-dark-200"
+                                    isUnread ? "text-dark-50" : "text-dark-200"
                                 )}
                             />
                             <PushPinSimpleIcon
@@ -401,9 +399,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     const replaceSecondaryConversation = useSplitPaneStore(
         (s) => s.replaceSecondaryConversation
     );
-    const setFocusedPaneIndex = useSplitPaneStore(
-        (s) => s.setFocusedPaneIndex
-    );
+    const setFocusedPaneIndex = useSplitPaneStore((s) => s.setFocusedPaneIndex);
     const addPane = useSplitPaneStore((s) => s.addPane);
 
     const totalPanes = extraPanes.length + 1;
@@ -419,10 +415,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
     // here so each sidebar group only highlights its own rows.
     const openPaneConvIds = useMemo(() => {
         const ids = new Set<string>();
-        if (
-            activeConversationId &&
-            activeWorkspaceId === workspaceId
-        ) {
+        if (activeConversationId && activeWorkspaceId === workspaceId) {
             ids.add(activeConversationId);
         }
         for (const p of extraPanes) {
@@ -444,9 +437,7 @@ function WorkspaceConversations({ workspaceId }: { workspaceId: string }) {
         }
         const extra = extraPanes[focusedPaneIndex - 1];
         if (!extra) return null;
-        return extra.workspaceId === workspaceId
-            ? extra.conversationId
-            : null;
+        return extra.workspaceId === workspaceId ? extra.conversationId : null;
     }, [
         activeWorkspaceId,
         workspaceId,
@@ -769,16 +760,16 @@ function WorkspaceRow({
                                     : "text-dark-200 hover:text-dark-50"
                             )}
                         >
+                            <span className="truncate font-medium">
+                                {ws.name}
+                            </span>
                             <CaretRightIcon
                                 className={cn(
-                                    "size-2.5 shrink-0 transition-transform duration-100",
+                                    "size-2.5 shrink-0 opacity-0 transition-all duration-100 group-hover:opacity-100",
                                     isExpanded && "rotate-90"
                                 )}
                                 weight="bold"
                             />
-                            <span className="truncate font-medium">
-                                {ws.name}
-                            </span>
                         </button>
 
                         <Popover
@@ -877,7 +868,7 @@ function WorkspaceRow({
             </ContextMenu>
 
             {isExpanded && (
-                <div className="ml-3 mt-0.5 border-l border-dark-700 pl-1.5">
+                <div className="mt-0.5">
                     <WorkspaceConversations workspaceId={ws.id} />
                 </div>
             )}
@@ -955,15 +946,11 @@ function PinnedGroup() {
     const replaceSecondaryConversation = useSplitPaneStore(
         (s) => s.replaceSecondaryConversation
     );
-    const setFocusedPaneIndex = useSplitPaneStore(
-        (s) => s.setFocusedPaneIndex
-    );
+    const setFocusedPaneIndex = useSplitPaneStore((s) => s.setFocusedPaneIndex);
     const addPane = useSplitPaneStore((s) => s.addPane);
 
     const isCollapsed = useLeftSidebarStore((s) => s.isPinnedGroupCollapsed);
-    const setCollapsed = useLeftSidebarStore(
-        (s) => s.setPinnedGroupCollapsed
-    );
+    const setCollapsed = useLeftSidebarStore((s) => s.setPinnedGroupCollapsed);
 
     const totalPanes = extraPanes.length + 1;
     const splitFull = totalPanes >= MAX_PANES;
@@ -1070,9 +1057,7 @@ function PinnedGroup() {
                             conv={entry.conv}
                             workspaceId={entry.workspaceId}
                             isActive={openPaneConvIds.has(entry.conv.id)}
-                            isFocusedPane={
-                                focusedPaneConvId === entry.conv.id
-                            }
+                            isFocusedPane={focusedPaneConvId === entry.conv.id}
                             isUnread={Boolean(
                                 unreadConversationIds[entry.conv.id]
                             )}
@@ -1084,8 +1069,8 @@ function PinnedGroup() {
                                     0) > 0
                             }
                             isPendingQuestion={
-                                (pendingQuestions[entry.conv.id]?.length ??
-                                    0) > 0
+                                (pendingQuestions[entry.conv.id]?.length ?? 0) >
+                                0
                             }
                             splitFull={splitFull}
                             onOpen={() => handleOpen(entry)}
@@ -1396,11 +1381,14 @@ export function LeftSidebar() {
                                 type="button"
                                 onClick={toggleSettingsPanel}
                                 className={cn(
-                                    "flex size-9 shrink-0 items-center justify-center rounded-md text-dark-200 transition-colors hover:bg-dark-850 hover:text-dark-50",
+                                    "flex size-7 shrink-0 items-center justify-center rounded-md text-dark-200 transition-colors hover:bg-dark-850 hover:text-dark-50",
                                     settingsOpen && "bg-dark-850 text-dark-50"
                                 )}
                             >
-                                <GearSixIcon className="size-4" weight="bold" />
+                                <GearSixIcon
+                                    className="size-3.5"
+                                    weight="bold"
+                                />
                             </button>
                         </Tooltip>
                     </div>
