@@ -7,7 +7,16 @@ export const ALLOW_BY_DEFAULT_TOOL_NAMES = [
     "glob",
     "grep",
     "use_skill",
-    "diagnostics"
+    "diagnostics",
+    // Read-only browser tools — safe to run without prompting (mirror
+    // the precedent set by `web_fetch`, except those need a network
+    // call). `browser_navigate`/`click`/`type`/`screenshot`/`eval` stay
+    // on `ask`.
+    "browser_list_tabs",
+    "browser_read",
+    "browser_snapshot",
+    "browser_find",
+    "browser_get_state"
 ] as const;
 
 export function getDefaultToolPermissionDecision(

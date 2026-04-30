@@ -32,6 +32,7 @@ import { DiagnosticsBlock } from "./tool-cards/DiagnosticsBlock";
 import { ShellBlock } from "./tool-cards/ShellBlock";
 import { AwaitShellBlock } from "./tool-cards/AwaitShellBlock";
 import { TaskBlock } from "./tool-cards/TaskBlock";
+import { BrowserBlock, isBrowserToolName } from "./tool-cards/BrowserBlock";
 import { GenericToolBlock } from "./tool-cards/GenericToolBlock";
 
 // `ThinkingBlock` (and any other consumers) import the shared primitive
@@ -93,6 +94,12 @@ export function ToolCallCard({ invocation }: ToolCallCardProps) {
         case "memory_delete":
             return <MemoryDeleteBlock invocation={invocation} />;
         default:
+            // All `browser_*` tools share a generic block driven by the
+            // tool name. Falls through to GenericToolBlock for everything
+            // else (incl. MCP tools).
+            if (isBrowserToolName(invocation.tool_name)) {
+                return <BrowserBlock invocation={invocation} />;
+            }
             return <GenericToolBlock invocation={invocation} />;
     }
 }

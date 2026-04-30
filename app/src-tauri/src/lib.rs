@@ -163,7 +163,9 @@ pub fn run() {
             browser::browser_close,
             browser::browser_list_alive,
             browser::browser_eval,
-            browser::browser_meta_report
+            browser::browser_meta_report,
+            browser::browser_op_result,
+            browser::browser_screenshot
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

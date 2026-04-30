@@ -18,6 +18,12 @@ import { diagnosticsToolDef, createDiagnosticsToolDef } from "./diagnostics";
 import { memoryWriteToolDef, createMemoryWriteToolDef } from "./memory-write";
 import { memoryReadToolDef, createMemoryReadToolDef } from "./memory-read";
 import { memoryDeleteToolDef, createMemoryDeleteToolDef } from "./memory-delete";
+import {
+    BROWSER_TOOL_DEFS,
+    BROWSER_TOOL_NAMES,
+    BROWSER_READ_ONLY_TOOL_NAMES,
+    createBrowserToolDefs
+} from "./browser";
 import type { ToolDefinition } from "./types";
 
 export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
@@ -40,7 +46,8 @@ export const AGNT_TOOL_DEFS: readonly ToolDefinition[] = [
     diagnosticsToolDef as ToolDefinition,
     memoryWriteToolDef as ToolDefinition,
     memoryReadToolDef as ToolDefinition,
-    memoryDeleteToolDef as ToolDefinition
+    memoryDeleteToolDef as ToolDefinition,
+    ...BROWSER_TOOL_DEFS
 ] as const;
 
 export const AGNT_TOOL_DEF_BY_NAME: Record<string, ToolDefinition> =
@@ -110,6 +117,10 @@ export {
     memoryReadToolDef,
     createMemoryReadToolDef,
     memoryDeleteToolDef,
-    createMemoryDeleteToolDef
+    createMemoryDeleteToolDef,
+    BROWSER_TOOL_DEFS,
+    BROWSER_TOOL_NAMES,
+    BROWSER_READ_ONLY_TOOL_NAMES,
+    createBrowserToolDefs
 };
 export type { ToolDefinition };

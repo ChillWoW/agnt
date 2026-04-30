@@ -83,6 +83,25 @@ struct UrlReportPayload {
     url: String,
 }
 
+// Browser-op IPC. The preload's `__agnt_browser__.__run({opId, op, args})`
+// dispatcher calls back into this command with the result; the host then
+// re-emits it as the `browser://op-result` event the React-side bridge
+// listens to and forwards to the server. Keeping the round-trip in one
+// event channel (rather than per-op-id channels) means we don't have to
+// register / unregister listeners for every tool call.
+#[derive(Debug, Clone, Serialize)]
+struct OpResultPayload {
+    #[serde(rename = "tabId")]
+    tab_id: String,
+    #[serde(rename = "opId")]
+    op_id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 #[tauri::command]
 pub async fn browser_open(
     app: AppHandle,
@@ -410,6 +429,58 @@ pub fn browser_meta_report(
         );
     }
     Ok(())
+}
+
+/// Receive a result from the preload's `__agnt_browser__.__run`
+/// dispatcher and re-emit it as a `browser://op-result` event for the
+/// React bridge to forward back to the server.
+#[tauri::command]
+pub fn browser_op_result(
+    app: AppHandle,
+    id: String,
+    #[allow(non_snake_case)] opId: String,
+    ok: bool,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+) -> Result<(), String> {
+    let _ = app.emit(
+        "browser://op-result",
+        OpResultPayload {
+            tab_id: id,
+            op_id: opId,
+            ok,
+            result,
+            error,
+        },
+    );
+    Ok(())
+}
+
+/// Capture the current viewport of a tab as a PNG.
+///
+/// Tauri 2.10 doesn't expose a per-webview screenshot primitive yet
+/// (proposed for wry but not landed) — neither WebView2 nor WKWebView
+/// surface a synchronous capture through Tauri. To avoid pulling in a
+/// platform-specific screen-grab dep just for this, we return a
+/// structured error here so the `browser_screenshot` tool can fail
+/// gracefully and tell the model to use `browser_read` /
+/// `browser_snapshot` instead. When wry's `WebView::screenshot` lands,
+/// swap this body for the real call.
+#[tauri::command]
+pub async fn browser_screenshot(
+    state: State<'_, BrowserState>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    // Make sure the tab actually exists so the failure message is the
+    // right one (rather than "no impl").
+    let _webview =
+        get_webview(&state, &id).ok_or_else(|| "browser tab not found".to_string())?;
+    Err(
+        "browser_screenshot is not yet supported on this build of Tauri \
+         (no per-webview capture primitive). Use browser_read or browser_snapshot \
+         to inspect the page instead."
+            .to_string(),
+    )
 }
 
 pub fn close_all(state: &BrowserState) {

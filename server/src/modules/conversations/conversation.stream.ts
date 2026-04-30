@@ -47,6 +47,7 @@ import {
 import { AGNT_TOOL_DEF_BY_NAME } from "./tools";
 import type { ToolModelOutput } from "./tools/types";
 import { abortQuestions, subscribeToQuestions } from "./questions";
+import { abortBrowserOps, subscribeToBrowserOps } from "./browser";
 import { subscribeToTodos } from "./todos";
 import {
     killForegroundForConversation,
@@ -1521,6 +1522,35 @@ async function runStreamTextIntoController({
         }
     );
 
+    const unsubscribeBrowserOps = subscribeToBrowserOps(
+        conversationId,
+        (event) => {
+            if (event.type === "requested") {
+                controller.enqueue(
+                    sseEvent("browser-op-required", {
+                        id: event.request.id,
+                        messageId: assistantMsgId,
+                        op: event.request.op,
+                        args: event.request.args,
+                        tabIdHint: event.request.tabIdHint ?? null,
+                        label: event.request.label,
+                        createdAt: event.request.createdAt
+                    })
+                );
+                return;
+            }
+
+            controller.enqueue(
+                sseEvent("browser-op-resolved", {
+                    id: event.requestId,
+                    messageId: assistantMsgId,
+                    ok: event.ok,
+                    error: event.error ?? null
+                })
+            );
+        }
+    );
+
     const unsubscribePlans = subscribeToPlanUpdates(
         conversationId,
         (event) => {
@@ -2446,6 +2476,7 @@ async function runStreamTextIntoController({
             if (part.type === "abort") {
                 abortPermissions(conversationId, "aborted");
                 abortQuestions(conversationId, "aborted");
+                abortBrowserOps(conversationId, "aborted");
                 abortSubagentsForParent(conversationId, "parent-aborted");
                 killForegroundForConversation(conversationId);
                 markPendingToolInvocationsAsError(
@@ -2530,6 +2561,7 @@ async function runStreamTextIntoController({
             });
             abortPermissions(conversationId, "aborted");
             abortQuestions(conversationId, "aborted");
+            abortBrowserOps(conversationId, "aborted");
             abortSubagentsForParent(conversationId, "parent-aborted");
             killForegroundForConversation(conversationId);
             markPendingToolInvocationsAsError(db, assistantMsgId, "aborted");
@@ -2578,6 +2610,7 @@ async function runStreamTextIntoController({
 
         abortPermissions(conversationId, message);
         abortQuestions(conversationId, message);
+        abortBrowserOps(conversationId, message);
         abortSubagentsForParent(conversationId, message);
         killForegroundForConversation(conversationId);
         markPendingToolInvocationsAsError(db, assistantMsgId, message);
@@ -2586,6 +2619,7 @@ async function runStreamTextIntoController({
     } finally {
         unsubscribePermissions();
         unsubscribeQuestions();
+        unsubscribeBrowserOps();
         unsubscribeTodos();
         unsubscribeShellProgress();
         unsubscribeShellLifecycle();

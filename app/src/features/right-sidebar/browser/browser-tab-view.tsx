@@ -15,6 +15,7 @@ import {
     DotsThreeIcon,
     GlobeIcon,
     LightningIcon,
+    SparkleIcon,
     XIcon
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
@@ -39,6 +40,7 @@ import {
     setSessionVisible
 } from "./browser-session";
 import { useBrowserStore } from "./browser-store";
+import { useBrowserAiStore } from "./browser-ai-store";
 
 interface BrowserTabViewProps {
     id: string;
@@ -50,6 +52,7 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
     const isLoading = useBrowserStore(
         (s) => s.loadingByTabId[id] ?? false
     );
+    const aiActive = useBrowserAiStore((s) => s.byTabId[id]);
 
     const hostRef = useRef<HTMLDivElement>(null);
     const [draftUrl, setDraftUrl] = useState(tab?.url ?? "");
@@ -195,7 +198,12 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
     const hasUrl = !!tab.url;
 
     return (
-        <div className="flex flex-col flex-1 overflow-hidden min-h-0">
+        <div
+            className={cn(
+                "flex flex-col flex-1 overflow-hidden min-h-0 relative",
+                aiActive && "agnt-browser-ai-active"
+            )}
+        >
             <div className="flex items-center gap-1 px-2 h-8 shrink-0 border-b border-dark-700">
                 <ChromeButton
                     onClick={() => void backTab(tab.id)}
@@ -297,15 +305,48 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
                 </Menu>
             </div>
 
-            {isLoading && (
-                <div className="h-px bg-blue-500/30 relative overflow-hidden shrink-0">
-                    <div className="absolute inset-y-0 w-1/3 bg-blue-400 animate-[browserLoading_1.2s_linear_infinite]" />
+            {aiActive && <AiStatusBar label={aiActive.label} />}
+
+            {(isLoading || aiActive) && (
+                <div
+                    className={cn(
+                        "h-px relative overflow-hidden shrink-0",
+                        aiActive
+                            ? "bg-violet-500/30"
+                            : "bg-blue-500/30"
+                    )}
+                >
+                    <div
+                        className={cn(
+                            "absolute inset-y-0",
+                            aiActive
+                                ? "w-2/5 bg-gradient-to-r from-fuchsia-400 via-violet-400 to-sky-400 animate-[browserAiSweep_1.4s_linear_infinite]"
+                                : "w-1/3 bg-blue-400 animate-[browserLoading_1.2s_linear_infinite]"
+                        )}
+                    />
                 </div>
             )}
 
             {hasUrl ? (
-                <div className="relative flex flex-1 min-w-0 min-h-0 overflow-hidden bg-white">
-                    <div ref={hostRef} className="absolute inset-0" />
+                // Outer parent paints the animated AI border in its
+                // padding area; the host div is inset by 3px when AI is
+                // active so the native webview shrinks (via the
+                // mountBrowser ResizeObserver) and the ring becomes
+                // visible around it. Without this inset the native
+                // webview would paint over our React-rendered ring.
+                <div
+                    className={cn(
+                        "relative flex flex-1 min-w-0 min-h-0 overflow-hidden",
+                        aiActive ? "agnt-browser-ai-frame" : "bg-white"
+                    )}
+                >
+                    <div
+                        ref={hostRef}
+                        className={cn(
+                            "absolute",
+                            aiActive ? "inset-[3px]" : "inset-0"
+                        )}
+                    />
                     {!opened && (
                         <div className="absolute inset-0 flex items-center justify-center text-dark-400 text-xs select-none">
                             Loading{tab.url ? `: ${tab.url}` : "..."}
@@ -373,6 +414,41 @@ function NewTabPage({ onSubmit }: NewTabPageProps) {
     );
 }
 
+function AiStatusBar({ label }: { label: string }) {
+    // Sits between the chrome bar and the webview area. Since the
+    // native webview paints over any React DOM in its rectangle, we
+    // can't overlay this banner ON the webview — putting it in the
+    // column flow above the webview reserves real layout space (the
+    // ResizeObserver inside mountBrowser picks the change up
+    // automatically), guaranteeing it stays visible.
+    return (
+        <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-violet-500/30 bg-gradient-to-r from-violet-950/60 via-fuchsia-950/40 to-sky-950/60 px-2.5">
+            <span
+                aria-hidden
+                className="relative flex size-2 shrink-0 items-center justify-center"
+            >
+                <span className="absolute inset-0 rounded-full bg-violet-400 animate-[browserAiPulse_1.4s_ease-in-out_infinite]" />
+                <span className="relative size-2 rounded-full bg-violet-300" />
+            </span>
+            <SparkleIcon
+                className="size-3 shrink-0 text-violet-300"
+                weight="fill"
+            />
+            <span className="truncate text-[10px] font-medium uppercase tracking-wider text-violet-200">
+                Agent is using browser
+            </span>
+            {label && (
+                <>
+                    <span className="text-[10px] text-violet-500">·</span>
+                    <span className="truncate text-[10px] text-violet-100">
+                        {label}
+                    </span>
+                </>
+            )}
+        </div>
+    );
+}
+
 interface ChromeButtonProps {
     onClick: () => void;
     disabled?: boolean;
@@ -404,9 +480,13 @@ function ChromeButton({
     );
 }
 
-// Tailwind doesn't ship a built-in indeterminate keyframe, so register
-// one once at module-load. The loading bar inside BrowserTabView refers
-// to it via `animate-[browserLoading_...]`.
+// Tailwind doesn't ship the indeterminate keyframes we need, so register
+// them once at module-load. `browserLoading` powers the page-load bar;
+// `browserAiSweep`, `browserAiPulse`, and `browserAiFrameSpin` power the
+// "agent is using browser" visual. `agnt-browser-ai-frame` is the class
+// applied to the webview parent: a moving gradient that shows through
+// in the 3px padding around the inset webview, producing a colorful
+// animated border that the user can't miss.
 if (typeof document !== "undefined") {
     const styleId = "agnt-browser-loading-keyframes";
     if (!document.getElementById(styleId)) {
@@ -416,6 +496,38 @@ if (typeof document !== "undefined") {
 @keyframes browserLoading {
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(400%); }
+}
+@keyframes browserAiSweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+}
+@keyframes browserAiPulse {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50%      { opacity: 1;    transform: scale(1.15); }
+}
+@keyframes browserAiFrameSpin {
+    0%   { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+@keyframes browserAiPillPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.55); }
+    50%      { box-shadow: 0 0 0 4px rgba(139, 92, 246, 0); }
+}
+.agnt-browser-ai-frame {
+    background: linear-gradient(
+        90deg,
+        #c084fc 0%,
+        #38bdf8 25%,
+        #f472b6 50%,
+        #c084fc 75%,
+        #38bdf8 100%
+    );
+    background-size: 200% 100%;
+    animation: browserAiFrameSpin 3s linear infinite;
+    box-shadow:
+        0 0 0 1px rgba(139, 92, 246, 0.55),
+        0 0 18px rgba(139, 92, 246, 0.35),
+        inset 0 0 12px rgba(139, 92, 246, 0.25);
 }
 `;
         document.head.appendChild(style);

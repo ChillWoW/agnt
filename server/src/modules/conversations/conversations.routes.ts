@@ -37,6 +37,10 @@ import {
     clearConversationQuestionState,
     resolveQuestions
 } from "./questions";
+import {
+    clearConversationBrowserOpState,
+    resolveBrowserOp
+} from "./browser";
 import { listTodos, replaceTodos } from "./todos";
 import { getPlan, deletePlan } from "./plans";
 import { mergeScopeState } from "../history/history.service";
@@ -282,6 +286,7 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
         try {
             clearConversationPermissionState(params.conversationId);
             clearConversationQuestionState(params.conversationId);
+            clearConversationBrowserOpState(params.conversationId);
             deleteConversation(params.id, params.conversationId);
             return { success: true };
         } catch (error) {
@@ -812,6 +817,48 @@ const conversationsRoutes = new Elysia({ prefix: "/workspaces" })
                 return { error: result.error };
             }
 
+            return { success: true };
+        }
+    )
+    .post(
+        "/:id/conversations/:conversationId/browser-ops/:opId/result",
+        ({ params, body, set }) => {
+            const { ok, result, error } = (body ?? {}) as {
+                ok?: unknown;
+                result?: unknown;
+                error?: unknown;
+            };
+
+            if (typeof ok !== "boolean") {
+                set.status = 400;
+                return { error: "Missing or invalid 'ok' field." };
+            }
+
+            if (ok) {
+                const resolveResult = resolveBrowserOp(params.opId, {
+                    ok: true,
+                    result
+                });
+                if (!resolveResult.ok) {
+                    set.status = 404;
+                    return { error: resolveResult.error };
+                }
+                return { success: true };
+            }
+
+            const message =
+                typeof error === "string" && error.length > 0
+                    ? error
+                    : "Browser op failed (no error message provided).";
+
+            const resolveResult = resolveBrowserOp(params.opId, {
+                ok: false,
+                error: message
+            });
+            if (!resolveResult.ok) {
+                set.status = 404;
+                return { error: resolveResult.error };
+            }
             return { success: true };
         }
     )

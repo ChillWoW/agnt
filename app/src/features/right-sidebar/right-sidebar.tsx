@@ -19,6 +19,7 @@ import {
     reconcileAliveBrowsers,
     useBrowserStore
 } from "./browser";
+import { useBrowserAiStore } from "./browser/browser-ai-store";
 import { PlanPanel, PLAN_FILE_PREFIX } from "@/features/plans/PlanPanel";
 import { KeybindTooltip } from "@/components/ui/Tooltip";
 import type { HotkeyCombo } from "@/features/hotkeys/types";
@@ -86,6 +87,7 @@ export function RightSidebar() {
 
     const browserTabs = useBrowserStore((s) => s.tabs);
     const browserLoading = useBrowserStore((s) => s.loadingByTabId);
+    const browserAiByTab = useBrowserAiStore((s) => s.byTabId);
 
     useEffect(() => {
         setOpenedFilesWorkspace(activeWorkspaceId);
@@ -332,6 +334,9 @@ export function RightSidebar() {
                                                 isActive={
                                                     activeBrowserId === tab.id
                                                 }
+                                                aiActive={Boolean(
+                                                    browserAiByTab[tab.id]
+                                                )}
                                                 onSelect={() =>
                                                     setActive({
                                                         kind: "browser",
@@ -450,6 +455,7 @@ interface BrowserPillProps {
     favicon: string;
     isActive: boolean;
     isLoading: boolean;
+    aiActive: boolean;
     onSelect: () => void;
     onClose: () => void;
 }
@@ -460,6 +466,7 @@ function BrowserPill({
     favicon,
     isActive,
     isLoading,
+    aiActive,
     onSelect,
     onClose
 }: BrowserPillProps) {
@@ -477,7 +484,9 @@ function BrowserPill({
                 "group/pill relative flex h-6 min-w-[4rem] max-w-[16rem] shrink items-center rounded transition-colors",
                 isActive
                     ? "bg-dark-800 text-dark-50"
-                    : "text-dark-300 hover:bg-dark-800 hover:text-dark-100"
+                    : "text-dark-300 hover:bg-dark-800 hover:text-dark-100",
+                aiActive &&
+                    "ring-1 ring-violet-400/60 animate-[browserAiPillPulse_2s_ease-in-out_infinite]"
             )}
         >
             <button

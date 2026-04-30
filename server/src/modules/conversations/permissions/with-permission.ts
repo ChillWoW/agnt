@@ -7,7 +7,9 @@ import {
 } from "../../settings/settings.types";
 import {
     AGNT_TOOL_DEFS,
+    BROWSER_TOOL_NAMES,
     createAwaitShellToolDef,
+    createBrowserToolDefs,
     createDiagnosticsToolDef,
     createGlobToolDef,
     createGrepToolDef,
@@ -52,7 +54,14 @@ const PLAN_MODE_TOOLS = new Set<string>([
     "web_fetch",
     "task",
     "diagnostics",
-    "memory_read"
+    "memory_read",
+    // In plan mode the agent can browse and inspect — but not click,
+    // type, navigate, or eval. Read-only browser tools only.
+    "browser_list_tabs",
+    "browser_read",
+    "browser_snapshot",
+    "browser_find",
+    "browser_get_state"
 ]);
 
 export interface ConversationPermissionContext {
@@ -164,6 +173,24 @@ export function buildConversationTools(
         ? new Set(getSubagentTypeConfig(subagentType).allowedTools)
         : null;
 
+    // Build the context-bound browser tool set once per call. Browser tools
+    // share a single context shape so we look them up by name instead of
+    // running the factory N times.
+    let cachedBrowserDefs: Map<string, ToolDefinition> | null = null;
+    const getBrowserDef = (name: string): ToolDefinition | undefined => {
+        if (!cachedBrowserDefs) {
+            const built = createBrowserToolDefs({
+                conversationId: ctx.conversationId,
+                workspaceId: ctx.workspaceId,
+                getAssistantMessageId: ctx.getAssistantMessageId ?? (() => "")
+            });
+            cachedBrowserDefs = new Map(
+                built.map((d) => [d.name, d as ToolDefinition])
+            );
+        }
+        return cachedBrowserDefs.get(name);
+    };
+
     const filteredDefs = AGNT_TOOL_DEFS.filter((def) => {
         // Subagents: strictly filter against the type's allowlist and
         // ALWAYS exclude the `task` tool (no nested subagents).
@@ -250,6 +277,10 @@ export function buildConversationTools(
                     ctx.workspacePath
                 ) as ToolDefinition;
             default:
+                if (BROWSER_TOOL_NAMES.includes(rawDef.name)) {
+                    const match = getBrowserDef(rawDef.name);
+                    if (match) return match;
+                }
                 return rawDef;
         }
     });

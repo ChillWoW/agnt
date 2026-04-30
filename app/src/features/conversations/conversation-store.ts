@@ -14,6 +14,12 @@ import { usePermissionStore } from "@/features/permissions";
 import type { PermissionRequest } from "@/features/permissions";
 import { useQuestionStore } from "@/features/questions";
 import type { QuestionSpec, QuestionsRequest } from "@/features/questions";
+import {
+    dispatchBrowserOp,
+    handleBrowserOpResolved,
+    type BrowserOpRequiredEvent,
+    type BrowserOpResolvedEvent
+} from "./browser-ops-bridge";
 import { useTodoStore } from "@/features/todos";
 import type { Todo } from "@/features/todos";
 import { clearDraft as clearChatDraft } from "@/features/chat-drafts";
@@ -931,6 +937,59 @@ function handleConversationSseEvent(
                 } else {
                     useQuestionStore.getState().clearPending(conversationId);
                 }
+                break;
+            }
+
+            case "browser-op-required": {
+                const event: BrowserOpRequiredEvent = {
+                    id: data.id as string,
+                    messageId: data.messageId as string,
+                    op: data.op as string,
+                    args:
+                        (data.args as Record<string, unknown> | undefined) ??
+                        {},
+                    tabIdHint:
+                        typeof data.tabIdHint === "string"
+                            ? (data.tabIdHint as string)
+                            : null,
+                    label:
+                        typeof data.label === "string"
+                            ? (data.label as string)
+                            : "",
+                    createdAt:
+                        (data.createdAt as string) ??
+                        new Date().toISOString()
+                };
+                // The SSE handler doesn't carry the workspaceId — pull it
+                // from the stream registry (populated when the stream
+                // started). Falls back to the conversation registry so
+                // observed (subagent) streams still resolve.
+                const storeState = useConversationStore.getState();
+                const workspaceId =
+                    storeState.streamWorkspaceById[conversationId] ??
+                    storeState.workspaceIdByConversationId[conversationId];
+                if (!workspaceId) {
+                    // No workspace context — can't POST results. Skip.
+                    break;
+                }
+                void dispatchBrowserOp(
+                    { conversationId, workspaceId },
+                    event
+                );
+                break;
+            }
+
+            case "browser-op-resolved": {
+                const event: BrowserOpResolvedEvent = {
+                    id: data.id as string,
+                    messageId: data.messageId as string,
+                    ok: Boolean(data.ok),
+                    error:
+                        typeof data.error === "string"
+                            ? (data.error as string)
+                            : null
+                };
+                handleBrowserOpResolved(conversationId, event);
                 break;
             }
 
