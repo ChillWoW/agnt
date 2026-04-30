@@ -34,6 +34,7 @@ import {
 } from "./browser-actions";
 import {
     ensureBrowserOpened,
+    isBrowserOpened,
     mountBrowser,
     setSessionVisible
 } from "./browser-session";
@@ -52,13 +53,22 @@ export function BrowserTabView({ id, occluded }: BrowserTabViewProps) {
 
     const hostRef = useRef<HTMLDivElement>(null);
     const [draftUrl, setDraftUrl] = useState(tab?.url ?? "");
-    const [opened, setOpened] = useState(false);
+    const [opened, setOpened] = useState(() => isBrowserOpened(id));
     const [menuOpen, setMenuOpen] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setDraftUrl(tab?.url ?? "");
     }, [tab?.url]);
+
+    // Re-sync `opened` with the actual session whenever the tab id
+    // changes. Without this, switching browser tabs while reusing this
+    // component instance (i.e. no `key={id}` on the parent) would leak
+    // the previous tab's `opened=true` into the new tab and short-
+    // circuit the lazy-open path below — producing a blank webview.
+    useEffect(() => {
+        setOpened(isBrowserOpened(id));
+    }, [id]);
 
     // Lazy-create the native webview the first time we see a non-empty
     // URL for this tab. The placeholder div must be mounted with bounds

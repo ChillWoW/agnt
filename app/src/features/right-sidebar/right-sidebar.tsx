@@ -365,7 +365,15 @@ export function RightSidebar() {
                                     )}
                                 </>
                             ) : active.kind === "browser" ? (
+                                // Key by tab id so switching browser tabs
+                                // remounts the component with fresh local
+                                // state. Without this, the `opened` flag
+                                // leaks from the previous tab and causes
+                                // the lazy webview-open path to short-
+                                // circuit, leaving the new tab as a
+                                // blank white div until the app reloads.
                                 <BrowserTabView
+                                    key={active.id}
                                     id={active.id}
                                     occluded={browserOccluded}
                                 />
