@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import healthRoutes from "./modules/health/health.routes";
 import settingsRoutes from "./modules/settings/settings.routes";
 import workspacesRoutes from "./modules/workspaces/workspaces.routes";
+import gitRoutes from "./modules/git/git.routes";
 import conversationsRoutes from "./modules/conversations/conversations.routes";
 import toolsRoutes from "./modules/conversations/tools.routes";
 import attachmentsRoutes from "./modules/attachments/attachments.routes";
@@ -30,6 +31,7 @@ const app = new Elysia()
     .use(settingsRoutes)
     .use(rulesRoutes)
     .use(workspacesRoutes)
+    .use(gitRoutes)
     .use(historyRoutes)
     .use(modelsRoutes)
     .use(statsRoutes)
