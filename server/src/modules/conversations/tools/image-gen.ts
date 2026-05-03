@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { logger } from "../../../lib/logger";
-import { getValidAccessToken } from "../../auth/auth.service";
+import {
+    getActiveAccountId,
+    getStoredAccountId,
+    getValidAccessToken
+} from "../../auth/auth.service";
 import {
     createAttachment,
     linkAttachmentsToMessage,
@@ -332,6 +336,7 @@ async function parseImageGenStream(
 
 async function callCodexImageGeneration(params: {
     accessToken: string;
+    accountIdHeader: string | null;
     model: string;
     prompt: string;
 }): Promise<{ call: ImageGenerationCallItem; seenTypes: string[] }> {
@@ -350,13 +355,18 @@ async function callCodexImageGeneration(params: {
         store: false
     };
 
+    const requestHeaders: Record<string, string> = {
+        Authorization: `Bearer ${params.accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "text/event-stream"
+    };
+    if (params.accountIdHeader) {
+        requestHeaders["ChatGPT-Account-Id"] = params.accountIdHeader;
+    }
+
     const response = await fetch(CODEX_RESPONSES_URL, {
         method: "POST",
-        headers: {
-            Authorization: `Bearer ${params.accessToken}`,
-            "Content-Type": "application/json",
-            Accept: "text/event-stream"
-        },
+        headers: requestHeaders,
         body: JSON.stringify(requestBody)
     });
 
@@ -417,9 +427,13 @@ function makeExecuteImageGen(ctx: ImageGenContext) {
             return { ok: false, error: "Prompt must be a non-empty string." };
         }
 
+        // Snapshot the active account once so the entire image-gen call
+        // (including any model fallback) bills against the same account
+        // even if the user switches active mid-flight.
+        const accountId = await getActiveAccountId();
         let accessToken: string;
         try {
-            accessToken = await getValidAccessToken();
+            accessToken = await getValidAccessToken(accountId);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
@@ -447,11 +461,14 @@ function makeExecuteImageGen(ctx: ImageGenContext) {
             promptPreview: prompt.slice(0, 120)
         });
 
+        const accountIdHeader = await getStoredAccountId(accountId);
+
         let call: ImageGenerationCallItem;
         let modelUsed = primaryModel;
         try {
             const result = await callCodexImageGeneration({
                 accessToken,
+                accountIdHeader,
                 model: primaryModel,
                 prompt
             });
@@ -478,6 +495,7 @@ function makeExecuteImageGen(ctx: ImageGenContext) {
             try {
                 const result = await callCodexImageGeneration({
                     accessToken,
+                    accountIdHeader,
                     model: IMAGE_GEN_FALLBACK_MODEL,
                     prompt
                 });

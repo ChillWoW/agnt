@@ -2,18 +2,23 @@ import { Elysia } from "elysia";
 import { ZodError } from "zod";
 import { logger } from "../../lib/logger";
 import {
-    disconnectAuth,
+    disconnectAll,
+    getAccount,
+    getActiveAccountId,
     getAuthState,
-    getStoredAuth,
     getOauthSessionStatus,
     getValidAccessToken,
+    removeAccount,
+    setAccountLabel,
+    setActiveAccount,
     startOauthConnection
 } from "./auth.service";
-import type {
-    AuthConnectStartResponse,
-    AuthErrorResponse,
-    AuthOauthSessionStatus,
-    AuthState
+import {
+    authRenamePayloadSchema,
+    type AuthConnectStartResponse,
+    type AuthErrorResponse,
+    type AuthOauthSessionStatus,
+    type AuthState
 } from "./auth.types";
 
 function getErrorMessage(error: unknown) {
@@ -66,28 +71,91 @@ const authRoutes = new Elysia({ prefix: "/auth" })
             }
         }
     )
+    .post(
+        "/accounts/:accountId/activate",
+        async ({ params, set }): Promise<AuthState | AuthErrorResponse> => {
+            logger.log(
+                "[auth-routes] POST /auth/accounts/:accountId/activate",
+                params.accountId
+            );
+            try {
+                return await setActiveAccount(params.accountId);
+            } catch (error) {
+                logger.error("[auth-routes] Activate failed:", error);
+                set.status = 400;
+                return { error: getErrorMessage(error) };
+            }
+        }
+    )
+    .post(
+        "/accounts/:accountId/disconnect",
+        async ({ params, set }): Promise<AuthState | AuthErrorResponse> => {
+            logger.log(
+                "[auth-routes] POST /auth/accounts/:accountId/disconnect",
+                params.accountId
+            );
+            try {
+                return await removeAccount(params.accountId);
+            } catch (error) {
+                logger.error("[auth-routes] Disconnect single failed:", error);
+                set.status = 400;
+                return { error: getErrorMessage(error) };
+            }
+        }
+    )
+    .patch(
+        "/accounts/:accountId",
+        async ({ params, body, set }): Promise<AuthState | AuthErrorResponse> => {
+            logger.log(
+                "[auth-routes] PATCH /auth/accounts/:accountId",
+                params.accountId
+            );
+            try {
+                const payload = authRenamePayloadSchema.parse(body);
+                return await setAccountLabel(params.accountId, payload.label);
+            } catch (error) {
+                logger.error("[auth-routes] Rename failed:", error);
+                set.status = 400;
+                return { error: getErrorMessage(error) };
+            }
+        }
+    )
     .post("/disconnect", async (): Promise<AuthState> => {
-        logger.log("[auth-routes] POST /auth/disconnect");
-        return disconnectAuth();
+        // Legacy single-account endpoint. Now disconnects ALL accounts so
+        // outdated clients don't silently leave stale rows behind.
+        logger.log("[auth-routes] POST /auth/disconnect (legacy: disconnects all)");
+        return disconnectAll();
     })
-    .get("/rate-limits", async ({ set }) => {
-        logger.log("[auth-routes] GET /auth/rate-limits");
+    .get("/rate-limits", async ({ query, set }) => {
+        logger.log("[auth-routes] GET /auth/rate-limits", query);
 
         try {
-            const auth = await getStoredAuth();
+            const requestedAccountId =
+                typeof query.accountId === "string" && query.accountId.length > 0
+                    ? query.accountId
+                    : null;
 
-            if (!auth) {
+            const targetAccountId =
+                requestedAccountId ?? (await getActiveAccountId());
+
+            if (!targetAccountId) {
                 set.status = 401;
                 return { error: "Not connected" };
             }
 
-            const accessToken = await getValidAccessToken();
+            const account = await getAccount(targetAccountId);
+            if (!account) {
+                set.status = 404;
+                return { error: "Account not found" };
+            }
+
+            const accessToken = await getValidAccessToken(targetAccountId);
             const headers: Record<string, string> = {
                 Authorization: `Bearer ${accessToken}`
             };
 
-            if (auth.accountId) {
-                headers["ChatGPT-Account-Id"] = auth.accountId;
+            if (!account.accountId.startsWith("local-")) {
+                headers["ChatGPT-Account-Id"] = account.accountId;
             }
 
             const response = await fetch(

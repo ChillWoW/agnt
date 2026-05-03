@@ -17,6 +17,14 @@ export interface CodexClientOptions {
      */
     conversationId?: string;
     /**
+     * Codex account to bill this request against. When omitted, falls back
+     * to the currently-active account (see `getActiveAccountId`). Callers
+     * that span multiple turns (the WS session, the streaming pipeline)
+     * should snapshot this id at turn-start so a mid-stream account switch
+     * doesn't corrupt headers/baseline state.
+     */
+    accountId?: string | null;
+    /**
      * `true` when this client is being used to drive a subagent (e.g. the
      * `task` tool's spawned child). Adds the `x-openai-subagent: collab_spawn`
      * header used by Codex CLI to route subagent traffic.
@@ -40,8 +48,8 @@ export interface CodexClientOptions {
 export async function buildCodexRequestHeaders(
     options: CodexClientOptions = {}
 ): Promise<Record<string, string>> {
-    const accessToken = await getValidAccessToken();
-    const accountId = await getStoredAccountId();
+    const accessToken = await getValidAccessToken(options.accountId);
+    const accountId = await getStoredAccountId(options.accountId);
 
     const headers: Record<string, string> = {
         Authorization: `Bearer ${accessToken}`,

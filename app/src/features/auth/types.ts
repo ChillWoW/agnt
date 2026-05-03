@@ -1,10 +1,21 @@
-export type AuthState = {
-    connected: boolean;
-    accountId: string | null;
+export type AuthAccount = {
+    accountId: string;
     email: string | null;
+    /**
+     * Real display name pulled from the ChatGPT/OpenAI side (id_token `name`
+     * claim or `/backend-api/me`). May be null for accounts without a
+     * profile name; UI falls back to label > email > id.
+     */
+    name: string | null;
+    label: string | null;
     expires: string | null;
-    connectedAt: string | null;
-    updatedAt: string | null;
+    connectedAt: string;
+    updatedAt: string;
+};
+
+export type AuthState = {
+    accounts: AuthAccount[];
+    activeAccountId: string | null;
 };
 
 export type AuthConnectStartResponse = {
@@ -20,6 +31,7 @@ export type AuthOauthSessionStatus =
     | {
           sessionId: string;
           status: "success";
+          accountId?: string | null;
       }
     | {
           sessionId: string;

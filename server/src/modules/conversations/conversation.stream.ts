@@ -17,6 +17,7 @@ import {
     sealBranches
 } from "./conversations.service";
 import { createCodexWsModel } from "./codex-websocket-provider";
+import { getActiveAccountId } from "../auth/auth.service";
 import {
     buildStreamResponse,
     sseEvent,
@@ -1608,8 +1609,15 @@ async function runStreamTextIntoController({
         // full history every turn — matching the official Codex CLI's
         // billing posture. The session falls back transparently to HTTP if
         // the WS handshake fails. See codex-websocket-provider.ts.
+        //
+        // Snapshot the active account once at turn-start: a mid-stream
+        // active-account switch fires `closeAllSessions()` which drops the
+        // socket, but the headers/baseline this turn already committed to
+        // must stay coherent with the WS handshake.
+        const activeAccountId = await getActiveAccountId();
         const model = await createCodexWsModel({
             conversationId,
+            accountId: activeAccountId,
             modelName,
             isSubagent: Boolean(subagentOverrides),
             parentConversationId:

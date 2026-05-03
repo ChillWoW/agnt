@@ -38,6 +38,14 @@ const HTTP_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
 interface CodexWsModelOptions extends CodexClientOptions {
     conversationId: string;
+    /**
+     * Active Codex account snapshotted at turn-start. Drives both the WS
+     * session key (so a mid-stream account switch doesn't reuse a socket
+     * authenticated for a different account) and the HTTP fallback headers.
+     * `null` is allowed for the rare "not connected yet" path; downstream
+     * `buildCodexRequestHeaders` will throw a clear error.
+     */
+    accountId: string | null;
 }
 
 function urlMatchesResponses(input: string): boolean {
@@ -151,15 +159,18 @@ async function runOverWebSocket(
 export async function createCodexWsModel(options: CodexWsModelOptions & { modelName: string }): Promise<ReturnType<ReturnType<typeof createOpenAI>["responses"]>> {
     const session = getOrCreateSession({
         conversationId: options.conversationId,
+        accountId: options.accountId,
         isSubagent: options.isSubagent,
         parentConversationId: options.parentConversationId
     });
 
     // Phase-1 headers are reused for the HTTP fallback path. The WS path
     // builds its own headers fresh inside `connect()` so a token refresh
-    // between turns is picked up automatically.
+    // between turns is picked up automatically. Both paths resolve the same
+    // snapshotted accountId so billing attribution is identical.
     const httpHeaders = await buildCodexRequestHeaders({
         conversationId: options.conversationId,
+        accountId: options.accountId,
         isSubagent: options.isSubagent,
         parentConversationId: options.parentConversationId
     });
@@ -214,6 +225,18 @@ export async function createCodexWsModel(options: CodexWsModelOptions & { modelN
             (init?.signal as AbortSignal | null | undefined) ??
             (input instanceof Request ? input.signal : null);
 
+        // Helper to retry the same turn over HTTP. We rebuild `init.body`
+        // from the already-decoded JSON because the original may have been
+        // consumed (e.g. if it was a `ReadableStream`); for the typical
+        // string/Buffer case this is a no-op but it's strictly safer.
+        const fallbackOverHttp = (): Promise<Response> => {
+            const fallbackInit: RequestInit = {
+                ...(init ?? {}),
+                body: JSON.stringify(parsed)
+            };
+            return fallbackFetch(input, fallbackInit);
+        };
+
         try {
             return await runOverWebSocket(session, parsed, signal);
         } catch (err) {
@@ -226,18 +249,28 @@ export async function createCodexWsModel(options: CodexWsModelOptions & { modelN
                         err
                     );
                 }
-                return fallbackFetch(input, init);
+                return fallbackOverHttp();
             }
             if (err instanceof CodexWsTurnError) {
-                // A mid-turn failure is recoverable for the next turn (the
-                // session resets `last` on error). Surface to the SDK as a
-                // normal fetch failure so its retry/error path engages.
+                // The WS turn died before producing a single frame
+                // (`sendTurn` now blocks on a first-frame gate). The
+                // server hasn't streamed any data to the AI SDK yet, so
+                // we can transparently retry this exact turn over HTTP
+                // and the user never sees an error. The session's
+                // incremental baseline was already cleared inside
+                // `errorStream`, so the HTTP request will upload the
+                // full input — correct, just slightly heavier this turn.
+                //
+                // Note: WS is *not* permanently disabled. Mid-turn close
+                // is often transient (stale TCP connection, NAT timeout,
+                // server-side load shedding); the next turn re-opens a
+                // fresh socket via `ensureOpen` and usually succeeds.
                 logger.warn(
-                    `[codex-ws] turn failed for conversation ${options.conversationId}; ` +
-                        `surfacing to AI SDK`,
+                    `[codex-ws] turn failed before first frame for conversation ${options.conversationId}; ` +
+                        `falling back to HTTP for this turn`,
                     err
                 );
-                throw err;
+                return fallbackOverHttp();
             }
             throw err;
         }

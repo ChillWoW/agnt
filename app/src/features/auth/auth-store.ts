@@ -2,10 +2,11 @@ import { create } from "zustand";
 import { toApiErrorMessage } from "@/lib/api";
 import { authApi } from "./auth-api";
 import { openExternalUrl } from "./open-external-url";
-import type { AuthOauthSessionStatus, AuthState } from "./types";
+import type { AuthAccount, AuthOauthSessionStatus, AuthState } from "./types";
 
 type AuthStore = {
-    auth: AuthState | null;
+    accounts: AuthAccount[];
+    activeAccountId: string | null;
     isLoading: boolean;
     isConnecting: boolean;
     isDisconnecting: boolean;
@@ -14,8 +15,15 @@ type AuthStore = {
     serverUrl: string | null;
     ensureLoaded: (serverUrl: string) => Promise<void>;
     refresh: () => Promise<void>;
-    connect: () => Promise<boolean>;
-    disconnect: () => Promise<boolean>;
+    addAccount: () => Promise<{
+        ok: boolean;
+        accountId?: string | null;
+        error?: string;
+    }>;
+    setActive: (accountId: string) => Promise<boolean>;
+    removeAccount: (accountId: string) => Promise<boolean>;
+    renameAccount: (accountId: string, label: string | null) => Promise<boolean>;
+    disconnectAll: () => Promise<boolean>;
 };
 
 let loadRequestId = 0;
@@ -39,17 +47,25 @@ async function waitForOauthCompletion(sessionId: string): Promise<AuthOauthSessi
         await delay(1500);
     }
 
-    const timeoutStatus: AuthOauthSessionStatus = {
+    return {
         sessionId,
         status: "error",
         error: "Timed out waiting for the Codex browser login to finish"
     };
+}
 
-    return timeoutStatus;
+function applyAuthState(state: AuthState) {
+    return {
+        accounts: state.accounts,
+        activeAccountId: state.activeAccountId,
+        hasLoaded: true,
+        error: null
+    };
 }
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
-    auth: null,
+    accounts: [],
+    activeAccountId: null,
     isLoading: false,
     isConnecting: false,
     isDisconnecting: false,
@@ -72,7 +88,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         const requestId = loadRequestId;
 
         set({
-            auth: state.serverUrl === serverUrl ? state.auth : null,
+            accounts: state.serverUrl === serverUrl ? state.accounts : [],
+            activeAccountId:
+                state.serverUrl === serverUrl ? state.activeAccountId : null,
             isLoading: true,
             hasLoaded: state.serverUrl === serverUrl ? state.hasLoaded : false,
             error: null,
@@ -88,10 +106,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
                 }
 
                 set({
-                    auth,
+                    ...applyAuthState(auth),
                     isLoading: false,
-                    hasLoaded: true,
-                    error: null,
                     serverUrl
                 });
             } catch (error) {
@@ -122,12 +138,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     refresh: async () => {
         try {
             const auth = await authApi.getState();
-
-            set({
-                auth,
-                hasLoaded: true,
-                error: null
-            });
+            set(applyAuthState(auth));
         } catch (error) {
             set({
                 error: toApiErrorMessage(error, "Unable to load Codex authentication")
@@ -135,7 +146,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         }
     },
 
-    connect: async () => {
+    addAccount: async () => {
         set({ isConnecting: true, error: null });
 
         try {
@@ -146,48 +157,110 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
             if (status.status === "error") {
                 set({ isConnecting: false, error: status.error });
-                return false;
+                return { ok: false, error: status.error };
             }
 
             const auth = await authApi.getState();
-
             set({
-                auth,
-                hasLoaded: true,
-                isConnecting: false,
-                error: null
+                ...applyAuthState(auth),
+                isConnecting: false
             });
 
+            const newAccountId =
+                status.status === "success" ? status.accountId ?? null : null;
+            return { ok: true, accountId: newAccountId };
+        } catch (error) {
+            const message = toApiErrorMessage(error, "Unable to connect Codex");
+            set({
+                isConnecting: false,
+                error: message
+            });
+            return { ok: false, error: message };
+        }
+    },
+
+    setActive: async (accountId) => {
+        try {
+            const auth = await authApi.setActive(accountId);
+            set(applyAuthState(auth));
             return true;
         } catch (error) {
             set({
-                isConnecting: false,
-                error: toApiErrorMessage(error, "Unable to connect Codex")
+                error: toApiErrorMessage(error, "Unable to switch active account")
             });
             return false;
         }
     },
 
-    disconnect: async () => {
+    removeAccount: async (accountId) => {
         set({ isDisconnecting: true, error: null });
 
         try {
-            const auth = await authApi.disconnect();
-
+            const auth = await authApi.removeAccount(accountId);
             set({
-                auth,
-                hasLoaded: true,
-                isDisconnecting: false,
-                error: null
+                ...applyAuthState(auth),
+                isDisconnecting: false
             });
-
             return true;
         } catch (error) {
             set({
                 isDisconnecting: false,
-                error: toApiErrorMessage(error, "Unable to disconnect Codex")
+                error: toApiErrorMessage(error, "Unable to disconnect account")
+            });
+            return false;
+        }
+    },
+
+    renameAccount: async (accountId, label) => {
+        try {
+            const auth = await authApi.renameAccount(accountId, label);
+            set(applyAuthState(auth));
+            return true;
+        } catch (error) {
+            set({
+                error: toApiErrorMessage(error, "Unable to rename account")
+            });
+            return false;
+        }
+    },
+
+    disconnectAll: async () => {
+        set({ isDisconnecting: true, error: null });
+
+        try {
+            const auth = await authApi.disconnectAll();
+            set({
+                ...applyAuthState(auth),
+                isDisconnecting: false
+            });
+            return true;
+        } catch (error) {
+            set({
+                isDisconnecting: false,
+                error: toApiErrorMessage(error, "Unable to disconnect")
             });
             return false;
         }
     }
 }));
+
+/**
+ * Selectors. Exported so call sites can use shallow comparison and avoid
+ * re-renders on unrelated state changes.
+ */
+export function selectActiveAccount(
+    state: Pick<AuthStore, "accounts" | "activeAccountId">
+): AuthAccount | null {
+    if (!state.activeAccountId) return null;
+    return (
+        state.accounts.find(
+            (account) => account.accountId === state.activeAccountId
+        ) ?? null
+    );
+}
+
+export function selectIsConnected(
+    state: Pick<AuthStore, "accounts" | "activeAccountId">
+): boolean {
+    return selectActiveAccount(state) !== null;
+}

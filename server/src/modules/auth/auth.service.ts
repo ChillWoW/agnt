@@ -1,14 +1,19 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { getHomeDir, getHomePath } from "../../lib/homedir";
 import { logger } from "../../lib/logger";
 import {
+    authAccountSchema,
     authStateSchema,
-    storedCodexAuthSchema,
+    legacyStoredCodexAuthSchema,
+    storedAuthFileSchema,
+    storedCodexAccountSchema,
+    type AuthAccount,
     type AuthConnectStartResponse,
     type AuthOauthSessionStatus,
     type AuthState,
-    type StoredCodexAuth
+    type StoredAuthFile,
+    type StoredCodexAccount
 } from "./auth.types";
 
 const AUTH_FILE_NAME = "auth.json";
@@ -32,6 +37,32 @@ const pendingOauthSessions = new Map<string, PendingOauthSession>();
 const pendingOauthSessionsByState = new Map<string, string>();
 let oauthCallbackServer: ReturnType<typeof createServer> | null = null;
 let oauthCallbackServerSessionId: string | null = null;
+
+/**
+ * Other modules can register a hook that fires whenever the active account
+ * changes (or any account is removed). Used by codex-ws-session.ts to drop
+ * its open WebSocket pool so the next turn handshakes with the fresh token.
+ *
+ * Implemented as a registry rather than a direct import so we don't create
+ * a circular dependency (auth.service ← codex-client ← codex-ws-session).
+ */
+type AccountChangeListener = () => void | Promise<void>;
+const accountChangeListeners = new Set<AccountChangeListener>();
+
+export function onActiveAccountChange(listener: AccountChangeListener): () => void {
+    accountChangeListeners.add(listener);
+    return () => accountChangeListeners.delete(listener);
+}
+
+async function notifyAccountChange() {
+    for (const listener of accountChangeListeners) {
+        try {
+            await listener();
+        } catch (error) {
+            logger.warn("[auth] Active-account change listener threw:", error);
+        }
+    }
+}
 
 function nowIso() {
     return new Date().toISOString();
@@ -66,33 +97,185 @@ async function ensureAuthFile() {
         await readFile(AUTH_FILE_PATH, "utf8");
     } catch {
         logger.log("[auth] Creating new auth file at", AUTH_FILE_PATH);
-        await writeFile(AUTH_FILE_PATH, "{}", "utf8");
+        const empty: StoredAuthFile = {
+            version: 2,
+            activeAccountId: null,
+            accounts: []
+        };
+        await writeFile(AUTH_FILE_PATH, JSON.stringify(empty, null, 4), "utf8");
     }
 }
 
-function serializeStoredAuth(auth: StoredCodexAuth | null) {
-    return JSON.stringify(auth ?? {}, null, 4);
+function emptyAuthFile(): StoredAuthFile {
+    return { version: 2, activeAccountId: null, accounts: [] };
 }
 
-function normalizeStoredAuth(input: unknown): StoredCodexAuth | null {
-    const parsed = storedCodexAuthSchema.safeParse(input);
-    return parsed.success ? parsed.data : null;
+function serializeAuthFile(file: StoredAuthFile) {
+    return JSON.stringify(file, null, 4);
 }
 
-async function readStoredAuth() {
-    await ensureAuthFile();
-    return readFile(AUTH_FILE_PATH, "utf8");
-}
-
-function toAuthState(auth: StoredCodexAuth | null): AuthState {
-    return authStateSchema.parse({
-        connected: Boolean(auth),
-        accountId: auth?.accountId ?? null,
-        email: auth?.email ?? null,
-        expires: auth?.expires ?? null,
-        connectedAt: auth?.connectedAt ?? null,
-        updatedAt: auth?.updatedAt ?? null
+function toAuthAccount(account: StoredCodexAccount): AuthAccount {
+    return authAccountSchema.parse({
+        accountId: account.accountId,
+        email: account.email ?? null,
+        name: account.name ?? null,
+        label: account.label ?? null,
+        expires: account.expires ?? null,
+        connectedAt: account.connectedAt,
+        updatedAt: account.updatedAt
     });
+}
+
+function toAuthState(file: StoredAuthFile): AuthState {
+    return authStateSchema.parse({
+        accounts: file.accounts.map(toAuthAccount),
+        activeAccountId:
+            file.activeAccountId &&
+            file.accounts.some((a) => a.accountId === file.activeAccountId)
+                ? file.activeAccountId
+                : (file.accounts[0]?.accountId ?? null)
+    });
+}
+
+/**
+ * Read `~/.agnt/auth.json` and return a normalized `StoredAuthFile`. Handles
+ *   - the empty `{}` placeholder
+ *   - the legacy v1 single-blob shape (returns migrated in-memory; persisted
+ *     opportunistically on the next legitimate write)
+ *   - the new v2 multi-account shape
+ *   - any unparseable garbage (returns empty in-memory)
+ *
+ * CRITICAL: this function NEVER writes to `auth.json` from a failure path.
+ * Earlier versions overwrote the file with the empty placeholder on
+ * `readFile` / `JSON.parse` / unrecognized-shape errors, which could destroy
+ * the user's accounts when:
+ *   1. A concurrent reader collided with `writeAuthFile`'s atomic rename and
+ *      hit a transient `EBUSY` on Windows, or
+ *   2. A stale older sidecar (running pre-multi-account code) wrote `{}`
+ *      back, then this newer reader saw the unrecognized shape and "reset"
+ *      it again — ratchet, ratchet, accounts gone.
+ *
+ * In every failure path we now return an in-memory empty value and leave
+ * the file alone. The next real save will overwrite atomically.
+ */
+export async function readAuthFile(): Promise<StoredAuthFile> {
+    await ensureAuthFile();
+
+    let raw: string | null = null;
+    // Tiny retry loop for Windows transient share-violations during the
+    // atomic rename window inside `writeAuthFile`.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            raw = await readFile(AUTH_FILE_PATH, "utf8");
+            break;
+        } catch (error) {
+            if (attempt === 2) {
+                logger.warn(
+                    "[auth] Failed to read auth file after retries (returning empty in-memory; file left untouched):",
+                    error
+                );
+                return emptyAuthFile();
+            }
+            await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+        }
+    }
+    if (raw === null) return emptyAuthFile();
+
+    let parsed: unknown;
+    try {
+        parsed = raw.trim().length === 0 ? {} : JSON.parse(raw);
+    } catch (error) {
+        logger.warn(
+            "[auth] auth.json is not valid JSON (returning empty in-memory; file left untouched):",
+            error
+        );
+        return emptyAuthFile();
+    }
+
+    const v2 = storedAuthFileSchema.safeParse(parsed);
+    if (v2.success) {
+        return v2.data;
+    }
+
+    const legacy = legacyStoredCodexAuthSchema.safeParse(parsed);
+    if (legacy.success) {
+        const accountId = legacy.data.accountId ?? `local-${crypto.randomUUID()}`;
+        const migrated: StoredAuthFile = {
+            version: 2,
+            activeAccountId: accountId,
+            accounts: [
+                {
+                    accountId,
+                    email: legacy.data.email ?? null,
+                    name: null,
+                    label: null,
+                    access: legacy.data.access,
+                    refresh: legacy.data.refresh,
+                    expires: legacy.data.expires,
+                    connectedAt: legacy.data.connectedAt,
+                    updatedAt: legacy.data.updatedAt
+                }
+            ]
+        };
+        logger.log(
+            `[auth] Migrating legacy auth.json to multi-account v2 in-memory (accountId: ${accountId}); will be persisted on the next save.`
+        );
+        // Persist the migration via the atomic writer, but swallow errors — a
+        // failure here only means the next read repeats the migration.
+        try {
+            await writeAuthFile(migrated);
+        } catch (error) {
+            logger.warn(
+                "[auth] Failed to persist legacy migration (will retry on next save):",
+                error
+            );
+        }
+        return migrated;
+    }
+
+    // Empty placeholder (`{}`) or unrecognized — treat as empty IN MEMORY.
+    // Never overwrite the file here — see CRITICAL note in the docstring.
+    if (
+        parsed === null ||
+        typeof parsed !== "object" ||
+        Object.keys(parsed as Record<string, unknown>).length === 0
+    ) {
+        return emptyAuthFile();
+    }
+    logger.warn(
+        "[auth] auth.json shape unrecognized; returning empty in-memory and leaving file untouched. Raw keys:",
+        Object.keys(parsed as Record<string, unknown>)
+    );
+    return emptyAuthFile();
+}
+
+/**
+ * Atomic write: serialize → write to a sibling temp file → rename over the
+ * target. Eliminates the window where a concurrent reader (e.g. a parallel
+ * OAuth callback) could observe a half-written file and fall through to the
+ * "empty placeholder" branch in `readAuthFile` — the symptom we hit before
+ * was a freshly-added second account silently flipping `activeAccountId`
+ * because the first read returned an empty file.
+ */
+export async function writeAuthFile(file: StoredAuthFile): Promise<StoredAuthFile> {
+    const validated = storedAuthFileSchema.parse(file);
+    await mkdir(getHomeDir(), { recursive: true });
+
+    const serialized = serializeAuthFile(validated);
+    const tempPath = `${AUTH_FILE_PATH}.tmp-${crypto.randomUUID()}`;
+    try {
+        await writeFile(tempPath, serialized, "utf8");
+        await rename(tempPath, AUTH_FILE_PATH);
+    } catch (error) {
+        try {
+            await unlink(tempPath);
+        } catch {
+            // best-effort cleanup
+        }
+        throw error;
+    }
+
+    return validated;
 }
 
 function cleanupExpiredOauthSessions() {
@@ -243,6 +426,64 @@ function getTokenEmail(idToken: string): string | null {
     const payload = parseJwtPayload(idToken);
     const email = payload?.email;
     return typeof email === "string" ? email : null;
+}
+
+/**
+ * Pull a human-friendly display name from the id_token. ChatGPT / OpenAI
+ * include the user's profile name as the standard OIDC `name` claim, with
+ * `given_name` as a fallback for accounts that only set the first name.
+ */
+function getTokenName(idToken: string): string | null {
+    const payload = parseJwtPayload(idToken);
+    if (!payload) return null;
+    const candidates = [
+        payload.name,
+        payload.preferred_username,
+        payload.given_name
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+            return candidate.trim();
+        }
+    }
+    return null;
+}
+
+/**
+ * Best-effort fetch of the live ChatGPT account profile. Used to backfill
+ * the display name when the id_token doesn't carry one (some accounts).
+ * Returns null on any error — callers should treat the result as optional.
+ */
+async function fetchChatGptAccountName(input: {
+    accessToken: string;
+    accountIdHeader: string | null;
+}): Promise<string | null> {
+    try {
+        const headers: Record<string, string> = {
+            Authorization: `Bearer ${input.accessToken}`,
+            Accept: "application/json"
+        };
+        if (input.accountIdHeader) {
+            headers["ChatGPT-Account-Id"] = input.accountIdHeader;
+        }
+        const response = await fetch(
+            "https://chatgpt.com/backend-api/me",
+            { headers }
+        );
+        if (!response.ok) return null;
+        const data = (await response.json()) as Record<string, unknown>;
+        const name = data?.name;
+        if (typeof name === "string" && name.trim().length > 0) {
+            return name.trim();
+        }
+        return null;
+    } catch (error) {
+        logger.warn(
+            "[auth] Failed to fetch ChatGPT profile name (non-fatal):",
+            error
+        );
+        return null;
+    }
 }
 
 function buildCodexAuthorizeUrl(input: {
@@ -479,26 +720,49 @@ async function completeOauthConnection(input: {
             redirectUri: session.redirectUri
         });
         const timestamp = nowIso();
-        const existingAuth = await getStoredAuth();
 
         const email = getTokenEmail(idToken);
-        const accountId = getCodexAccountId(idToken, accessToken);
+        const accountId =
+            getCodexAccountId(idToken, accessToken) ??
+            `local-${crypto.randomUUID()}`;
 
-        await writeStoredAuth({
+        // Prefer the id_token claim (zero extra HTTP), fall back to the
+        // ChatGPT backend profile when the JWT didn't carry a name. Either
+        // way `name` is optional — UI degrades gracefully to email/label.
+        let name = getTokenName(idToken);
+        if (!name) {
+            name = await fetchChatGptAccountName({
+                accessToken,
+                accountIdHeader: accountId.startsWith("local-")
+                    ? null
+                    : accountId
+            });
+        }
+
+        const stored = await addOrUpdateAccount({
+            accountId,
+            email,
+            name,
             access: accessToken,
             refresh: refreshToken,
             expires: getTokenExpiry(accessToken, idToken),
-            accountId,
-            email,
-            connectedAt: existingAuth?.connectedAt ?? timestamp,
+            connectedAt: timestamp,
             updatedAt: timestamp
         });
 
-        logger.log("[auth] OAuth connection complete — email:", email, "accountId:", accountId);
+        logger.log(
+            "[auth] OAuth connection complete — email:",
+            email,
+            "name:",
+            name,
+            "accountId:",
+            stored.accountId
+        );
 
         session.status = {
             sessionId,
-            status: "success"
+            status: "success",
+            accountId: stored.accountId
         };
 
         return {
@@ -529,77 +793,281 @@ async function completeOauthConnection(input: {
     }
 }
 
-export async function getStoredAuth(): Promise<StoredCodexAuth | null> {
-    try {
-        const fileContents = await readStoredAuth();
-        const parsed = JSON.parse(fileContents) as unknown;
-        const normalized = normalizeStoredAuth(parsed);
+/**
+ * Insert or update an account by `accountId`. Preserves the original
+ * `connectedAt` on update, refreshes `updatedAt`.
+ *
+ * Active-account rules (in order):
+ *   1. If the existing file has an `activeAccountId` AND that id is still
+ *      present in the resulting accounts list, KEEP it. This is the only
+ *      behavior that preserves user intent across a multi-account add.
+ *   2. Otherwise, the merged account becomes active (first add, or active
+ *      pointed at a row that no longer exists).
+ *
+ * Previously this was a single `... && accounts.some(...) ? a : b` ternary
+ * which is the SAME logic, but I'm spelling it out so the intent reads
+ * clearly and there's no chance of a subtle short-circuit / precedence bug
+ * silently flipping `active` when adding a 2nd account.
+ */
+export async function addOrUpdateAccount(input: {
+    accountId: string;
+    email?: string | null;
+    name?: string | null;
+    label?: string | null;
+    access: string;
+    refresh: string;
+    expires: string | null;
+    connectedAt: string;
+    updatedAt: string;
+}): Promise<StoredCodexAccount> {
+    const file = await readAuthFile();
+    const existingIdx = file.accounts.findIndex(
+        (a) => a.accountId === input.accountId
+    );
+    const existing = existingIdx >= 0 ? file.accounts[existingIdx] : null;
 
-        if (normalized || Object.keys((parsed as Record<string, unknown>) ?? {}).length === 0) {
-            return normalized;
-        }
+    const merged: StoredCodexAccount = storedCodexAccountSchema.parse({
+        accountId: input.accountId,
+        email: input.email ?? existing?.email ?? null,
+        name: input.name ?? existing?.name ?? null,
+        label: input.label ?? existing?.label ?? null,
+        access: input.access,
+        refresh: input.refresh,
+        expires: input.expires,
+        connectedAt: existing?.connectedAt ?? input.connectedAt,
+        updatedAt: input.updatedAt
+    });
 
-        await writeStoredAuth(normalized);
-        return normalized;
-    } catch (error) {
-        logger.warn("[auth] Failed to read stored auth, resetting:", error);
-        await writeStoredAuth(null);
-        return null;
+    const accounts = [...file.accounts];
+    if (existingIdx >= 0) {
+        accounts[existingIdx] = merged;
+    } else {
+        accounts.push(merged);
     }
+
+    let nextActiveAccountId: string;
+    if (
+        typeof file.activeAccountId === "string" &&
+        file.activeAccountId.length > 0 &&
+        accounts.some((a) => a.accountId === file.activeAccountId)
+    ) {
+        nextActiveAccountId = file.activeAccountId;
+    } else {
+        nextActiveAccountId = merged.accountId;
+    }
+
+    const next: StoredAuthFile = {
+        version: 2,
+        accounts,
+        activeAccountId: nextActiveAccountId
+    };
+
+    await writeAuthFile(next);
+    logger.log(
+        `[auth] Wrote auth file: account ${merged.accountId} ${
+            existingIdx >= 0 ? "updated" : "added"
+        } (total accounts: ${accounts.length}, active: ${nextActiveAccountId}, kept-active: ${
+            file.activeAccountId === nextActiveAccountId &&
+            file.accounts.length > 0
+        })`
+    );
+
+    // Updating the active account's tokens means callers may already hold a
+    // stale token — drop WS sessions so the next turn re-handshakes fresh.
+    if (next.activeAccountId === merged.accountId) {
+        await notifyAccountChange();
+    }
+
+    return merged;
 }
 
-export async function writeStoredAuth(
-    auth: StoredCodexAuth | null
-): Promise<StoredCodexAuth | null> {
-    const validated = auth ? storedCodexAuthSchema.parse(auth) : null;
+/** Remove an account by id; reassigns active to first remaining if needed. */
+export async function removeAccount(accountId: string): Promise<AuthState> {
+    const file = await readAuthFile();
+    const filtered = file.accounts.filter((a) => a.accountId !== accountId);
 
-    await mkdir(getHomeDir(), { recursive: true });
-    await writeFile(AUTH_FILE_PATH, serializeStoredAuth(validated), "utf8");
+    if (filtered.length === file.accounts.length) {
+        logger.warn("[auth] removeAccount called with unknown id:", accountId);
+        return toAuthState(file);
+    }
 
-    logger.log("[auth] Wrote auth file:", auth ? "connected" : "disconnected");
+    const next: StoredAuthFile = {
+        version: 2,
+        accounts: filtered,
+        activeAccountId:
+            file.activeAccountId === accountId
+                ? (filtered[0]?.accountId ?? null)
+                : file.activeAccountId
+    };
 
-    return validated;
+    await writeAuthFile(next);
+    logger.log(
+        "[auth] Removed account",
+        accountId,
+        "(remaining:",
+        filtered.length,
+        ", active:",
+        next.activeAccountId,
+        ")"
+    );
+
+    // Clear refresh mutex for the dropped account.
+    refreshMutexes.delete(accountId);
+
+    await notifyAccountChange();
+    return toAuthState(next);
+}
+
+/** Set the globally active account; closes WS sessions via listener. */
+export async function setActiveAccount(accountId: string): Promise<AuthState> {
+    const file = await readAuthFile();
+    if (!file.accounts.some((a) => a.accountId === accountId)) {
+        throw new Error(`Account ${accountId} is not connected`);
+    }
+
+    if (file.activeAccountId === accountId) {
+        return toAuthState(file);
+    }
+
+    const next: StoredAuthFile = {
+        ...file,
+        activeAccountId: accountId
+    };
+    await writeAuthFile(next);
+    logger.log("[auth] Active account switched to", accountId);
+
+    await notifyAccountChange();
+    return toAuthState(next);
+}
+
+/** Update the user-facing label for an account. */
+export async function setAccountLabel(
+    accountId: string,
+    label: string | null
+): Promise<AuthState> {
+    const file = await readAuthFile();
+    const idx = file.accounts.findIndex((a) => a.accountId === accountId);
+    if (idx < 0) {
+        throw new Error(`Account ${accountId} is not connected`);
+    }
+
+    const accounts = [...file.accounts];
+    accounts[idx] = { ...accounts[idx]!, label, updatedAt: nowIso() };
+
+    const next: StoredAuthFile = { ...file, accounts };
+    await writeAuthFile(next);
+    return toAuthState(next);
+}
+
+/** Disconnect every account and reset the file. */
+export async function disconnectAll(): Promise<AuthState> {
+    logger.log("[auth] Disconnecting ALL Codex accounts");
+    const empty = emptyAuthFile();
+    await writeAuthFile(empty);
+    refreshMutexes.clear();
+    await notifyAccountChange();
+    return toAuthState(empty);
+}
+
+export async function listAccounts(): Promise<StoredCodexAccount[]> {
+    const file = await readAuthFile();
+    return file.accounts;
+}
+
+export async function getActiveAccountId(): Promise<string | null> {
+    const file = await readAuthFile();
+    if (
+        file.activeAccountId &&
+        file.accounts.some((a) => a.accountId === file.activeAccountId)
+    ) {
+        return file.activeAccountId;
+    }
+    return file.accounts[0]?.accountId ?? null;
+}
+
+/** Resolve a single account, defaulting to the active one when id omitted. */
+export async function getAccount(
+    accountId?: string | null
+): Promise<StoredCodexAccount | null> {
+    const file = await readAuthFile();
+    if (file.accounts.length === 0) return null;
+
+    const targetId =
+        accountId ??
+        (file.activeAccountId &&
+        file.accounts.some((a) => a.accountId === file.activeAccountId)
+            ? file.activeAccountId
+            : file.accounts[0]?.accountId ?? null);
+
+    if (!targetId) return null;
+    return file.accounts.find((a) => a.accountId === targetId) ?? null;
 }
 
 const REFRESH_WINDOW_MS = 60 * 60 * 1000;
-let refreshMutex: Promise<string> | null = null;
+const refreshMutexes = new Map<string, Promise<string>>();
 
-export async function getValidAccessToken(): Promise<string> {
-    if (refreshMutex) {
-        logger.log("[auth] Token refresh already in progress, waiting for existing request");
-        return refreshMutex;
-    }
-
-    const auth = await getStoredAuth();
-
-    if (!auth) {
+/**
+ * Returns a non-expired access token for the requested account (or the
+ * currently-active account when `accountId` is omitted). Refreshes via the
+ * refresh token if the access token is within `REFRESH_WINDOW_MS` of expiry.
+ *
+ * Each account has its own in-flight refresh promise so concurrent requests
+ * across different accounts don't serialize behind one another.
+ */
+export async function getValidAccessToken(
+    accountId?: string | null
+): Promise<string> {
+    const account = await getAccount(accountId);
+    if (!account) {
         throw new Error("Codex is not connected");
     }
 
-    const expiresAt = auth.expires ? new Date(auth.expires).getTime() : 0;
+    const inflight = refreshMutexes.get(account.accountId);
+    if (inflight) {
+        logger.log(
+            "[auth] Token refresh already in progress for",
+            account.accountId,
+            "; waiting"
+        );
+        return inflight;
+    }
+
+    const expiresAt = account.expires ? new Date(account.expires).getTime() : 0;
     const needsRefresh = expiresAt - Date.now() < REFRESH_WINDOW_MS;
 
     if (!needsRefresh) {
-        return auth.access;
+        return account.access;
     }
 
-    logger.log("[auth] Access token needs refresh (expires:", auth.expires, ")");
+    logger.log(
+        "[auth] Access token needs refresh for",
+        account.accountId,
+        "(expires:",
+        account.expires,
+        ")"
+    );
 
-    refreshMutex = (async () => {
+    const refreshPromise = (async () => {
         try {
             const response = await fetch(`${CODEX_ISSUER}/oauth/token`, {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: new URLSearchParams({
                     grant_type: "refresh_token",
-                    refresh_token: auth.refresh,
+                    refresh_token: account.refresh,
                     client_id: CODEX_CLIENT_ID
                 })
             });
 
             if (!response.ok) {
                 const text = await response.text();
-                logger.error("[auth] Token refresh failed:", response.status, text);
+                logger.error(
+                    "[auth] Token refresh failed for",
+                    account.accountId,
+                    ":",
+                    response.status,
+                    text
+                );
                 throw new Error(text || "Codex token refresh failed");
             }
 
@@ -612,51 +1080,64 @@ export async function getValidAccessToken(): Promise<string> {
                 typeof payload.access_token !== "string" ||
                 typeof payload.refresh_token !== "string"
             ) {
-                logger.error("[auth] Token refresh returned invalid payload");
+                logger.error(
+                    "[auth] Token refresh returned invalid payload for",
+                    account.accountId
+                );
                 throw new Error("Codex token refresh returned an invalid payload");
             }
 
-            await writeStoredAuth({
-                ...auth,
+            await addOrUpdateAccount({
+                accountId: account.accountId,
+                email: account.email ?? null,
+                name: account.name ?? null,
+                label: account.label ?? null,
                 access: payload.access_token,
                 refresh: payload.refresh_token,
-                expires: getTokenExpiry(payload.access_token) ?? auth.expires,
+                expires:
+                    getTokenExpiry(payload.access_token) ?? account.expires,
+                connectedAt: account.connectedAt,
                 updatedAt: nowIso()
             });
 
-            logger.log("[auth] Token refresh successful");
+            logger.log(
+                "[auth] Token refresh successful for",
+                account.accountId
+            );
 
             return payload.access_token;
         } finally {
-            refreshMutex = null;
+            refreshMutexes.delete(account.accountId);
         }
     })();
 
-    return refreshMutex;
+    refreshMutexes.set(account.accountId, refreshPromise);
+    return refreshPromise;
 }
 
 export async function getAuthState(): Promise<AuthState> {
-    return toAuthState(await getStoredAuth());
+    return toAuthState(await readAuthFile());
 }
 
 /**
- * Read the stored Codex account id (the JWT `chatgpt_account_id` claim that
- * was extracted at OAuth time). Returned as the value to send in the
- * `ChatGPT-Account-Id` header on Codex backend requests. Mirrors
- * `BearerAuthProvider::add_auth_headers` in
+ * Read the stored Codex account id for the active (or specified) account.
+ * Returned as the value to send in the `ChatGPT-Account-Id` header on Codex
+ * backend requests. Mirrors `BearerAuthProvider::add_auth_headers` in
  * `codex-rs/model-provider/src/bearer_auth_provider.rs`. Required for proper
  * billing attribution to the user's Plus/Team plan — without it, requests
  * tend to fall into a more expensive (or lower-limit) rate bucket.
+ *
+ * Returns `null` for synthetic local-* ids (which were generated locally
+ * because the JWT didn't include the claim) — those should not be sent on
+ * the wire.
  */
-export async function getStoredAccountId(): Promise<string | null> {
-    const auth = await getStoredAuth();
-    return auth?.accountId ?? null;
-}
-
-export async function disconnectAuth(): Promise<AuthState> {
-    logger.log("[auth] Disconnecting Codex auth");
-    await writeStoredAuth(null);
-    return toAuthState(null);
+export async function getStoredAccountId(
+    accountId?: string | null
+): Promise<string | null> {
+    const account = await getAccount(accountId);
+    if (!account) return null;
+    if (account.accountId.startsWith("local-")) return null;
+    return account.accountId;
 }
 
 export async function startOauthConnection(): Promise<AuthConnectStartResponse> {

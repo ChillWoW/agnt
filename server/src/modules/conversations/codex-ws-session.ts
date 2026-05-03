@@ -46,6 +46,7 @@
  */
 
 import { logger } from "../../lib/logger";
+import { onActiveAccountChange } from "../auth/auth.service";
 import { buildCodexRequestHeaders } from "./codex-client";
 
 const WEBSOCKET_URL = "wss://chatgpt.com/backend-api/codex/responses";
@@ -88,6 +89,16 @@ export interface ResponsesApiBody {
 
 interface SessionOptions {
     conversationId: string;
+    /**
+     * Codex account this session is bound to. The Authorization /
+     * ChatGPT-Account-Id headers used at handshake belong to this account,
+     * so a session is NOT reusable across accounts. The session map keys on
+     * `${conversationId}::${accountId}`; switching the active account drops
+     * all open sessions via `onActiveAccountChange`.
+     *
+     * `null` when the user hasn't connected any account yet.
+     */
+    accountId: string | null;
     isSubagent?: boolean;
     parentConversationId?: string | null;
 }
@@ -433,8 +444,47 @@ export class CodexWsSession {
         let pendingError: unknown = null;
         let pendingClose = false;
 
+        // First-frame gate. We don't return the ReadableStream from
+        // `sendTurn` until either the server has emitted at least one frame
+        // (so we know the WS turn is healthy) or a terminal error fired (so
+        // the caller can transparently fall back to HTTP). This is what
+        // turns "socket closed mid-turn before any data" — historically a
+        // hard user-visible error — into a recoverable HTTP fallback.
+        //
+        // The Bun WebSocket sometimes hands us a socket whose underlying
+        // TCP connection has already been silently torn down by the server
+        // / a NAT box. We don't notice until `ws.send` returns and the
+        // close event fires shortly after. Without this gate, the AI SDK
+        // has already received the Response object and reads the error off
+        // the body stream, which it can't recover from.
+        let firstFrameSettled = false;
+        let resolveFirstFrame: (() => void) | null = null;
+        let rejectFirstFrame: ((err: unknown) => void) | null = null;
+        const firstFramePromise = new Promise<void>((resolve, reject) => {
+            resolveFirstFrame = resolve;
+            rejectFirstFrame = reject;
+        });
+        const settleFirstFrameOk = () => {
+            if (firstFrameSettled) return;
+            firstFrameSettled = true;
+            resolveFirstFrame?.();
+            resolveFirstFrame = null;
+            rejectFirstFrame = null;
+        };
+        const settleFirstFrameErr = (err: unknown) => {
+            if (firstFrameSettled) return;
+            firstFrameSettled = true;
+            rejectFirstFrame?.(err);
+            resolveFirstFrame = null;
+            rejectFirstFrame = null;
+        };
+
         const enqueue = (chunk: Uint8Array): boolean => {
             if (terminated) return false;
+            // First successful chunk → the WS turn is producing data, so
+            // unblock `sendTurn`'s first-frame await (and any later error
+            // surfaces through the stream as usual).
+            settleFirstFrameOk();
             if (streamController) {
                 try {
                     streamController.enqueue(chunk);
@@ -451,6 +501,9 @@ export class CodexWsSession {
         const closeStream = () => {
             if (terminated) return;
             terminated = true;
+            // A clean close means the turn produced data and finished —
+            // make sure first-frame waiters wake up rather than hang.
+            settleFirstFrameOk();
             if (streamController) {
                 try {
                     streamController.close();
@@ -466,6 +519,11 @@ export class CodexWsSession {
         const errorStream = (err: unknown) => {
             if (terminated) return;
             terminated = true;
+            // If we haven't returned the stream yet, surface the error to
+            // the `await firstFramePromise` site so the caller can fall
+            // back to HTTP. Otherwise this is a no-op (the consumer will
+            // see the error through `streamController.error`).
+            settleFirstFrameErr(err);
             if (streamController) {
                 try {
                     streamController.error(err);
@@ -661,15 +719,22 @@ export class CodexWsSession {
 
         const onClose = (_event: Event) => {
             if (terminated) return;
-            if (WIRE_LOG) {
-                logger.warn(
-                    `[codex-ws] turn#${turnId} socket closed mid-turn; conv=${this.opts.conversationId}`
-                );
-            }
+            // Differentiate "closed before any frame arrived" (recoverable
+            // via HTTP fallback) from "closed mid-stream after we'd already
+            // started forwarding deltas" (unrecoverable, surfaces to the
+            // user). The phase=before vs phase=after-frame token also lets
+            // us spot a stuck-on-handshake server quickly in the log.
+            const phase = firstFrameSettled ? "after-frame" : "before-frame";
+            logger.warn(
+                `[codex-ws] turn#${turnId} socket closed mid-turn (phase=${phase}); ` +
+                    `conv=${this.opts.conversationId} responseId=${responseId || "<none>"}`
+            );
             session.last = null;
             session.dropSocket("close before completion");
             errorStream(
-                new CodexWsTurnError("codex-ws: socket closed mid-turn")
+                new CodexWsTurnError(
+                    `codex-ws: socket closed mid-turn (${phase})`
+                )
             );
         };
 
@@ -720,12 +785,32 @@ export class CodexWsSession {
         try {
             ws.send(envelope);
         } catch (err) {
+            const sendErr = new CodexWsTurnError(
+                `codex-ws: send failed: ${(err as Error).message}`
+            );
+            // Settle the first-frame promise so it doesn't dangle as an
+            // unhandled rejection if anything observes it later.
+            settleFirstFrameErr(sendErr);
             cleanup();
             session.last = null;
             session.dropSocket("send failed");
-            throw new CodexWsTurnError(
-                `codex-ws: send failed: ${(err as Error).message}`
-            );
+            throw sendErr;
+        }
+
+        // Block until either the first frame arrives (the WS turn is
+        // healthy → return the stream) or a terminal error fires (→ throw
+        // so the provider's fetch wrapper can fall back to HTTP). This is
+        // the recovery path for "socket closed mid-turn before any data",
+        // which used to surface to the user as an unrecoverable stream
+        // error and lose the entire turn.
+        try {
+            await firstFramePromise;
+        } catch (err) {
+            // `cleanup()` already ran inside `errorStream`; just propagate.
+            // We deliberately don't wrap non-CodexWs errors (e.g. abort
+            // reasons) so the caller's existing logic still distinguishes
+            // them — only `CodexWsTurnError` triggers HTTP fallback.
+            throw err;
         }
 
         return new ReadableStream<Uint8Array>({
@@ -851,6 +936,7 @@ export class CodexWsSession {
     private async connect(): Promise<WebSocket> {
         const headers = await buildCodexRequestHeaders({
             conversationId: this.opts.conversationId,
+            accountId: this.opts.accountId,
             isSubagent: this.opts.isSubagent,
             parentConversationId: this.opts.parentConversationId
         });
@@ -862,6 +948,7 @@ export class CodexWsSession {
         if (WIRE_LOG) {
             logger.log(
                 `[codex-ws] opening socket: conv=${this.opts.conversationId} ` +
+                    `account=${this.opts.accountId ?? "<unset>"} ` +
                     `isSubagent=${this.opts.isSubagent === true} ` +
                     `parent=${this.opts.parentConversationId ?? "null"}`
             );
@@ -946,24 +1033,38 @@ export class CodexWsSession {
 
 const sessions = new Map<string, CodexWsSession>();
 
+function sessionKey(opts: Pick<SessionOptions, "conversationId" | "accountId">): string {
+    return `${opts.conversationId}::${opts.accountId ?? "<unset>"}`;
+}
+
 /**
- * Get-or-create the session for a conversation. Subagents are keyed by their
- * own conversation id, so they get their own socket and don't share
- * incremental state with the parent.
+ * Get-or-create the session for a (conversation, account) pair. Subagents
+ * are keyed by their own conversation id, so they get their own socket and
+ * don't share incremental state with the parent.
+ *
+ * Account is part of the key because each session bakes the Authorization /
+ * ChatGPT-Account-Id headers at WS-handshake time. When the user switches
+ * the active account, `auth.service` fires `onActiveAccountChange` which
+ * drops every session here so the next turn opens a fresh socket under the
+ * new credentials.
  */
 export function getOrCreateSession(opts: SessionOptions): CodexWsSession {
-    const existing = sessions.get(opts.conversationId);
+    const key = sessionKey(opts);
+    const existing = sessions.get(key);
     if (existing) return existing;
     const created = new CodexWsSession(opts);
-    sessions.set(opts.conversationId, created);
+    sessions.set(key, created);
     return created;
 }
 
 export function closeSession(conversationId: string): void {
-    const session = sessions.get(conversationId);
-    if (!session) return;
-    session.close();
-    sessions.delete(conversationId);
+    // Close every session for this conversation regardless of accountId.
+    const prefix = `${conversationId}::`;
+    for (const [key, session] of sessions.entries()) {
+        if (!key.startsWith(prefix)) continue;
+        session.close();
+        sessions.delete(key);
+    }
 }
 
 export function closeAllSessions(): void {
@@ -972,3 +1073,13 @@ export function closeAllSessions(): void {
     }
     sessions.clear();
 }
+
+// When the active account changes (or any account is removed), drop all WS
+// sessions so the next turn re-handshakes under the fresh credentials.
+onActiveAccountChange(() => {
+    if (sessions.size === 0) return;
+    logger.log(
+        `[codex-ws] active account changed; closing ${sessions.size} session(s)`
+    );
+    closeAllSessions();
+});

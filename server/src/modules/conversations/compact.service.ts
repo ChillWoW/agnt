@@ -3,6 +3,7 @@ import { getWorkspaceDb } from "../../lib/db";
 import { logger } from "../../lib/logger";
 import { getEffectiveConversationState } from "../history/history.service";
 import { getModelById } from "../models/models.service";
+import { getActiveAccountId } from "../auth/auth.service";
 import { createCodexClient } from "./codex-client";
 import { computeContextSummary, type ContextSummary } from "./context.service";
 import { DEFAULT_MODEL } from "./conversation.constants";
@@ -408,7 +409,8 @@ export async function compactConversation(
         hardClipped
     });
 
-    const codex = await createCodexClient({ conversationId });
+    const accountId = await getActiveAccountId();
+    const codex = await createCodexClient({ conversationId, accountId });
 
     let summaryContent: string;
     let summarizerFailed = false;

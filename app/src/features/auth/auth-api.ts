@@ -13,6 +13,22 @@ export const authApi = {
         api.get<AuthOauthSessionStatus>("/auth/oauth/status", {
             query: { sessionId }
         }),
-    disconnect: () => api.post<AuthState>("/auth/disconnect"),
-    getRateLimits: () => api.get<AuthRateLimits>("/auth/rate-limits")
+    setActive: (accountId: string) =>
+        api.post<AuthState>(
+            `/auth/accounts/${encodeURIComponent(accountId)}/activate`
+        ),
+    removeAccount: (accountId: string) =>
+        api.post<AuthState>(
+            `/auth/accounts/${encodeURIComponent(accountId)}/disconnect`
+        ),
+    renameAccount: (accountId: string, label: string | null) =>
+        api.patch<AuthState, { label: string | null }>(
+            `/auth/accounts/${encodeURIComponent(accountId)}`,
+            { body: { label } }
+        ),
+    disconnectAll: () => api.post<AuthState>("/auth/disconnect"),
+    getRateLimits: (accountId?: string | null) =>
+        api.get<AuthRateLimits>("/auth/rate-limits", {
+            query: accountId ? { accountId } : undefined
+        })
 };
